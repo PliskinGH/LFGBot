@@ -1,0 +1,7 @@
+
+CONFIG_DEFAULT = "DEFAULT"
+CONFIG_ID = "ID"
+
+HELP_COMMAND = "help"
+
+DEFAULT_AVATAR_URL = "https://i.imgur.com/xClQZ1Q.png"

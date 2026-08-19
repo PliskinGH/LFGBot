@@ -1,0 +1,178 @@
+[
+   {
+      "title":"Autumn",
+      "description":"You are in fall! Bears foraging in your territory bedamned, you fear nothing. And with the dry air and all this fallen foliage, perfect kindling for to burn your adversaries!",
+      "image": {"url": "https://i.imgur.com/fM0z980.jpg"},
+      "thumbnail": {"url": "https://i.imgur.com/kc1cb3n.jpg"},
+      "color": 14520159,
+      "category":"Map"
+   },
+   {
+      "title":"Winter",
+      "description":"You are in winter! You love cold feet, sticking your tongue on your steel blade just for the fun of it and look great sporting the silver fox look as your beard freezes.",
+      "image": {"url": "https://i.imgur.com/cwXDPnO.jpg"},
+      "thumbnail": {"url": "https://i.imgur.com/13inxbU.jpg"},
+      "color": 16514303,
+      "category":"Map"
+   },
+   {
+      "title":"Winter",
+      "description":"It’s winter, time for hot toddies and canoodling by the fire with your favorite book… oh wait clearly wrong game....",
+      "image": {"url": "https://i.imgur.com/cwXDPnO.jpg"},
+      "thumbnail": {"url": "https://i.imgur.com/13inxbU.jpg"},
+      "color": 16514303,
+      "category":"Map"
+   },
+   {
+      "title":"Winter",
+      "description":"It’s winter in the forest! Run through the snowy fields and ford the frozen river as you attempt to rule the creatures of the wood!",
+      "image": {"url": "https://i.imgur.com/cwXDPnO.jpg"},
+      "thumbnail": {"url": "https://i.imgur.com/13inxbU.jpg"},
+      "color": 16514303,
+      "category":"Map"
+   },
+   {
+      "title":"Lake",
+      "description":"You are at the lake! Ah! Fresh air! A little boating and some fishing. Just the thing to keep your mind off those whispering bubbles—your adversaries last gasps of air as they sink to the bottom with your prize rock collection.",
+      "image": {"url": "https://i.imgur.com/dp2MolG.jpg"},
+      "color": 1752220,
+      "category":"Map"
+   },
+   {
+      "title":"Mountain",
+      "description":"You are on the mountain! Surely one cannot rule the land until they are king of the mountain. Reach the summit, show your prowess, let the plebs gasp at your mighty tree fort.",
+      "image": {"url": "https://i.imgur.com/53dlDot.jpg"},
+      "color": 12745742,
+      "category":"Map"
+   },
+   {
+      "title":"Ranger",
+      "image": {"url": "https://ledercards.netlify.app/cards/root/en-US/vagabond-ranger.webp"},
+      "thumbnail": {"url": "https://i.imgur.com/s9JfzHu.png"},
+      "description":"You are ranger! Never mind the epithets of “murderwolf”. Go forth wanderlust rogue and trap some juicy hares!",
+      "color": 8948109,
+      "category":"Vagabond"
+   },
+   {
+      "title":"Thief",
+      "image": {"url": "https://ledercards.netlify.app/cards/root/en-US/vagabond-thief.webp"},
+      "thumbnail": {"url": "https://i.imgur.com/VInFTIm.png"},
+      "description":"You are thief! Go forth mysterious rogue! Pilfer what is rightfully yours and reap the rewards of magnanimity when you give it back to them.",
+      "color": 16777215,
+      "category":"Vagabond"
+   },
+   {
+      "title":"Tinker",
+      "image": {"url": "https://ledercards.netlify.app/cards/root/en-US/vagabond-tinker.webp"},
+      "thumbnail": {"url": "https://i.imgur.com/r2H0uBZ.png"},
+      "description":"You are tinker! Fair travels thwack tailed rogue! Never mind the groans from the crowd. We all know you have favor in the forest!",
+      "color": 16051036,
+      "category":"Vagabond"
+   },
+   {
+      "title":"Vagrant",
+      "image": {"url": "https://ledercards.netlify.app/cards/root/en-US/vagabond-vagrant.webp"},
+      "thumbnail": {"url": "https://i.imgur.com/UbrrFhi.png"},
+      "description":"You are vagrant! Go forth and spread the “good” word! Don’t worry, they will believe you, they have no choice!",
+      "color": 14024787,
+      "category":"Vagabond"
+   },
+   {
+      "title":"Arbiter",
+      "image": {"url": "https://ledercards.netlify.app/cards/root/en-US/vagabond-arbiter.webp"},
+      "thumbnail": {"url": "https://i.imgur.com/6zAPCrN.png"},
+      "description":"You are arbiter! Dig holes, scowl, silently pass judgment and cleave insolence.",
+      "color": 13474,
+      "category":"Vagabond"
+   },
+   {
+      "title":"Scoundrel",
+      "image": {"url": "https://ledercards.netlify.app/cards/root/en-US/vagabond-scoundrel.webp"},
+      "thumbnail": {"url": "https://i.imgur.com/VSRVj9M.png"},
+      "description":"You are scoundrel! Fare thee well masked avenger! Although no one, not even yourself quite knows what it is you hope to avenge.",
+      "color": 16736258,
+      "category":"Vagabond"
+   },
+   {
+      "title":"Adventurer",
+      "image": {"url": "https://ledercards.netlify.app/cards/root/en-US/vagabond-adventurer.webp"},
+      "thumbnail": {"url": "https://i.imgur.com/2rQ0LPY.png"},
+      "description":"You are adventurer! Your parents never understood your fascination with breaking your toys. Luckily sly uncle MacGyver got it and reared you into the resourceful raptor you are now. Go forth and plunge square pegs in round holes!",
+      "color": 10901021,
+      "category":"Vagabond"
+   },
+   {
+      "title":"Ronin",
+      "image": {"url": "https://ledercards.netlify.app/cards/root/en-US/vagabond-ronin.webp"},
+      "thumbnail": {"url": "https://i.imgur.com/Seh9jgM.png"},
+      "description":"You are ronin! Your honor—since they board wiped your last retainer—in tatters. Masterless , coalitionless, you seek only infamy now and somehow feel compelled to grumble everything in gruff, angry tones...like cursing with a mouth full of cookies.",
+      "color": 2303786,
+      "category":"Vagabond"
+   },
+   {
+      "title":"Harrier",
+      "image": {"url": "https://ledercards.netlify.app/cards/root/en-US/vagabond-harrier.webp"},
+      "thumbnail": {"url": "https://i.imgur.com/urzikbD.png"},
+      "description":"You are harrier! Something happened that late night in the oak tree when ol’ Grandpa Bushy reduced the acorns in root tea a little too richly. Watching him vanish into thin air, you decided to sip the family elixir. And just like that, your wanderlust life of adventure unfurled before your glazed eyes!",
+      "color": 6672620,
+      "category":"Vagabond"
+   },
+   {
+      "title":"Elder Treetop",
+      "thumbnail": {"url": "https://i.imgur.com/rEexphg.png"},
+      "description":"Enables an extra building space.\n Removing an enemy building from the Treetop scores the player **2VP**. *Instead of just 1.*",
+      "color": 6275410,
+      "category":"Landmark"
+   },
+   {
+      "title":"Lost City",
+      "thumbnail": {"url": "https://i.imgur.com/gnPvPuo.png"},
+      "description":"The clearing with the Lost city counts as all suits for all purposes.\n *A crafting piece with the Lost City will provide any symbol once.*",
+      "color": 11493162,
+      "category":"Landmark"
+   },
+   {
+      "title":"Black Market",
+      "thumbnail": {"url": "https://i.imgur.com/OTWDAQ8.png"},
+      "description":"Once per turn, if a player has a piece in the clearing with The Black Market, they may swap one of their cards in hand face-down with a card here.",
+      "color": 7230253,
+      "category":"Landmark"
+   },
+   {
+      "title":"Legendary Forge",
+      "thumbnail": {"url": "https://i.imgur.com/5dKCPPf.png"},
+      "description":"Items on this card can only be crafted by using atleast one crafting piece in the clearing with the Legendary Forge.\n *Item card required as well.*\n When you craft an item from this card, gain **+1VP** and draw a card.",
+      "color": 14206355,
+      "category":"Landmark"
+   },
+   {
+      "title":"The Ferry",
+      "thumbnail": {"url": "https://i.imgur.com/UUA9B5m.png"},
+      "description":"Once per turn, a player taking a move from the clearing with the ferry can move to an adjacent clearing with the river, moving the ferry as well.\n *(This follows the normal move rules.)*\n After taking this move, that player draws one card.",
+      "color": 11427369,
+      "category":"Landmark"
+   },
+   {
+      "title":"The Tower",
+      "thumbnail": {"url": "https://i.imgur.com/ONWFUrV.png"},
+      "description":"At the end of a player's Evening, if that player rules the clearing with The Tower, that player scores **1VP**.",
+      "color": 5127742,
+      "category":"Landmark"
+   },
+   {
+      "title":"Standard",
+      "image": {"url": "https://i.imgur.com/nylKUN4.gif"},
+      "thumbnail": {"url": "https://i.imgur.com/vnXo6OY.gif"},
+      "description":"",
+      "color": 13585719,
+      "category":"Deck"
+   },
+   {
+      "title":"Exiles & Partisans",
+      "image": {"url": "https://i.imgur.com/bhf5GBu.gif"},
+      "thumbnail": {"url": "https://i.imgur.com/W7Jhrso.gif"},
+      "description":"",
+      "color": 10841778,
+      "category":"Deck"
+   }
+]
