@@ -79,14 +79,9 @@ def clean_thread_title(title, re):
         title = title[:100]
     return title
 
-def get_id_from_user_mention(mention):
-    match = re.match(r'^<@([0-9]*)>$', mention)
-    if (match):
-        return int(match.group(1))
-    return None
-
-def get_id_from_role_mention(mention: str) -> int | None:
-    match = re.match(r"^<@&([0-9]+)>$", mention)
+def get_id_from_mention(mention: str) -> int | None:
+    match = re.match(r"^<(?:@!?|@&|#)([0-9]+)>$", mention)
+    
     if match:
         return int(match.group(1))
     return None

@@ -87,7 +87,7 @@ class LFGView(DynamicButtonView):
     def __init__(self, cog : Matchmaking,
                  game_option : GameOption = None,
                  host : discord.Member = None,
-                 target_role : discord.Role = None,
+                 target_role : discord.Mentionable = None,
                  max_guests : int | None = None):
         # Tuple format: (label, emoji, callback, optional_style)
         button_configs = [
@@ -278,6 +278,8 @@ class Matchmaking(commands.Cog):
                 embed.add_field(name="Target", value=view.target_role.mention, inline=True)
             if (view.host):
                 embed.add_field(name="Host", value=view.host.mention, inline=True)
+            if (view.max_guests is not None):
+                embed.add_field(name="Number of Guests", value=str(view.max_guests), inline=True)
             if (len(guests_string)):
                 embed.add_field(name="Guests", value=guests_string, inline=False)
             try:
@@ -377,6 +379,9 @@ class Matchmaking(commands.Cog):
         host = interaction.user
         field_text = host.mention
         embed.add_field(name="Host", value=field_text, inline=True)
+
+        if (max_guests is not None):
+            embed.add_field(name="Number of Guests", value=str(max_guests), inline=True)
         
         author_avatar = common.DEFAULT_AVATAR_URL
         display_avatar = host.display_avatar
@@ -399,11 +404,22 @@ class Matchmaking(commands.Cog):
             gameColor = host.colour
         embed.colour = gameColor
 
+        role_id = None
+        if (len(game_option.role)):
+            role_id = utils.get_id_from_mention(game_option.role)
+        target_role = None
+        if (role_id is not None):
+            target_role = interaction.guild.get_role(role_id)
+            if (target_role is None):
+                target_role = interaction.guild.get_member(role_id)
+            if (target_role is None):
+                target_role = interaction.guild.get_channel(role_id)
+
         # View for the buttons
         view = LFGView(cog=self, 
                        game_option=game_option, 
                        host=host,
-                       target_role=interaction.guild.get_role(utils.get_id_from_role_mention(game_option.role)) if len(game_option.role) else None,
+                       target_role=target_role,
                        max_guests=max_guests)
         
         try:

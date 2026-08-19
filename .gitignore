@@ -1,5 +1,4 @@
 /.env
-/.github
 /.venv
 /.vscode
 **/__pycache__/

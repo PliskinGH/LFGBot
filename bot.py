@@ -14,6 +14,7 @@ if (PREFIX is None):
 # 1. Define Intents
 intents = discord.Intents.default()
 intents.message_content = True
+intents.members = True
 
 
 # 2. Subclass Bot
