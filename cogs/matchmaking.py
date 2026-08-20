@@ -218,14 +218,27 @@ class Matchmaking(commands.Cog):
 
         self.custom_emoji_re = re.compile(r"<:[\w]+:[\d]+>")
 
+    async def game_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        guild_config = self.guilds.get(interaction.guild_id)
+        if (guild_config is None):
+            return []
+
+        return [
+            app_commands.Choice(name=game.name, value=game.command)
+            for game in guild_config.games.values()
+            if current.lower() in game.command.lower()
+        ][:25]
+
     async def send_help(self, interaction: discord.Interaction, topic: str):
         if (topic == LFG_COMMAND):
             message = (
                 "**/lfg**\n"
-                "Select a game from the menu, then complete the game settings "
-                "to create a looking-for-group post.\n\n"
-                "Choose one of the available game categories from the menu. "
-                "You can add an optional description and maximum guest count."
+                "Use it without arguments to select a game and enter settings "
+                "through the menus, or provide the game and settings directly.\n\n"
+                "Direct usage: `/lfg game:<game> [description:<text>] "
+                "[max_guests:<number>]`"
             )
             guild_config = self.guilds.get(interaction.guild_id)
             games = list(guild_config.games.values()) if guild_config else []
@@ -331,7 +344,11 @@ class Matchmaking(commands.Cog):
                 embed.add_field(name="Host", value=view.host.mention, inline=True)
             nb_guests = len(view.guests)
             if (nb_guests or view.max_guests is not None):
-                embed.add_field(name=f"Guests ({nb_guests}/{view.max_guests})", value=guests_string, inline=False)
+                field_name = f"Guests ({nb_guests}"
+                if (view.max_guests is not None):
+                    field_name += f"/{view.max_guests}"
+                field_name += ")"
+                embed.add_field(name=field_name, value=guests_string, inline=False)
             try:
                 await message.edit(embed=embed)
             except Exception as error:
@@ -728,8 +745,38 @@ class Matchmaking(commands.Cog):
     @app_commands.command(
         name=LFG_COMMAND, description=LFG_DESCRIPTION
     )
+    @app_commands.describe(
+        game="The game/role to ping for this LFG post.",
+        description="Optional description for the game.",
+        max_guests="Optional maximum number of guests (1-100). The LFG will automatically close when this number is reached.",
+    )
+    @app_commands.autocomplete(game=game_autocomplete)
     async def lfg(self, interaction: discord.Interaction,
+                  game: str | None = None,
+                  description: str | None = None,
+                  max_guests: app_commands.Range[int, 1, 100] | None = None,
                   ):
+        if (game is not None):
+            guild_config = self.guilds.get(interaction.guild_id)
+            game_option = guild_config.games.get(game) if guild_config else None
+            if (game_option is None):
+                await interaction.response.send_message(
+                    f"`{game}` is not a configured game for this server.",
+                    ephemeral=True,
+                )
+                return
+
+            await interaction.response.defer()
+            await self.create_lfg(interaction, game_option, description or "", max_guests)
+            return
+
+        if (description is not None or max_guests is not None):
+            await interaction.response.send_message(
+                "The `game` argument is required when using direct settings.",
+                ephemeral=True,
+            )
+            return
+
         choices = [ (game_option.name, game_option.command)
                     for game_option in self.guilds[interaction.guild_id].games.values() ]
 
