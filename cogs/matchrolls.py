@@ -115,7 +115,7 @@ class MatchRolls(commands.Cog):
             subset_choices = [choices[i-1] for i in value_list]
 
         choice = ""
-        if (len(choices)):
+        if (len(subset_choices)):
             choice = random.choice(subset_choices)
             footer_text = "Randomly chosen among: " + ", ".join(subset_choices) + "."
         
@@ -145,6 +145,9 @@ class MatchRolls(commands.Cog):
                                  icon_url=author_avatar)
                 embed.set_footer(text=footer_text)
                 await interaction.response.send_message(embed=embed, ephemeral=not(display))
+                return
+
+        await interaction.response.send_message(f"No item found in the set or subset for `{category}`.", ephemeral=True)
 
 # Mandatory setup function for extensions
 async def setup(bot: commands.Bot):
