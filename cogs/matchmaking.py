@@ -218,6 +218,47 @@ class Matchmaking(commands.Cog):
 
         self.custom_emoji_re = re.compile(r"<:[\w]+:[\d]+>")
 
+    async def send_help(self, interaction: discord.Interaction, topic: str):
+        if (topic == LFG_COMMAND):
+            message = (
+                "**/lfg**\n"
+                "Select a game from the menu, then complete the game settings "
+                "to create a looking-for-group post.\n\n"
+                "Choose one of the available game categories from the menu. "
+                "You can add an optional description and maximum guest count."
+            )
+            guild_config = self.guilds.get(interaction.guild_id)
+            games = list(guild_config.games.values()) if guild_config else []
+            if (games):
+                alignment = len(max((game.command for game in games), key=len))
+                game_lines = []
+                for game in games:
+                    line = f"• `{game.command.ljust(alignment)}`"
+                    if (game.name):
+                        line += (
+                            " : Looking for "
+                            f"{utils.indefinite_article(game.name)} **{game.name}** game."
+                        )
+                    game_lines.append(line)
+                embed = discord.Embed(
+                    title="Games available on your server",
+                    description="\n".join(game_lines),
+                )
+            else:
+                embed = discord.Embed(
+                    title="Games available on your server",
+                    description="No games are configured for this server.",
+                )
+            await interaction.response.send_message(
+                message, embed=embed, ephemeral=True
+            )
+        else:
+            message = (
+                f"**/{topic}**\n"
+                "No detailed help is available for this command yet."
+            )
+            await interaction.response.send_message(message, ephemeral=True)
+
     async def process_game_selection(self,
                                      interaction: discord.Interaction,
                                      command_interaction: discord.Interaction,
