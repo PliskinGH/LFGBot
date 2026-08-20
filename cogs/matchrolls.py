@@ -21,11 +21,11 @@ class MatchRolls(commands.Cog):
 
     async def send_help(self, interaction: discord.Interaction, topic: str):
         if (topic != RANDOM_COMMAND):
-            await interaction.response.send_message(
-                f"**/{topic}**\n"
-                "No detailed help is available for this command yet.",
-                ephemeral=True,
+            message = (
+                f"# Help: /{topic}\n"
+                "No detailed help is available for this command yet."
             )
+            await interaction.response.send_message(message, ephemeral=True)
             return
 
         guild = utils.get_guild_from_config(self.config, interaction.guild_id)
@@ -50,27 +50,27 @@ class MatchRolls(commands.Cog):
         if (categories):
             alignment = len(max(categories, key=len))
             roll_sets = [
-                f"• `{category.ljust(alignment)}` : {display_set}.\n"
+                f"- `{category.ljust(alignment)}` - {display_set}.\n"
                 for category, display_set in roll_sets
             ]
 
         message = (
-            "**/random category:<category> "
-            "[subset:<subset>] [display:<true|false>]**\n"
-            "Choose a category using autocomplete. You can optionally "
-            "provide a subset or interval of entries. Set `display` to "
-            "`false` for an ephemeral result; it is public by default.\n\n"
-            "**Subset examples**\n"
-            "`subset:6` rolls from the first six items.\n"
-            "`subset:2,5-9` rolls from item 2 and items 5 through 9."
+            "# Help: /random\n"
+            "Choose a category and receive a random item from its set. "
+            "Autocomplete shows the available options.\n"
+            "## Usage\n"
+            "`/random category:<category> [subset:<subset>] "
+            "[display:<true|false>]`\n"
+            "## Subset examples\n"
+            "- `subset:6` rolls from the first six items.\n"
+            "- `subset:2,5-9` rolls from item 2 and items 5 through 9.\n"
+            "## Display\n"
+            "Set `display:false` for an ephemeral result. Results are "
+            "public by default.\n"
+            "## Available sets\n"
+            f"{''.join(roll_sets) or 'No roll sets are configured.'}"
         )
-        embed = discord.Embed(
-            title="Sets available on your server",
-            description="".join(roll_sets) or "No roll sets are configured.",
-        )
-        await interaction.response.send_message(
-            message, embed=embed, ephemeral=True
-        )
+        await interaction.response.send_message(message, ephemeral=True)
 
     # Autocomplete callback reads directly from self.available_choices
     async def category_autocomplete(

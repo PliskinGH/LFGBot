@@ -234,11 +234,22 @@ class Matchmaking(commands.Cog):
     async def send_help(self, interaction: discord.Interaction, topic: str):
         if (topic == LFG_COMMAND):
             message = (
-                "**/lfg**\n"
-                "Use it without arguments to select a game and enter settings "
-                "through the menus, or provide the game and settings directly.\n\n"
-                "Direct usage: `/lfg game:<game> [description:<text>] "
-                "[max_guests:<number>]`"
+                "# Help: /lfg\n"
+                "Create a looking-for-group post using either the guided "
+                "menus or direct command arguments.\n"
+                "## Guided mode\n"
+                "Use `/lfg` without arguments to choose a game and enter "
+                "the settings through the menus.\n"
+                "## Direct mode\n"
+                "`/lfg game:<game> [description:<text>] "
+                "[max_guests:<number>]`\n"
+                "### game\n"
+                "The game/role to ping for this LFG post.\n"
+                "### description\n"
+                "Optional description for the game.\n"
+                "### max_guests\n"
+                "Optional maximum number of guests (1-100). The LFG will "
+                "automatically close when this number is reached.\n"
             )
             guild_config = self.guilds.get(interaction.guild_id)
             games = list(guild_config.games.values()) if guild_config else []
@@ -246,28 +257,20 @@ class Matchmaking(commands.Cog):
                 alignment = len(max((game.command for game in games), key=len))
                 game_lines = []
                 for game in games:
-                    line = f"• `{game.command.ljust(alignment)}`"
+                    line = f"- `{game.command.ljust(alignment)}`"
                     if (game.name):
                         line += (
-                            " : Looking for "
-                            f"{utils.indefinite_article(game.name)} **{game.name}** game."
+                            " - "
+                            f"{utils.indefinite_article(game.name)} {game.name} game."
                         )
                     game_lines.append(line)
-                embed = discord.Embed(
-                    title="Games available on your server",
-                    description="\n".join(game_lines),
-                )
+                message += "## Available games\n" + "\n".join(game_lines)
             else:
-                embed = discord.Embed(
-                    title="Games available on your server",
-                    description="No games are configured for this server.",
-                )
-            await interaction.response.send_message(
-                message, embed=embed, ephemeral=True
-            )
+                message += "## Available games\nNo games are configured for this server."
+            await interaction.response.send_message(message, ephemeral=True)
         else:
             message = (
-                f"**/{topic}**\n"
+                f"# Help: /{topic}\n"
                 "No detailed help is available for this command yet."
             )
             await interaction.response.send_message(message, ephemeral=True)
