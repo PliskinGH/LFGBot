@@ -632,7 +632,10 @@ class Matchmaking(commands.Cog):
             if (thread is not None):
                 if (not(thread_in_forum)):
                     await thread.send(content=thread_message, embed=thread_embed)
-                embed.url = thread.jump_url
+                if (thread_in_forum):
+                    embed.url = thread.jump_url
+                else:
+                    embed.url = message.jump_url
                 await message.edit(embed=embed)
 
                 verified_users = []
