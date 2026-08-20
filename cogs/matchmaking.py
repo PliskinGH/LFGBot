@@ -22,6 +22,8 @@ CONFIG_GAMES_TAGS = "GamesTags"
 CONFIG_GAMES_VISIBILITY = "GamesVisibility"
 CONFIG_GAMES_MESSAGES = "GamesMessages"
 CONFIG_GAMES_REGISTRATION_API = "GamesRegistrationAPI"
+CONFIG_GAMES_MATCH_API = "GamesMatchAPI"
+CONFIG_GAMES_MATCH_URL = "GamesMatchURL"
 CONFIG_GAMES_API_TOKEN_ENV_VARS = "GamesAPITokenEnvVars"
 CONFIG_GAMES_WEBSITE_URL = "GamesWebsiteURL"
 CONFIG_GAMES_REGISTRATION_URL = "GamesRegistrationURL"
@@ -37,6 +39,8 @@ CONFIG_GAMES_ARGS = [
     CONFIG_GAMES_VISIBILITY,
     CONFIG_GAMES_MESSAGES,
     CONFIG_GAMES_REGISTRATION_API,
+    CONFIG_GAMES_MATCH_API,
+    CONFIG_GAMES_MATCH_URL,
     CONFIG_GAMES_API_TOKEN_ENV_VARS,
     CONFIG_GAMES_WEBSITE_URL,
     CONFIG_GAMES_REGISTRATION_URL,
@@ -58,7 +62,9 @@ GUESTS_OVER_LIMIT = " and others..."
 class GameOption(object):
 
     def __init__(self, name, command, role, icon, color, forum,
-                 tag, visibility, message, registration_api,
+                 tag, visibility, message,
+                 registration_api, match_api,
+                 match_url,
                  api_token_env_var, website_url,
                  registration_url, profile_url):
         self.name = name
@@ -71,6 +77,8 @@ class GameOption(object):
         self.visibility = visibility
         self.message = message
         self.registration_api = registration_api
+        self.match_api = match_api
+        self.match_url = match_url
         self.api_token_env_var = api_token_env_var
         self.website_url = website_url
         self.registration_url = registration_url
@@ -198,6 +206,8 @@ class Matchmaking(commands.Cog):
                     visibility=utils.safe_list_get(configdict[CONFIG_GAMES_VISIBILITY], index, None),
                     message=utils.safe_list_get(configdict[CONFIG_GAMES_MESSAGES], index, None),
                     registration_api=utils.safe_list_get(configdict[CONFIG_GAMES_REGISTRATION_API], index, None),
+                    match_api=utils.safe_list_get(configdict[CONFIG_GAMES_MATCH_API], index, None),
+                    match_url=utils.safe_list_get(configdict[CONFIG_GAMES_MATCH_URL], index, None),
                     api_token_env_var=utils.safe_list_get(configdict[CONFIG_GAMES_API_TOKEN_ENV_VARS], index, None),
                     website_url=utils.safe_list_get(configdict[CONFIG_GAMES_WEBSITE_URL], index, None),
                     registration_url=utils.safe_list_get(configdict[CONFIG_GAMES_REGISTRATION_URL], index, None),
@@ -533,6 +543,12 @@ class Matchmaking(commands.Cog):
         registration_api_url = None
         if (game_option.registration_api):
             registration_api_url = game_option.registration_api
+        match_api_url = None
+        if (game_option.match_api):
+            match_api_url = game_option.match_api
+        match_url = None
+        if (game_option.match_url):
+            match_url = game_option.match_url
         auth_token = None
         if (game_option.api_token_env_var):
             token_env_var = game_option.api_token_env_var
@@ -547,7 +563,7 @@ class Matchmaking(commands.Cog):
         profile_url = None
         if (game_option.profile_url):
             profile_url = game_option.profile_url
-        
+
         try:
             thread = await thread_channel.create_thread(**keywords)
             if (thread_in_forum):
@@ -557,21 +573,72 @@ class Matchmaking(commands.Cog):
                     await thread.send(content=thread_message, embed=thread_embed)
                 embed.url = thread.jump_url
                 await message.edit(embed=embed)
+
+                verified_users = []
                 if registration_api_url:
-                    users = [host] + list(guests)
-                    await self.check_registration(thread, users, registration_api_url,
-                                                  gameName, auth_token,
-                                                  website_url, registration_url, profile_url)
+                    try:
+                        users = [host] + list(guests)
+                        verified_users = await self.check_registration(
+                            thread, users, registration_api_url,
+                            gameName, auth_token,
+                            website_url, registration_url, profile_url)
+                    except Exception as error:
+                        print(f"League player registration check failed: {error}")
+                if match_api_url:
+                    try:
+                        await self.register_match(
+                            thread, match_api_url, match_url,
+                            auth_token, thread_title, gameName,
+                            verified_users)
+                    except Exception as error:
+                        print(f"League match registration request failed: {error}")
         except Exception as e:
             print(e)
+
+    async def register_match(self, thread, match_api_url, match_url,
+                             auth_token, title, website_name, verified_users):
+        headers = {"Content-Type": "application/json"}
+        if (auth_token):
+            headers["Authorization"] = f"Token {auth_token}"
+
+        payload = {
+            "title": title,
+            "table_talk_url": thread.jump_url,
+        }
+
+        if (verified_users):
+            payload["participants"] = [
+                {"discord_username": user.name}
+                for user in verified_users
+            ]
+
+        async with aiohttp.ClientSession(headers=headers) as session:
+            async with session.post(match_api_url, json=payload) as response:
+                if response.status not in (200, 201):
+                    response_text = await response.text()
+                    print(f"League match registration failed ({response.status}): {response_text}")
+                    return None
+
+                match = await response.json()
+                match_id = match.get("id")
+                if (match_id is None):
+                    return None
+                confirmation_message = f"Game preregistered on {website_name}"
+                if (match_url):
+                    preregistered_match_url = f"{match_url.rstrip('/')}/{match_id}/"
+                    confirmation_message += f": {preregistered_match_url}"
+                else:
+                    confirmation_message += " with ID: " + str(match_id)
+                await thread.send(content=confirmation_message)
 
     async def check_registration(self, thread, users, api_url,
                                  website_name=None, auth_token=None,
                                  website_url=None, registration_url=None, profile_url=None):
         if (not(api_url) or not(users)):
-            return
+            return []
 
         unregistered_users = []
+        verified_users = []
         headers = None
         if (auth_token):
             headers={"Authorization": f"Token {auth_token}"}
@@ -583,9 +650,11 @@ class Matchmaking(commands.Cog):
                 async with session.get(api_url + user.name + "/") as response:
                     if response.status != 200:
                         unregistered_users.append(user)
+                    else:
+                        verified_users.append(user)
 
         if (not(unregistered_users)):
-            return
+            return verified_users
 
         message = "Welcome"
         for user in unregistered_users:
@@ -611,7 +680,8 @@ class Matchmaking(commands.Cog):
             message += "profile"
         message += " has the correct Discord username. "
         
-        await thread.send(content=message, suppress_embeds=True)                
+        await thread.send(content=message, suppress_embeds=True)
+        return verified_users
 
 
     @app_commands.command(
