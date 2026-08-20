@@ -143,7 +143,7 @@ class GameSettingsModal(discord.ui.Modal):
                  parent_select: discord.ui.Select | None = None,
                  title: str = "Game Settings",
                  on_confirm: ModalCallback | None = None,):
-        super().__init__(title=title, timeout=60)
+        super().__init__(title=title, timeout=300)
         self.parent_select = parent_select
         self.on_confirm = on_confirm
 
@@ -278,10 +278,9 @@ class Matchmaking(commands.Cog):
                 embed.add_field(name="Target", value=view.target_role.mention, inline=True)
             if (view.host):
                 embed.add_field(name="Host", value=view.host.mention, inline=True)
-            if (view.max_guests is not None):
-                embed.add_field(name="Number of Guests", value=str(view.max_guests), inline=True)
-            if (len(guests_string)):
-                embed.add_field(name="Guests", value=guests_string, inline=False)
+            nb_guests = len(view.guests)
+            if (nb_guests or view.max_guests is not None):
+                embed.add_field(name=f"Guests ({nb_guests}/{view.max_guests})", value=guests_string, inline=False)
             try:
                 await message.edit(embed=embed)
             except Exception as error:
@@ -370,18 +369,12 @@ class Matchmaking(commands.Cog):
         if (len(game_option.role)):
             embed.add_field(name="Target", value=game_option.role, inline=True)
         
-        # Member and User return different mentions for server nicknames...
-        # So this :
-        # field_text = ctx.message.author.mention
-        # can give exclamation marks on the IDs
-        # and can break comparisons of mentions when reacting
-        # We need the User object
         host = interaction.user
         field_text = host.mention
         embed.add_field(name="Host", value=field_text, inline=True)
 
         if (max_guests is not None):
-            embed.add_field(name="Number of Guests", value=str(max_guests), inline=True)
+            embed.add_field(name=f"Guests (0/{max_guests})", value="", inline=False)
         
         author_avatar = common.DEFAULT_AVATAR_URL
         display_avatar = host.display_avatar
@@ -618,7 +611,7 @@ class Matchmaking(commands.Cog):
             message += "profile"
         message += " has the correct Discord username. "
         
-        await thread.send(content=message)                
+        await thread.send(content=message, suppress_embeds=True)                
 
 
     @app_commands.command(
@@ -633,7 +626,8 @@ class Matchmaking(commands.Cog):
             choices=choices, 
             command_interaction=interaction,
             on_select=self.process_game_selection,
-            placeholder="Select a game option..."
+            placeholder="Select a game option...",
+            timeout=300
         )
 
         await interaction.response.send_message(

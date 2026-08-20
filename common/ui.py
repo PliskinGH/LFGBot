@@ -39,8 +39,9 @@ class DynamicSelectView(discord.ui.View):
     def __init__(self, choices: list[tuple[str, str]], 
                        command_interaction: discord.Interaction, 
                        on_select: SelectCallback | None = None,
-                       placeholder: str = "Choose an option..."):
-        super().__init__(timeout=60)
+                       placeholder: str = "Choose an option...",
+                       timeout: Optional[float] = 60.0):
+        super().__init__(timeout=timeout)
         self.add_item(DynamicSelect(choices, command_interaction, on_select, placeholder))
 
 class DynamicButtonView(discord.ui.View):
