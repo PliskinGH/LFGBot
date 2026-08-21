@@ -278,7 +278,7 @@ class Matchmaking(commands.Cog):
                 "## Guided mode\n"
                 "Use `/lfg` without arguments to choose a game and enter "
                 "the settings through the menus.\n"
-                "Inside a game thread created by the bot, this opens a title modal instead.\n"
+                "Inside a game thread created by the bot, this opens instead a modal to rename the thread.\n"
                 "## Direct mode\n"
                 "`/lfg game:<game> [description:<text>] "
                 "[max_players:<number>]`\n"
@@ -372,7 +372,8 @@ class Matchmaking(commands.Cog):
             )
             return
         
-        if (view.max_guests is not None and len(view.guests) >= view.max_guests):
+        is_joining = interaction.user not in view.guests
+        if (is_joining and view.max_guests is not None and len(view.guests) >= view.max_guests):
             await interaction.response.send_message(
                 f"Sorry, this game is already full.", ephemeral=True
             )
@@ -380,7 +381,10 @@ class Matchmaking(commands.Cog):
 
         await interaction.response.defer(ephemeral=True)
 
-        view.guests.add(interaction.user)
+        if (is_joining):
+            view.guests.add(interaction.user)
+        else:
+            view.guests.remove(interaction.user)
 
         message = interaction.message
         embed = message.embeds[0] if message.embeds else None
@@ -416,26 +420,32 @@ class Matchmaking(commands.Cog):
             except Exception as error:
                 print(error)
 
-        if (interaction.user in view.guests):
+        if (is_joining):
             # Notify users
             await self.notify_players(interaction.channel, view.host, interaction.user, view.users_to_notify)
             pass
 
         await interaction.followup.send(
-            content=f"You have joined the game!", ephemeral=True
+            content=(f"You have joined the game!" if is_joining
+                     else f"You have left the game!"), ephemeral=True
         )
         
-        if (view.max_guests is not None and len(view.guests) >= view.max_guests):
+        if (is_joining and view.max_guests is not None and len(view.guests) >= view.max_guests):
             # factorize game start from process_start to allow for automatic start when max guests reached
             await self.start_game(interaction, view)
 
     async def process_notify(self, interaction: discord.Interaction, view: discord.ui.View):
         await interaction.response.defer(ephemeral=True)
 
-        view.users_to_notify.add(interaction.user)
+        is_subscribing = interaction.user not in view.users_to_notify
+        if (is_subscribing):
+            view.users_to_notify.add(interaction.user)
+        else:
+            view.users_to_notify.remove(interaction.user)
 
         await interaction.followup.send(
-            content=f"You will be notified when someone joins the game!", ephemeral=True
+            content=(f"You will be notified when someone joins the game!" if is_subscribing
+                     else f"You will no longer be notified when someone joins the game!"), ephemeral=True
         )
 
     async def process_cancel(self, interaction: discord.Interaction, view: discord.ui.View):
@@ -885,7 +895,7 @@ class Matchmaking(commands.Cog):
     @app_commands.describe(
         game="The game/role to ping for this LFG post.",
         description="Optional description for the game.",
-        max_players="Optional maximum number of players (including you) (2-100). The LFG will automatically close when this number is reached.",
+        max_players="Optional maximum number of players (including host) (2-100).",
     )
     @app_commands.autocomplete(game=game_autocomplete)
     async def lfg(self, interaction: discord.Interaction,
