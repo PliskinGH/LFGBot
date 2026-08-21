@@ -28,6 +28,7 @@ CONFIG_GAMES_API_TOKEN_ENV_VARS = "GamesAPITokenEnvVars"
 CONFIG_GAMES_WEBSITE_URL = "GamesWebsiteURL"
 CONFIG_GAMES_REGISTRATION_URL = "GamesRegistrationURL"
 CONFIG_GAMES_PROFILE_URL = "GamesProfileURL"
+CONFIG_GAMES_MAX_PLAYERS = "GamesMaxPlayers"
 CONFIG_GAMES_ARGS = [
     CONFIG_GAMES_COMMANDS,
     CONFIG_GAMES_NAMES,
@@ -44,7 +45,8 @@ CONFIG_GAMES_ARGS = [
     CONFIG_GAMES_API_TOKEN_ENV_VARS,
     CONFIG_GAMES_WEBSITE_URL,
     CONFIG_GAMES_REGISTRATION_URL,
-    CONFIG_GAMES_PROFILE_URL
+    CONFIG_GAMES_PROFILE_URL,
+    CONFIG_GAMES_MAX_PLAYERS
 ]
 EMOJI_JOIN = "👍"
 EMOJI_NOTIFY = "🔔"
@@ -66,7 +68,8 @@ class GameOption(object):
                  registration_api, match_api,
                  match_url,
                  api_token_env_var, website_url,
-                 registration_url, profile_url):
+                 registration_url, profile_url,
+                 default_max_guests):
         self.name = name
         self.command = command
         self.role = role
@@ -83,6 +86,7 @@ class GameOption(object):
         self.website_url = website_url
         self.registration_url = registration_url
         self.profile_url = profile_url
+        self.default_max_guests = default_max_guests
 
 class GuildGamesConfig(object):
 
@@ -137,15 +141,15 @@ class GameSettingsModal(discord.ui.Modal):
         required=False,
     )
 
-    max_guests = discord.ui.TextInput(
-        label="Max number of guests (1-100)",
+    max_players = discord.ui.TextInput(
+        label="Max number of players (2-100)",
         placeholder="Enter a whole number...",
         min_length=1,
         max_length=3,  # Prevents extremely large numbers
         required=False,
     )
 
-    max_guests_number = None  # This will hold the validated number of guests
+    max_players_number = None  # This will hold the validated number of players
 
     def __init__(self, 
                  parent_select: discord.ui.Select | None = None,
@@ -157,13 +161,15 @@ class GameSettingsModal(discord.ui.Modal):
 
     async def on_submit(self, modal_interaction: discord.Interaction):
         # Validate that the input is a number
-        if (self.max_guests.value):
+        if (self.max_players.value):
             try:
-                value = int(self.max_guests.value)
-                self.max_guests_number = value
+                value = int(self.max_players.value)
+                if (value < 2 or value > 100):
+                    raise ValueError
+                self.max_players_number = value
             except ValueError:
                 await modal_interaction.response.send_message(
-                    "❌ **Invalid input:** Please enter numbers only.",
+                    "❌ **Invalid input:** Please enter a number from 2 to 100.",
                     ephemeral=True,
                 )
                 return
@@ -211,12 +217,25 @@ class Matchmaking(commands.Cog):
                     api_token_env_var=utils.safe_list_get(configdict[CONFIG_GAMES_API_TOKEN_ENV_VARS], index, None),
                     website_url=utils.safe_list_get(configdict[CONFIG_GAMES_WEBSITE_URL], index, None),
                     registration_url=utils.safe_list_get(configdict[CONFIG_GAMES_REGISTRATION_URL], index, None),
-                    profile_url=utils.safe_list_get(configdict[CONFIG_GAMES_PROFILE_URL], index, None)
+                    profile_url=utils.safe_list_get(configdict[CONFIG_GAMES_PROFILE_URL], index, None),
+                    default_max_guests=self.parse_default_max_guests(
+                        utils.safe_list_get(configdict[CONFIG_GAMES_MAX_PLAYERS], index, None)
+                    )
                 )
                 guild_config.games[game] = game_option
             self.guilds[guild_id] = guild_config
 
         self.custom_emoji_re = re.compile(r"<:[\w]+:[\d]+>")
+
+    @staticmethod
+    def parse_default_max_guests(max_players : str | None) -> int | None:
+        if (not max_players):
+            return None
+        try:
+            parsed_value = int(max_players)
+        except ValueError:
+            return None
+        return parsed_value - 1 if 2 <= parsed_value <= 100 else None
 
     async def game_autocomplete(
         self, interaction: discord.Interaction, current: str
@@ -242,14 +261,15 @@ class Matchmaking(commands.Cog):
                 "the settings through the menus.\n"
                 "## Direct mode\n"
                 "`/lfg game:<game> [description:<text>] "
-                "[max_guests:<number>]`\n"
+                "[max_players:<number>]`\n"
                 "### game\n"
                 "The game/role to ping for this LFG post.\n"
                 "### description\n"
                 "Optional description for the game.\n"
-                "### max_guests\n"
-                "Optional maximum number of guests (1-100). The LFG will "
-                "automatically close when this number is reached.\n"
+                "### max_players\n"
+                "Optional maximum number of players (including you) (2-100).\n"
+                "The LFG will automatically close when this number is reached.\n"
+                "Some games may have a default maximum number of players, which will be used if this argument is not provided.\n"
             )
             guild_config = self.guilds.get(interaction.guild_id)
             games = list(guild_config.games.values()) if guild_config else []
@@ -261,8 +281,21 @@ class Matchmaking(commands.Cog):
                     if (game.name):
                         line += (
                             " - "
-                            f"{utils.indefinite_article(game.name)} {game.name} game."
+                            f"{utils.indefinite_article(game.name)} **{game.name}** game"
                         )
+                    settings = []
+                    if (game.role):
+                        settings.append(f"role to ping: {game.role}")
+                    if (game.forum):
+                        forum = game.forum
+                        if (forum.isdigit()):
+                            forum = f"<#{forum}>"
+                        settings.append(f"target forum: {forum}")
+                    if (game.default_max_guests is not None):
+                        settings.append(f"players: {game.default_max_guests + 1}")
+                    if (settings):
+                        line += " (" + ", ".join(settings) + ")"
+                    line += "."
                     game_lines.append(line)
                 message += "## Available games\n" + "\n".join(game_lines)
             else:
@@ -298,7 +331,12 @@ class Matchmaking(commands.Cog):
         game_command = select.values[0]
         game_option = self.guilds[interaction.guild_id].games.get(game_command)
 
-        await self.create_lfg(interaction, game_option, modal.description.value, modal.max_guests_number)
+        max_players = modal.max_players_number
+        if (max_players is None):
+            max_guests = game_option.default_max_guests
+        else:
+            max_guests = max_players - 1
+        await self.create_lfg(interaction, game_option, modal.description.value, max_guests)
 
     async def process_join(self, interaction: discord.Interaction, view: discord.ui.View):
         if (view.is_finished()):
@@ -754,13 +792,13 @@ class Matchmaking(commands.Cog):
     @app_commands.describe(
         game="The game/role to ping for this LFG post.",
         description="Optional description for the game.",
-        max_guests="Optional maximum number of guests (1-100). The LFG will automatically close when this number is reached.",
+        max_players="Optional maximum number of players (including you) (2-100). The LFG will automatically close when this number is reached.",
     )
     @app_commands.autocomplete(game=game_autocomplete)
     async def lfg(self, interaction: discord.Interaction,
                   game: str | None = None,
                   description: str | None = None,
-                  max_guests: app_commands.Range[int, 1, 100] | None = None,
+                  max_players: app_commands.Range[int, 2, 100] | None = None,
                   ):
         if (game is not None):
             guild_config = self.guilds.get(interaction.guild_id)
@@ -773,10 +811,14 @@ class Matchmaking(commands.Cog):
                 return
 
             await interaction.response.defer()
+            if (max_players is None):
+                max_guests = game_option.default_max_guests
+            else:
+                max_guests = max_players - 1
             await self.create_lfg(interaction, game_option, description or "", max_guests)
             return
 
-        if (description is not None or max_guests is not None):
+        if (description is not None or max_players is not None):
             await interaction.response.send_message(
                 "The `game` argument is required when using direct settings.",
                 ephemeral=True,
