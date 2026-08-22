@@ -55,6 +55,8 @@ EMOJI_START = "✅"
 EMOJIS_VALID = [EMOJI_JOIN, EMOJI_NOTIFY, EMOJI_CANCEL, EMOJI_START]
 EMOJIS_CLOSE = [EMOJI_CANCEL, EMOJI_START]
 
+LFG_FOOTER_HELP = "For discussion about this game, please use a thread.\nIt will be created for you when you close the game."
+
 THREAD_TYPES = [discord.ChannelType.public_thread,
                 discord.ChannelType.private_thread,
                 discord.ChannelType.news_thread]
@@ -94,37 +96,140 @@ class GuildGamesConfig(object):
         self.guild_id = guild_id
         self.games = {}  # dict of game_command -> GameOption
 
-class LFGView(DynamicButtonView):
+class LFGView(discord.ui.View):
 
-    def __init__(self, cog : Matchmaking,
-                 game_option : GameOption = None,
-                 host : discord.Member = None,
-                 target_role : discord.Mentionable = None,
-                 max_guests : int | None = None):
-        # Tuple format: (label, emoji, callback, optional_style)
-        button_configs = [
-            (
-                "Join",
-                EMOJI_JOIN,
-                cog.process_join,
-                discord.ButtonStyle.success,
-            ),
-            (
-                "Notify me",
-                EMOJI_NOTIFY,
-                cog.process_notify,
-                discord.ButtonStyle.danger,
-            ),
-            ("Cancel", EMOJI_CANCEL, cog.process_cancel, discord.ButtonStyle.secondary),
-            ("Start", EMOJI_START, cog.process_start, discord.ButtonStyle.primary),
-        ]
-        super().__init__(timeout=None, buttons=button_configs)
+    def __init__(self, cog: 'Matchmaking' = None,
+                 game_option: 'GameOption' = None,
+                 host: discord.Member = None,
+                 target_role: discord.Mentionable = None,
+                 max_guests: int | None = None):
+        super().__init__(timeout=None)
+        self.cog = cog
         self.game_option = game_option
         self.host = host
         self.target_role = target_role
         self.guests = set()
         self.users_to_notify = set()
-        self.max_guests = max_guests  # Maximum number of guests allowed in the game
+        self.max_guests = max_guests
+
+    async def _get_contextual_view(self, interaction: discord.Interaction):
+        """Reconstructs the view state from the message embed/footer if necessary."""
+        if self.host is not None:
+            return self
+            
+        cog = self.cog or interaction.client.get_cog('Matchmaking')
+        message = interaction.message
+        if not message or not message.embeds:
+            return self
+
+        embed = message.embeds[0]
+        guild = interaction.guild
+        
+        # Recover Game Option from title
+        game_option = None
+        title = embed.title or ""
+        m = re.search(r"Looking for (?:an? )?(.+?) game$", title)
+        if m:
+            game_name = m.group(1).strip()
+            guild_config = cog.guilds.get(interaction.guild_id)
+            if guild_config:
+                for go in guild_config.games.values():
+                    if go.name == game_name:
+                        game_option = go
+                        break
+        
+        # Recover Host
+        host = None
+        for field in embed.fields:
+            if field.name == "Host":
+                h_id = utils.get_id_from_mention(field.value)
+                if h_id:
+                    host = guild.get_member(h_id)
+                    if host is None:
+                        try:
+                            host = await guild.fetch_member(h_id)
+                        except: pass
+                break
+        
+        # Recover Target
+        target_role = None
+        for field in embed.fields:
+            if field.name == "Target":
+                t_id = utils.get_id_from_mention(field.value)
+                if t_id:
+                    target_role = (guild.get_role(t_id) or 
+                                   guild.get_member(t_id) or 
+                                   guild.get_channel(t_id))
+                    if target_role is None:
+                        try:
+                            target_role = await guild.fetch_member(t_id)
+                        except: pass
+                break
+
+        # Recover Guests & Max Guests
+        guests = set()
+        max_guests = None
+        for field in embed.fields:
+            if field.name.startswith("Guests"):
+                m = re.search(r"Guests \((\d+)(?:/(\d+))?\)", field.name)
+                if m:
+                    if m.group(2):
+                        max_guests = int(m.group(2))
+                
+                ids = re.findall(r"<@!?(\d+)>", field.value)
+                for i in ids:
+                    u_id = int(i)
+                    member = guild.get_member(u_id)
+                    if member is None:
+                        try:
+                            member = await guild.fetch_member(u_id)
+                        except: pass
+                    if member:
+                        guests.add(member)
+                break
+        
+        # Recover Users to Notify from the Subscribed field
+        users_to_notify = set()
+        for field in embed.fields:
+            if field.name != "Subscribed":
+                continue
+            ids = re.findall(r"<@!?([0-9]+)>", field.value)
+            for i in ids:
+                u_id = int(i)
+                member = guild.get_member(u_id)
+                if member is None:
+                    try:
+                        member = await guild.fetch_member(u_id)
+                    except: pass
+                if member:
+                    users_to_notify.add(member)
+            break
+
+        ctx_view = LFGView(cog=cog, game_option=game_option, host=host, 
+                           target_role=target_role, max_guests=max_guests)
+        ctx_view.guests = guests
+        ctx_view.users_to_notify = users_to_notify
+        return ctx_view
+
+    @discord.ui.button(label="Join", emoji=EMOJI_JOIN, style=discord.ButtonStyle.success, custom_id="lfg_view:join")
+    async def join_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        ctx_view = await self._get_contextual_view(interaction)
+        await ctx_view.cog.process_join(interaction, ctx_view)
+
+    @discord.ui.button(label="Notify me", emoji=EMOJI_NOTIFY, style=discord.ButtonStyle.danger, custom_id="lfg_view:notify")
+    async def notify_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        ctx_view = await self._get_contextual_view(interaction)
+        await ctx_view.cog.process_notify(interaction, ctx_view)
+
+    @discord.ui.button(label="Cancel", emoji=EMOJI_CANCEL, style=discord.ButtonStyle.secondary, custom_id="lfg_view:cancel")
+    async def cancel_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        ctx_view = await self._get_contextual_view(interaction)
+        await ctx_view.cog.process_cancel(interaction, ctx_view)
+
+    @discord.ui.button(label="Start", emoji=EMOJI_START, style=discord.ButtonStyle.primary, custom_id="lfg_view:start")
+    async def start_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        ctx_view = await self._get_contextual_view(interaction)
+        await ctx_view.cog.process_start(interaction, ctx_view)
 
 
 ModalCallback = Callable[
@@ -415,6 +520,11 @@ class Matchmaking(commands.Cog):
                     field_name += f"/{view.max_guests}"
                 field_name += ")"
                 embed.add_field(name=field_name, value=guests_string, inline=False)
+            if (view.users_to_notify):
+                sub_mentions = ",".join(
+                    u.mention for u in sorted(list(view.users_to_notify), key=lambda x: x.id)
+                )
+                embed.add_field(name="Subscribed", value=sub_mentions, inline=False)
             try:
                 await message.edit(embed=embed)
             except Exception as error:
@@ -442,6 +552,26 @@ class Matchmaking(commands.Cog):
             view.users_to_notify.add(interaction.user)
         else:
             view.users_to_notify.remove(interaction.user)
+
+        # Update message to persist users_to_notify in a separate field
+        message = interaction.message
+        embed = message.embeds[0]
+        subscribed_field_index = next(
+            (index for index, field in enumerate(embed.fields)
+             if field.name == "Subscribed"),
+            None,
+        )
+        if (subscribed_field_index is not None):
+            embed.remove_field(subscribed_field_index)
+        if view.users_to_notify:
+            sub_mentions = ",".join(
+                u.mention for u in sorted(list(view.users_to_notify), key=lambda x: x.id)
+            )
+            embed.add_field(name="Subscribed", value=sub_mentions, inline=False)
+        try:
+            await message.edit(embed=embed)
+        except Exception as error:
+            print(error)
 
         await interaction.followup.send(
             content=(f"You will be notified when someone joins the game!" if is_subscribing
@@ -504,7 +634,7 @@ class Matchmaking(commands.Cog):
         # Embed + buttons to interact
 
         embed = discord.Embed(description=description)
-        embed.set_footer(text="For discussion about this game, please use a thread.\nIt will be created for you when you close the game.")
+        embed.set_footer(text=LFG_FOOTER_HELP)
         
         if (len(game_option.role)):
             embed.add_field(name="Target", value=game_option.role, inline=True)
@@ -588,7 +718,10 @@ class Matchmaking(commands.Cog):
 
         view.stop()  # Stop listening for interactions
 
-        await interaction.edit_original_response(view=view)  # Update the original message with the disabled view
+        if interaction.response.is_done():
+            await interaction.message.edit(view=view)
+        else:
+            await interaction.response.edit_message(view=view)
 
 
     async def create_game_thread(self, interaction: discord.Interaction, view: LFGView):
@@ -949,4 +1082,6 @@ class Matchmaking(commands.Cog):
 async def setup(bot: commands.Bot):
     config = configparser.ConfigParser()
     config.read('config/games.ini')
-    await bot.add_cog(Matchmaking(bot=bot, config=config))
+    cog = Matchmaking(bot=bot, config=config)
+    await bot.add_cog(cog)
+    bot.add_view(LFGView(cog=cog))
