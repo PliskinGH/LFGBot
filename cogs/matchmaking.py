@@ -609,7 +609,9 @@ class Matchmaking(commands.Cog):
             )
             return
 
-        await self.close_game(interaction, emoji=EMOJI_CANCEL)
+        await self.close_game(interaction,
+                              emoji=EMOJI_CANCEL,
+                              footer_text="Game cancelled. Sorry!")
         
         await interaction.followup.send(
             content=f"The game has been canceled.", ephemeral=True
@@ -627,7 +629,9 @@ class Matchmaking(commands.Cog):
         await self.start_game(interaction, context)
 
     async def start_game(self, interaction: discord.Interaction, context: LFGContext):
-        await self.close_game(interaction, emoji=EMOJI_START)
+        await self.close_game(interaction,
+                              emoji=EMOJI_START,
+                              footer_text="Game already started. Sorry!")
 
         await self.create_game_thread(interaction, context)
 
@@ -635,18 +639,20 @@ class Matchmaking(commands.Cog):
             content=f"The game has started!", ephemeral=True
         )
 
-    async def close_game(self, interaction: discord.Interaction, emoji: str = EMOJI_START):
+    async def close_game(self, interaction: discord.Interaction,
+                         emoji: str = EMOJI_START,
+                         footer_text: str = "Game closed/full. Sorry!"):
         message = interaction.message
         embed = message.embeds[0] if message.embeds else None
         if (embed is not None):
             emoji_url = utils.get_default_emoji_url(emoji)
-            embed.set_footer(text="Game closed/full. Sorry!", icon_url=emoji_url)
+            embed.set_footer(text=footer_text, icon_url=emoji_url)
             try:
                 await message.edit(embed=embed)
             except Exception as error:
                 print(error)
 
-        await self.disable_view(interaction)
+        await self.remove_view(interaction)
 
     async def create_lfg(self, interaction: discord.Interaction,
                          game_option: GameOption,
@@ -731,21 +737,11 @@ class Matchmaking(commands.Cog):
                 print(e)
                 print("Failed to DM " + user_to_notify.display_name)
 
-    async def disable_view(self, interaction: discord.Interaction):
-        # New disabled view
-        view = LFGView(cog=self)
-
-        # Disable all buttons in the view
-        for child in view.children:
-            if isinstance(child, discord.ui.Button):
-                child.disabled = True
-
-        view.stop()  # Stop listening for interactions
-
+    async def remove_view(self, interaction: discord.Interaction):
         if interaction.response.is_done():
-            await interaction.message.edit(view=view)
+            await interaction.message.edit(view=None)
         else:
-            await interaction.response.edit_message(view=view)
+            await interaction.response.edit_message(view=None)
 
 
     async def create_game_thread(self, interaction: discord.Interaction, context: LFGContext):
