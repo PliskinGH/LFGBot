@@ -710,6 +710,9 @@ class Matchmaking(commands.Cog):
     
     async def notify_players(self, channel, host, new_player, users_to_notify):
         for user_to_notify in users_to_notify:
+            if (user_to_notify == new_player):
+                continue
+
             message_to_send = "A new player (" + new_player.display_name + ")"
             message_to_send += " has joined your game"
             message_to_send += " in the LFG channel "
