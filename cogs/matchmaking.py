@@ -100,9 +100,9 @@ class GameOption(object):
 
 class GuildGamesConfig(object):
 
-    def __init__(self, guild_id):
+    def __init__(self, guild_id : int):
         self.guild_id = guild_id
-        self.games = {}  # dict of game_command -> GameOption
+        self.games : dict[str, GameOption] = {}  # dict of game_command -> GameOption
 
 class LFGContext(object):
 
@@ -342,7 +342,7 @@ class Matchmaking(commands.Cog):
     def __init__(self, bot: commands.Bot,
                  config : configparser.ConfigParser = None):
         self.bot = bot
-        self.guilds = {} # dict of guild_id -> GuildGamesConfig
+        self.guilds : dict[int, GuildGamesConfig] = {} # dict of guild_id -> GuildGamesConfig
         for guild in config.sections():
             guild_id = config.getint(guild, common.CONFIG_ID, fallback=None)
             if (guild_id is None):
@@ -1066,6 +1066,13 @@ class Matchmaking(commands.Cog):
         if (game is not None):
             guild_config = self.guilds.get(interaction.guild_id)
             game_option = guild_config.games.get(game) if guild_config else None
+            if (game_option is None):
+                # If discord unfortunately sent the name instead of value during autocomplete...
+                # We need to check the name too.
+                for go in guild_config.games.values():
+                    if go.name == game:
+                        game_option = go
+                        break
             if (game_option is None):
                 await interaction.response.send_message(
                     f"`{game}` is not a configured game for this server.",
