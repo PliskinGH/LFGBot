@@ -11,17 +11,17 @@ TEST_GUILD_ID = os.getenv('TEST_GUILD_ID')
 if (PREFIX is None):
     PREFIX = "!"
 
-# 1. Define Intents
+# 1. Define Intents and Allowed mentions
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
-
+allowed_mentions = discord.AllowedMentions(everyone=False, users=True, roles=True, replied_user=True)
 
 # 2. Subclass Bot
 class LFGBot(commands.Bot):
 
     def __init__(self):
-        super().__init__(command_prefix=PREFIX, intents=intents)
+        super().__init__(command_prefix=PREFIX, intents=intents, allowed_mentions=allowed_mentions)
 
     async def setup_hook(self):
         """Runs automatically before the bot connects to Discord."""
