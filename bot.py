@@ -13,7 +13,6 @@ if (PREFIX is None):
 
 # 1. Define Intents and Allowed mentions
 intents = discord.Intents.default()
-intents.message_content = True
 intents.members = True
 allowed_mentions = discord.AllowedMentions(everyone=False, users=True, roles=True, replied_user=True)
 
