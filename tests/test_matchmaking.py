@@ -4,7 +4,13 @@ import asyncio
 import discord
 import pytest
 
-from cogs.matchmaking import LFG_COMMAND, LFGContext, Matchmaking
+from cogs.matchmaking import (
+    LFG_COMMAND,
+    RENAME_COMMAND,
+    LFGContext,
+    Matchmaking,
+    ThreadRenameModal,
+)
 
 from tests.conftest import (
     FakeChannel,
@@ -93,12 +99,146 @@ class TestSendHelp:
         assert "<@&111>" in content
         assert "No games are configured" not in content
 
+    def test_rename_help_includes_usage(self, matchmaking):
+        interaction = FakeInteraction(user=FakeMember(1, "host"), guild_id=1)
+        _run(matchmaking.send_help(interaction, RENAME_COMMAND))
+
+        content = interaction.response.messages[0][0]
+        assert "# Help: /rename" in content
+        assert "`/rename title:<new title>`" in content
+        assert "`/rename` without arguments" in content
+
     def test_unknown_topic_falls_back_to_generic_help(self, matchmaking):
         interaction = FakeInteraction(user=FakeMember(1, "host"), guild_id=1)
         _run(matchmaking.send_help(interaction, "unknown"))
         content = interaction.response.messages[0][0]
         assert "# Help: /unknown" in content
+        assert "# Help: /unknown" in content
         assert "No detailed help is available" in content
+
+
+class TestRenameCommand:
+    """Tests for the standalone /rename command."""
+
+    def _thread_interaction(self, matchmaking, user, host, owner_id=None,
+                            channel_type=None):
+        embed = discord.Embed(title="Looking for a Root game")
+        embed.add_field(name="Host", value=host.mention, inline=True)
+
+        channel = FakeChannel(id=123, name="root-game")
+        channel.type = channel_type or discord.ChannelType.public_thread
+        channel.owner_id = owner_id if owner_id is not None else matchmaking.bot.user.id
+        channel.message = FakeMessage([embed])
+
+        return FakeInteraction(user=user, channel=channel)
+
+    def test_requires_a_thread(self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        interaction = FakeInteraction(user=host)
+        _run(Matchmaking.rename.callback(matchmaking, interaction, title="New Room"))
+        assert (
+            interaction.response.messages[0][0]
+            == "This command can only be used inside a bot-created game thread."
+        )
+
+    def test_rejects_thread_not_owned_by_bot(self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        interaction = self._thread_interaction(
+            matchmaking, user=host, host=host, owner_id=999
+        )
+        _run(Matchmaking.rename.callback(matchmaking, interaction, title="New Room"))
+        assert (
+            interaction.response.messages[0][0]
+            == "This thread cannot be renamed because it was not created by this bot."
+        )
+
+    def test_non_host_cannot_rename(self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        other = FakeMember(101, "Rando")
+        interaction = self._thread_interaction(matchmaking, user=other, host=host)
+        _run(Matchmaking.rename.callback(matchmaking, interaction, title="New Room"))
+        assert interaction.channel.edited_kwargs is None
+        assert (
+            interaction.response.messages[0][0]
+            == "Only the host can rename this thread."
+        )
+
+    @pytest.mark.asyncio
+    async def test_host_renames_thread_directly(self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        interaction = self._thread_interaction(matchmaking, user=host, host=host)
+
+        await Matchmaking.rename.callback(matchmaking, interaction, title="New Room")
+
+        assert interaction.channel.edited_kwargs["name"] == "New Room"
+        assert interaction.response.messages[0][0] == "Thread renamed to **New Room**."
+
+    @pytest.mark.asyncio
+    async def test_empty_title_opens_modal(self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        interaction = self._thread_interaction(matchmaking, user=host, host=host)
+
+        await Matchmaking.rename.callback(matchmaking, interaction, title="   ")
+
+        assert len(interaction.response.modals) == 1
+        assert isinstance(interaction.response.modals[0], ThreadRenameModal)
+        assert interaction.channel.edited_kwargs is None
+
+    @pytest.mark.asyncio
+    async def test_modal_callback_renames_thread(self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        interaction = self._thread_interaction(matchmaking, user=host, host=host)
+
+        await matchmaking.rename_thread_modal(interaction, "New Room")
+
+        assert interaction.channel.edited_kwargs["name"] == "New Room"
+        assert interaction.response.messages[0][0] == "Thread renamed to **New Room**."
+
+    @pytest.mark.asyncio
+    async def test_modal_callback_rejects_non_host(self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        other = FakeMember(101, "Rando")
+        interaction = self._thread_interaction(matchmaking, user=other, host=host)
+
+        await matchmaking.rename_thread_modal(interaction, "New Room")
+
+        assert interaction.channel.edited_kwargs is None
+        assert (
+            interaction.response.messages[0][0]
+            == "Only the host can rename this thread."
+        )
+
+
+class TestLfgLocationRestrictions:
+    def test_disallows_inside_thread(self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        channel = FakeChannel(id=123, name="root-game")
+        channel.type = discord.ChannelType.public_thread
+        interaction = FakeInteraction(user=host, channel=channel)
+
+        _run(Matchmaking.lfg.callback(matchmaking, interaction, game="root"))
+
+        assert (
+            interaction.response.messages[0][0]
+            == "The `/lfg` command cannot be used inside a thread. "
+            "Use `/rename` to rename a game thread."
+        )
+        assert interaction.channel.created_kwargs is None
+
+    def test_disallows_outside_a_guild_channel(self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        # A DM channel (private) is not a server channel.
+        channel = FakeChannel(id=123, name="dm")
+        channel.type = discord.ChannelType.private
+        interaction = FakeInteraction(user=host, channel=channel)
+
+        _run(Matchmaking.lfg.callback(matchmaking, interaction, game="root"))
+
+        assert (
+            interaction.response.messages[0][0]
+            == "The `/lfg` command can only be used in a server channel."
+        )
+        assert interaction.channel.created_kwargs is None
 
 
 class TestLfgContextFromInteraction:

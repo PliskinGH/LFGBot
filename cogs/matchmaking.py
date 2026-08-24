@@ -20,6 +20,9 @@ LFG_NOTIFY_CUSTOM_ID = "lfg_view:notify"
 LFG_CANCEL_CUSTOM_ID = "lfg_view:cancel"
 LFG_START_CUSTOM_ID = "lfg_view:start"
 
+RENAME_COMMAND = "rename"
+RENAME_DESCRIPTION = "Rename a game thread."
+
 CONFIG_GAMES_COMMANDS = "GamesCommands"
 CONFIG_GAMES_NAMES = "GamesFullNames"
 CONFIG_GAMES_ROLES = "GamesRoles"
@@ -418,7 +421,6 @@ class Matchmaking(commands.Cog):
                 "## Guided mode\n"
                 "Use `/lfg` without arguments to choose a game and enter "
                 "the settings through the menus.\n"
-                "Inside a game thread created by the bot, this opens instead a modal to rename the thread.\n"
                 "## Direct mode\n"
                 "`/lfg game:<game> [description:<text>] "
                 "[max_players:<number>]`\n"
@@ -426,7 +428,6 @@ class Matchmaking(commands.Cog):
                 "The game/role to ping for this LFG post.\n"
                 "### description\n"
                 "Optional description for the game.\n"
-                "Inside a game thread created by the bot, provide only `description` to rename the thread.\n"
                 "### max_players\n"
                 "Optional maximum number of players (including host) (2-100).\n"
                 "The LFG will automatically close when this number is reached.\n"
@@ -461,6 +462,19 @@ class Matchmaking(commands.Cog):
                 message += "## Available games\n" + "\n".join(game_lines)
             else:
                 message += "## Available games\nNo games are configured for this server."
+            await interaction.response.send_message(message, ephemeral=True)
+        elif (topic == RENAME_COMMAND):
+            message = (
+                "# Help: /rename\n"
+                "Rename a game thread created by the bot.\n"
+                "## Guided mode\n"
+                "`/rename` without arguments opens a modal to enter the new thread title.\n"
+                "## Direct mode\n"
+                "`/rename title:<new title>`\n"
+                "### title\n"
+                "The new title for the thread.\n"
+                "Only the host can rename a thread, and only threads created by the bot can be renamed.\n"
+            )
             await interaction.response.send_message(message, ephemeral=True)
         else:
             message = (
@@ -985,7 +999,8 @@ class Matchmaking(commands.Cog):
 
         if (channel.owner_id != self.bot.user.id):
             await interaction.response.send_message(
-                "This thread cannot be renamed with `/lfg`.", ephemeral=True
+                "This thread cannot be renamed because it was not created by this bot.",
+                ephemeral=True,
             )
             return False
 
@@ -1024,26 +1039,33 @@ class Matchmaking(commands.Cog):
             f"Thread renamed to **{new_name}**.", ephemeral=True
         )
 
-    async def rename_thread_direct(self, interaction: discord.Interaction,
-                                   title: str | None):
+    async def rename_thread_modal(self, interaction: discord.Interaction,
+                                  title: str):
+        if (not await self.check_thread_rename_permission(interaction)):
+            return
+
+        await self.rename_thread(interaction, title)
+
+    @app_commands.command(
+        name=RENAME_COMMAND, description=RENAME_DESCRIPTION
+    )
+    @app_commands.describe(title="The new title for the thread.")
+    async def rename(self, interaction: discord.Interaction,
+                     title: str | None = None):
         can_rename = await self.check_thread_rename_permission(interaction)
         if (can_rename is None):
-            return False
+            await interaction.response.send_message(
+                "This command can only be used inside a bot-created game thread.",
+                ephemeral=True,
+            )
+            return
         if (not can_rename):
-            return True
+            return
 
         if (title is None or not title.strip()):
             await interaction.response.send_modal(
                 ThreadRenameModal(self.rename_thread_modal)
             )
-            return True
-
-        await self.rename_thread(interaction, title)
-        return True
-
-    async def rename_thread_modal(self, interaction: discord.Interaction,
-                                  title: str):
-        if (not await self.check_thread_rename_permission(interaction)):
             return
 
         await self.rename_thread(interaction, title)
@@ -1063,7 +1085,19 @@ class Matchmaking(commands.Cog):
                   description: str | None = None,
                   max_players: app_commands.Range[int, 2, 100] | None = None,
                   ):
-        if (await self.rename_thread_direct(interaction, description)):
+        channel = interaction.channel
+        if (channel is not None and channel.type in THREAD_TYPES):
+            await interaction.response.send_message(
+                "The `/lfg` command cannot be used inside a thread. "
+                "Use `/rename` to rename a game thread.",
+                ephemeral=True,
+            )
+            return
+        if (channel is None or channel.type != discord.ChannelType.text):
+            await interaction.response.send_message(
+                "The `/lfg` command can only be used in a server channel.",
+                ephemeral=True,
+            )
             return
 
         if (game is not None):

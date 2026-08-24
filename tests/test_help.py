@@ -34,7 +34,12 @@ class TestTopicAutocomplete:
     @pytest.mark.asyncio
     async def test_excludes_help_and_filters(self, bot_with_commands):
         bot_with_commands.tree = FakeTreeWithCommands(
-            [FakeCommand("lfg"), FakeCommand("random"), FakeCommand(HELP_COMMAND)]
+            [
+                FakeCommand("lfg"),
+                FakeCommand("random"),
+                FakeCommand("rename"),
+                FakeCommand(HELP_COMMAND),
+            ]
         )
         help_cog = Help(bot=bot_with_commands)
 
@@ -45,13 +50,18 @@ class TestTopicAutocomplete:
     @pytest.mark.asyncio
     async def test_returns_all_topics_sorted(self, bot_with_commands):
         bot_with_commands.tree = FakeTreeWithCommands(
-            [FakeCommand("lfg"), FakeCommand("random"), FakeCommand(HELP_COMMAND)]
+            [
+                FakeCommand("lfg"),
+                FakeCommand("random"),
+                FakeCommand("rename"),
+                FakeCommand(HELP_COMMAND),
+            ]
         )
         help_cog = Help(bot=bot_with_commands)
 
         interaction = FakeInteraction(user=FakeMember(1, "host"), guild_id=1)
         choices = await help_cog.topic_autocomplete(interaction, "")
-        assert [choice.value for choice in choices] == ["lfg", "random"]
+        assert [choice.value for choice in choices] == ["lfg", "random", "rename"]
 
 
 class TestHelpCommand:
@@ -70,19 +80,30 @@ class TestHelpCommand:
         assert content == "`/unknown` is not currently available."
         assert interaction.response.messages[0][2] is True  # ephemeral
 
+    @pytest.mark.parametrize(
+        "topic,expected",
+        [("lfg", "# Help: /lfg"), ("rename", "# Help: /rename")],
+    )
     @pytest.mark.asyncio
-    async def test_known_topic_dispatches_to_cog(self, bot_with_commands):
+    async def test_known_topic_dispatches_to_cog(
+        self, bot_with_commands, topic, expected
+    ):
         bot_with_commands.tree = FakeTreeWithCommands(
-            [FakeCommand("lfg"), FakeCommand("random"), FakeCommand(HELP_COMMAND)]
+            [
+                FakeCommand("lfg"),
+                FakeCommand("random"),
+                FakeCommand("rename"),
+                FakeCommand(HELP_COMMAND),
+            ]
         )
         help_cog = Help(bot=bot_with_commands)
         interaction = FakeInteraction(user=FakeMember(1, "host"), guild_id=1)
 
-        await Help.help.callback(help_cog, interaction, "lfg")
+        await Help.help.callback(help_cog, interaction, topic)
 
         # Matchmaking.send_help receives (interaction, topic) and sends its help text.
         content = interaction.response.messages[0][0]
-        assert "# Help: /lfg" in content
+        assert expected in content
 
     @pytest.mark.asyncio
     async def test_known_topic_but_cog_unavailable(self, bot_with_commands):

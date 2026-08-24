@@ -66,15 +66,17 @@ class FakeGuild:
 
 
 class FakeChannel:
-    """A channel stub capturing thread-creation requests."""
+    """A channel stub capturing thread-creation/rename requests."""
 
-    def __init__(self, id=1, name="general"):
+    def __init__(self, id=1, name="general", type_=None):
         self.id = id
         self.name = name
-        self.type = discord.ChannelType.text
+        self.type = type_ or discord.ChannelType.text
         self.mention = f"<#{self.id}>"
         self.owner_id = None
         self.created_kwargs = None
+        self.message = None  # FakeMessage returned by fetch_message
+        self.edited_kwargs = None
 
     async def create_thread(self, **kwargs):
         self.created_kwargs = kwargs
@@ -82,9 +84,10 @@ class FakeChannel:
         return (None, None)
 
     async def fetch_message(self, message_id):
-        return None
+        return self.message
 
     async def edit(self, **kwargs):
+        self.edited_kwargs = kwargs
         return None
 
 

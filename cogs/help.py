@@ -3,11 +3,12 @@ from discord import app_commands
 from discord.ext import commands
 
 from common import common
-from cogs.matchmaking import LFG_COMMAND, Matchmaking
+from cogs.matchmaking import LFG_COMMAND, RENAME_COMMAND, Matchmaking
 from cogs.matchrolls import MatchRolls, RANDOM_COMMAND
 
 HELP_COGS = {
     LFG_COMMAND: Matchmaking.__name__,
+    RENAME_COMMAND: Matchmaking.__name__,
     RANDOM_COMMAND: MatchRolls.__name__,
 }
 
