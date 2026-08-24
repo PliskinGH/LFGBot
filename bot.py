@@ -3,11 +3,16 @@ import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 
+from common import utils
+
 load_dotenv()
 
 TOKEN = os.getenv('DISCORD_TOKEN')
 PREFIX = os.getenv('COMMAND_PREFIX')
-TEST_GUILD_ID = os.getenv('TEST_GUILD_ID')
+# TEST_GUILD_ID accepts a comma-separated list of guild IDs to sync slash
+# commands to (e.g. "123,456,789") for quick testing across several
+# servers, instead of waiting for global command propagation.
+TEST_GUILD_IDS = utils.split_config_list(os.getenv('TEST_GUILD_ID'))
 if (PREFIX is None):
     PREFIX = "!"
 
@@ -32,13 +37,14 @@ class LFGBot(commands.Bot):
                 print(f"Loaded cog: {filename[:-3]}")
 
         # Sync commands globally (can take up to 1 hour to propagate everywhere).
-        # FOR QUICK TESTING: Sync to a specific test guild for instant updates:
-        if (TEST_GUILD_ID is not None):
-            print("Syncing slash commands for test guild...")
-            TEST_GUILD = discord.Object(id=TEST_GUILD_ID)
-            self.tree.copy_global_to(guild=TEST_GUILD)
-            test_synced = await self.tree.sync(guild=TEST_GUILD)
-            print(f"Synced {len(test_synced)} command(s) for test guild.")
+        # FOR QUICK TESTING: Sync to specific test guilds for instant updates.
+        if (TEST_GUILD_IDS):
+            for guild_id in TEST_GUILD_IDS:
+                print(f"Syncing slash commands for test guild {guild_id}...")
+                TEST_GUILD = discord.Object(id=guild_id)
+                self.tree.copy_global_to(guild=TEST_GUILD)
+                test_synced = await self.tree.sync(guild=TEST_GUILD)
+                print(f"Synced {len(test_synced)} command(s) for test guild {guild_id}.")
         else:
             # Sync slash commands with Discord after all Cogs are loaded
             print("Syncing slash commands...")
