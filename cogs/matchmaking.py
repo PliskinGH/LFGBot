@@ -142,12 +142,11 @@ class LFGContext(object):
         m = re.search(r"Looking for (?:an? )?(.+?) game$", title)
         if m:
             game_name = m.group(1).strip()
-            guild_config = cog.guilds.get(interaction.guild_id)
-            if guild_config:
-                for go in guild_config.games.values():
-                    if go.name == game_name:
-                        game_option = go
-                        break
+            guild_config = cog.get_guild_config(interaction.guild_id)
+            for go in guild_config.games.values():
+                if go.name == game_name:
+                    game_option = go
+                    break
         
         # Recover Host
         host = None
@@ -343,41 +342,51 @@ class Matchmaking(commands.Cog):
                  config : configparser.ConfigParser = None):
         self.bot = bot
         self.guilds : dict[int, GuildGamesConfig] = {} # dict of guild_id -> GuildGamesConfig
+        self.default_guild_config = GuildGamesConfig(None)
+        self._load_guild_config(self.default_guild_config, config, common.CONFIG_DEFAULT)
         for guild in config.sections():
             guild_id = config.getint(guild, common.CONFIG_ID, fallback=None)
             if (guild_id is None):
                 continue
             guild_config = GuildGamesConfig(guild_id)
-            configdict = {}
-            for arg in CONFIG_GAMES_ARGS:
-                configdict[arg] = utils.split_config_list(config.get(guild, arg, fallback=None))
-            for game in configdict[CONFIG_GAMES_COMMANDS]:
-                index = configdict[CONFIG_GAMES_COMMANDS].index(game)
-                game_option = GameOption(
-                    name=utils.safe_list_get(configdict[CONFIG_GAMES_NAMES], index, ""),
-                    command=game,
-                    role=utils.safe_list_get(configdict[CONFIG_GAMES_ROLES], index, ""),
-                    icon=utils.safe_list_get(configdict[CONFIG_GAMES_ICONS], index, ""),
-                    color=utils.safe_list_get(configdict[CONFIG_GAMES_COLORS], index, ""),
-                    forum=utils.safe_list_get(configdict[CONFIG_GAMES_FORUMS], index, None),
-                    tag=utils.safe_list_get(configdict[CONFIG_GAMES_TAGS], index, None),
-                    visibility=utils.safe_list_get(configdict[CONFIG_GAMES_VISIBILITY], index, None),
-                    message=utils.safe_list_get(configdict[CONFIG_GAMES_MESSAGES], index, None),
-                    registration_api=utils.safe_list_get(configdict[CONFIG_GAMES_REGISTRATION_API], index, None),
-                    match_api=utils.safe_list_get(configdict[CONFIG_GAMES_MATCH_API], index, None),
-                    match_url=utils.safe_list_get(configdict[CONFIG_GAMES_MATCH_URL], index, None),
-                    api_token_env_var=utils.safe_list_get(configdict[CONFIG_GAMES_API_TOKEN_ENV_VARS], index, None),
-                    website_url=utils.safe_list_get(configdict[CONFIG_GAMES_WEBSITE_URL], index, None),
-                    registration_url=utils.safe_list_get(configdict[CONFIG_GAMES_REGISTRATION_URL], index, None),
-                    profile_url=utils.safe_list_get(configdict[CONFIG_GAMES_PROFILE_URL], index, None),
-                    default_max_guests=self.parse_default_max_guests(
-                        utils.safe_list_get(configdict[CONFIG_GAMES_MAX_PLAYERS], index, None)
-                    )
-                )
-                guild_config.games[game] = game_option
+            self._load_guild_config(guild_config, config, guild)
             self.guilds[guild_id] = guild_config
 
         self.custom_emoji_re = re.compile(r"<:[\w]+:[\d]+>")
+
+    def _load_guild_config(self, guild_config: GuildGamesConfig,
+                           config: configparser.ConfigParser,
+                           section: str):
+        configdict = {}
+        for arg in CONFIG_GAMES_ARGS:
+            configdict[arg] = utils.split_config_list(config.get(section, arg, fallback=None))
+        for game in configdict[CONFIG_GAMES_COMMANDS]:
+            index = configdict[CONFIG_GAMES_COMMANDS].index(game)
+            game_option = GameOption(
+                name=utils.safe_list_get(configdict[CONFIG_GAMES_NAMES], index, ""),
+                command=game,
+                role=utils.safe_list_get(configdict[CONFIG_GAMES_ROLES], index, ""),
+                icon=utils.safe_list_get(configdict[CONFIG_GAMES_ICONS], index, ""),
+                color=utils.safe_list_get(configdict[CONFIG_GAMES_COLORS], index, ""),
+                forum=utils.safe_list_get(configdict[CONFIG_GAMES_FORUMS], index, None),
+                tag=utils.safe_list_get(configdict[CONFIG_GAMES_TAGS], index, None),
+                visibility=utils.safe_list_get(configdict[CONFIG_GAMES_VISIBILITY], index, None),
+                message=utils.safe_list_get(configdict[CONFIG_GAMES_MESSAGES], index, None),
+                registration_api=utils.safe_list_get(configdict[CONFIG_GAMES_REGISTRATION_API], index, None),
+                match_api=utils.safe_list_get(configdict[CONFIG_GAMES_MATCH_API], index, None),
+                match_url=utils.safe_list_get(configdict[CONFIG_GAMES_MATCH_URL], index, None),
+                api_token_env_var=utils.safe_list_get(configdict[CONFIG_GAMES_API_TOKEN_ENV_VARS], index, None),
+                website_url=utils.safe_list_get(configdict[CONFIG_GAMES_WEBSITE_URL], index, None),
+                registration_url=utils.safe_list_get(configdict[CONFIG_GAMES_REGISTRATION_URL], index, None),
+                profile_url=utils.safe_list_get(configdict[CONFIG_GAMES_PROFILE_URL], index, None),
+                default_max_guests=self.parse_default_max_guests(
+                    utils.safe_list_get(configdict[CONFIG_GAMES_MAX_PLAYERS], index, None)
+                )
+            )
+            guild_config.games[game] = game_option
+
+    def get_guild_config(self, guild_id: int) -> GuildGamesConfig:
+        return self.guilds.get(guild_id, self.default_guild_config)
 
     @staticmethod
     def parse_default_max_guests(max_players : str | None) -> int | None:
@@ -392,9 +401,7 @@ class Matchmaking(commands.Cog):
     async def game_autocomplete(
         self, interaction: discord.Interaction, current: str
     ) -> list[app_commands.Choice[str]]:
-        guild_config = self.guilds.get(interaction.guild_id)
-        if (guild_config is None):
-            return []
+        guild_config = self.get_guild_config(interaction.guild_id)
 
         return [
             app_commands.Choice(name=game.name, value=game.command)
@@ -425,8 +432,8 @@ class Matchmaking(commands.Cog):
                 "The LFG will automatically close when this number is reached.\n"
                 "Some games may have a default maximum number of players, which will be used if this argument is not provided.\n"
             )
-            guild_config = self.guilds.get(interaction.guild_id)
-            games = list(guild_config.games.values()) if guild_config else []
+            guild_config = self.get_guild_config(interaction.guild_id)
+            games = list(guild_config.games.values())
             if (games):
                 alignment = len(max((game.command for game in games), key=len))
                 game_lines = []
@@ -483,7 +490,7 @@ class Matchmaking(commands.Cog):
         await interaction.response.defer(ephemeral=True)
 
         game_command = select.values[0]
-        game_option = self.guilds[interaction.guild_id].games.get(game_command)
+        game_option = self.get_guild_config(interaction.guild_id).games.get(game_command)
 
         max_players = modal.max_players_number
         if (max_players is None):
@@ -1060,8 +1067,8 @@ class Matchmaking(commands.Cog):
             return
 
         if (game is not None):
-            guild_config = self.guilds.get(interaction.guild_id)
-            game_option = guild_config.games.get(game) if guild_config else None
+            guild_config = self.get_guild_config(interaction.guild_id)
+            game_option = guild_config.games.get(game)
             if (game_option is None):
                 # If discord unfortunately sent the name instead of value during autocomplete...
                 # We need to check the name too.
@@ -1092,7 +1099,7 @@ class Matchmaking(commands.Cog):
             return
 
         choices = [ (game_option.name, game_option.command)
-                    for game_option in self.guilds[interaction.guild_id].games.values() ]
+                    for game_option in self.get_guild_config(interaction.guild_id).games.values() ]
 
         view = DynamicSelectView(
             choices=choices, 
