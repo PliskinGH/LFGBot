@@ -55,11 +55,11 @@ class MatchRolls(commands.Cog):
             ]
 
         message = (
-            "# Help: /random\n"
+            f"# Help: /{RANDOM_COMMAND}\n"
             "Choose a category and receive a random item from its set. "
             "Autocomplete shows the available options.\n"
             "## Usage\n"
-            "`/random category:<category> [subset:<subset>] "
+            f"`/{RANDOM_COMMAND} category:<category> [subset:<subset>] "
             "[display:<true|false>]`\n"
             "## Subset examples\n"
             "- `subset:6` rolls from the first six items.\n"

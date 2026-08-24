@@ -39,8 +39,8 @@ class TestSendHelp:
         await_test(matchrolls.send_help(interaction, RANDOM_COMMAND))
 
         content = interaction.response.messages[0][0]
-        assert "# Help: /random" in content
-        assert "/random category:<category>" in content
+        assert f"# Help: /{RANDOM_COMMAND}" in content
+        assert f"/{RANDOM_COMMAND} category:<category>" in content
         assert "## Available sets" in content
         assert "map" in content
         assert "landmark" in content

@@ -415,14 +415,14 @@ class Matchmaking(commands.Cog):
     async def send_help(self, interaction: discord.Interaction, topic: str):
         if (topic == LFG_COMMAND):
             message = (
-                "# Help: /lfg\n"
+                f"# Help: /{LFG_COMMAND}\n"
                 "Create a looking-for-group post using either the guided "
                 "menus or direct command arguments.\n"
                 "## Guided mode\n"
-                "Use `/lfg` without arguments to choose a game and enter "
+                f"Use `/{LFG_COMMAND}` without arguments to choose a game and enter "
                 "the settings through the menus.\n"
                 "## Direct mode\n"
-                "`/lfg game:<game> [description:<text>] "
+                f"`/{LFG_COMMAND} game:<game> [description:<text>] "
                 "[max_players:<number>]`\n"
                 "### game\n"
                 "The game/role to ping for this LFG post.\n"
@@ -465,12 +465,12 @@ class Matchmaking(commands.Cog):
             await interaction.response.send_message(message, ephemeral=True)
         elif (topic == RENAME_COMMAND):
             message = (
-                "# Help: /rename\n"
+                f"# Help: /{RENAME_COMMAND}\n"
                 "Rename a game thread created by the bot.\n"
                 "## Guided mode\n"
-                "`/rename` without arguments opens a modal to enter the new thread title.\n"
+                f"`/{RENAME_COMMAND}` without arguments opens a modal to enter the new thread title.\n"
                 "## Direct mode\n"
-                "`/rename title:<new title>`\n"
+                f"`/{RENAME_COMMAND} title:<new title>`\n"
                 "### title\n"
                 "The new title for the thread.\n"
                 "Only the host can rename a thread, and only threads created by the bot can be renamed.\n"
@@ -1088,14 +1088,14 @@ class Matchmaking(commands.Cog):
         channel = interaction.channel
         if (channel is not None and channel.type in THREAD_TYPES):
             await interaction.response.send_message(
-                "The `/lfg` command cannot be used inside a thread. "
-                "Use `/rename` to rename a game thread.",
+                f"The `/{LFG_COMMAND}` command cannot be used inside a thread. "
+                f"Use `/{RENAME_COMMAND}` to rename a game thread.",
                 ephemeral=True,
             )
             return
         if (channel is None or channel.type != discord.ChannelType.text):
             await interaction.response.send_message(
-                "The `/lfg` command can only be used in a server channel.",
+                f"The `/{LFG_COMMAND}` command can only be used in a server channel.",
                 ephemeral=True,
             )
             return

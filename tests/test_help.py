@@ -3,7 +3,7 @@ import pytest
 
 from cogs.help import Help
 from common.common import HELP_COMMAND
-from cogs.matchmaking import Matchmaking
+from cogs.matchmaking import LFG_COMMAND, RENAME_COMMAND, Matchmaking
 
 from tests.conftest import (
     FakeBot,
@@ -82,7 +82,10 @@ class TestHelpCommand:
 
     @pytest.mark.parametrize(
         "topic,expected",
-        [("lfg", "# Help: /lfg"), ("rename", "# Help: /rename")],
+        [
+            (LFG_COMMAND, f"# Help: /{LFG_COMMAND}"),
+            (RENAME_COMMAND, f"# Help: /{RENAME_COMMAND}"),
+        ],
     )
     @pytest.mark.asyncio
     async def test_known_topic_dispatches_to_cog(

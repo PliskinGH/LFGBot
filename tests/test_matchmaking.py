@@ -93,8 +93,8 @@ class TestSendHelp:
         _run(matchmaking.send_help(interaction, LFG_COMMAND))
 
         content = interaction.response.messages[0][0]
-        assert "# Help: /lfg" in content
-        assert "`/lfg game:<game>" in content
+        assert f"# Help: /{LFG_COMMAND}" in content
+        assert f"`/{LFG_COMMAND} game:<game>" in content
         assert "- `root`" in content
         assert "<@&111>" in content
         assert "No games are configured" not in content
@@ -104,9 +104,9 @@ class TestSendHelp:
         _run(matchmaking.send_help(interaction, RENAME_COMMAND))
 
         content = interaction.response.messages[0][0]
-        assert "# Help: /rename" in content
-        assert "`/rename title:<new title>`" in content
-        assert "`/rename` without arguments" in content
+        assert f"# Help: /{RENAME_COMMAND}" in content
+        assert f"`/{RENAME_COMMAND} title:<new title>`" in content
+        assert f"`/{RENAME_COMMAND}` without arguments" in content
 
     def test_unknown_topic_falls_back_to_generic_help(self, matchmaking):
         interaction = FakeInteraction(user=FakeMember(1, "host"), guild_id=1)
@@ -220,8 +220,8 @@ class TestLfgLocationRestrictions:
 
         assert (
             interaction.response.messages[0][0]
-            == "The `/lfg` command cannot be used inside a thread. "
-            "Use `/rename` to rename a game thread."
+            == f"The `/{LFG_COMMAND}` command cannot be used inside a thread. "
+            f"Use `/{RENAME_COMMAND}` to rename a game thread."
         )
         assert interaction.channel.created_kwargs is None
 
@@ -236,7 +236,7 @@ class TestLfgLocationRestrictions:
 
         assert (
             interaction.response.messages[0][0]
-            == "The `/lfg` command can only be used in a server channel."
+            == f"The `/{LFG_COMMAND}` command can only be used in a server channel."
         )
         assert interaction.channel.created_kwargs is None
 
