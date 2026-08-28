@@ -90,9 +90,9 @@ class TestRandomCommand:
         content, embed, ephemeral, _ = interaction.response.messages[0]
         assert content is None
         assert ephemeral is False  # public by default
-        assert embed.title == "Random Map: Autumn"
+        assert embed.title == "Random Map: Alpha"
         assert embed.author.name == "host"
-        assert "Randomly chosen among: Autumn, Winter, Lake." in embed.footer.text
+        assert "Randomly chosen among: Alpha, Beta, Gamma." in embed.footer.text
 
     @pytest.mark.asyncio
     async def test_display_false_is_ephemeral(self, matchrolls, monkeypatch):
@@ -109,12 +109,12 @@ class TestRandomCommand:
         interaction = self._interaction()
         self._patch_random(monkeypatch)
 
-        # subset "2" selects the FIRST TWO items of [Autumn, Winter, Lake].
+        # subset "2" selects the FIRST TWO items of [Alpha, Beta, Gamma].
         await self._call_random(matchrolls, interaction, "map", subset="2")
 
         content, embed, ephemeral, _ = interaction.response.messages[0]
-        assert embed.title == "Random Map: Autumn"
-        assert "Randomly chosen among: Autumn, Winter." in embed.footer.text
+        assert embed.title == "Random Map: Alpha"
+        assert "Randomly chosen among: Alpha, Beta." in embed.footer.text
 
     @pytest.mark.asyncio
     async def test_subset_out_of_range_reports_no_item(self, matchrolls, monkeypatch):

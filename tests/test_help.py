@@ -23,8 +23,8 @@ def bot_with_commands(games_config):
 
 
 class FakeTreeWithCommands(FakeTree):
-    def get_command(self, name):
-        for command in self._commands:
+    def get_command(self, name, *, guild=None, type=None):
+        for command in self.get_commands(guild=guild):
             if command.name == name:
                 return command
         return None
@@ -63,6 +63,16 @@ class TestTopicAutocomplete:
         choices = await help_cog.topic_autocomplete(interaction, "")
         assert [choice.value for choice in choices] == ["lfg", "random", "rename"]
 
+    @pytest.mark.asyncio
+    async def test_includes_guild_scoped_commands(self, bot_with_commands):
+        bot_with_commands.tree = FakeTreeWithCommands([FakeCommand("help")])
+        bot_with_commands.tree._guild_commands = {1: [FakeCommand("game_a")]}
+        help_cog = Help(bot=bot_with_commands)
+
+        interaction = FakeInteraction(user=FakeMember(1, "host"), guild_id=1)
+        choices = await help_cog.topic_autocomplete(interaction, "")
+        assert [choice.value for choice in choices] == ["game_a"]
+
 
 class TestHelpCommand:
     @pytest.mark.asyncio
@@ -79,6 +89,24 @@ class TestHelpCommand:
         content = interaction.response.messages[0][0]
         assert content == "`/unknown` is not currently available."
         assert interaction.response.messages[0][2] is True  # ephemeral
+
+    @pytest.mark.asyncio
+    async def test_guild_scoped_command_dispatches_to_matchmaking(
+        self, bot_with_commands
+    ):
+        bot_with_commands.tree = FakeTreeWithCommands([FakeCommand("help")])
+        game_a = FakeCommand("game_a")
+        # The cog that registers a dynamic command records itself on extras so
+        # /help can find the owning cog without hardcoding names.
+        game_a.extras = {"help_cog": bot_with_commands.get_cog("Matchmaking")}
+        bot_with_commands.tree._guild_commands = {1: [game_a]}
+        help_cog = Help(bot=bot_with_commands)
+
+        interaction = FakeInteraction(user=FakeMember(1, "host"), guild_id=1)
+        await Help.help.callback(help_cog, interaction, "game_a")
+
+        content = interaction.response.messages[0][0]
+        assert "# Help: /game_a" in content
 
     @pytest.mark.parametrize(
         "topic,expected",

@@ -26,6 +26,10 @@ class LFGBot(commands.Bot):
 
     def __init__(self):
         super().__init__(command_prefix=PREFIX, intents=intents, allowed_mentions=allowed_mentions)
+        # Guild ids that cogs registered per-guild slash commands for. Populated
+        # while extensions are loaded and consumed in setup_hook to sync those
+        # guilds. Only relevant outside TEST_GUILD_ID mode.
+        self.provided_guild_ids: set[int] = set()
 
     async def setup_hook(self):
         """Runs automatically before the bot connects to Discord."""
@@ -46,6 +50,15 @@ class LFGBot(commands.Bot):
                 test_synced = await self.tree.sync(guild=TEST_GUILD)
                 print(f"Synced {len(test_synced)} command(s) for test guild {guild_id}.")
         else:
+            # Cog setup() may have registered guild-specific slash commands and
+            # recorded the target guilds in self.provided_guild_ids. Sync each of
+            # those guilds, then sync globally so guilds that are not listed in
+            # the games config can still use the global /lfg command.
+            for guild_id in sorted(self.provided_guild_ids):
+                print(f"Syncing per-guild commands for guild {guild_id}...")
+                guild = discord.Object(id=guild_id)
+                synced = await self.tree.sync(guild=guild)
+                print(f"Synced {len(synced)} command(s) for guild {guild_id}.")
             # Sync slash commands with Discord after all Cogs are loaded
             print("Syncing slash commands...")
             synced = await self.tree.sync()

@@ -18,7 +18,7 @@ class TestSplitConfigList:
         assert utils.split_config_list("a, b ,c") == ["a", "b", "c"]
 
     def test_single_item(self):
-        assert utils.split_config_list("root") == ["root"]
+        assert utils.split_config_list("game_a") == ["game_a"]
 
     def test_keeps_empty_spots_between_commas(self):
         assert utils.split_config_list(", ,") == ["", "", ""]
@@ -76,11 +76,11 @@ class TestParseIntervals:
 
 
 class TestIndefiniteArticle:
-    @pytest.mark.parametrize("word", ["Autumn", "Oath", "Elder", "Iberian", "umbrella", "orange"])
+    @pytest.mark.parametrize("word", ["Apple", "Eagle", "Iris", "Otter", "umbrella", "orange"])
     def test_vowel_words_get_an(self, word):
         assert utils.indefinite_article(word) == "an"
 
-    @pytest.mark.parametrize("word", ["Root", "Lake", "Map", "Tower", "Ferry", ""])
+    @pytest.mark.parametrize("word", ["Game", "Book", "Map", "Cat", "Dog", ""])
     def test_consonant_or_empty_get_a(self, word):
         assert utils.indefinite_article(word) == "a"
 
@@ -102,8 +102,8 @@ class TestCleanThreadTitle:
 
     def test_strips_custom_emoji_patterns(self):
         custom = re.compile(r"<:[a-zA-Z0-9_]+:[0-9]+>")
-        assert utils.clean_thread_title("Root <:root:123456> game", custom) == (
-            "Root  game"
+        assert utils.clean_thread_title("Game <:game:123456> post", custom) == (
+            "Game  post"
         )
 
     def test_strips_whitespace(self):

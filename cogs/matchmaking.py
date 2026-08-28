@@ -1,4 +1,5 @@
-from typing import Any, Callable, Coroutine
+import inspect
+from typing import Any, Callable, Coroutine, Optional
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -22,6 +23,11 @@ LFG_START_CUSTOM_ID = "lfg_view:start"
 
 RENAME_COMMAND = "rename"
 RENAME_DESCRIPTION = "Rename a game thread."
+
+# Path to the games configuration (see games.ini): guild sections and their games.
+GAMES_INI_PATH = 'config/games.ini'
+# Path to the optional per-game parameter configuration (see games_parameters.ini).
+GAMES_PARAMETERS_PATH = 'config/games_parameters.ini'
 
 CONFIG_GAMES_COMMANDS = "GamesCommands"
 CONFIG_GAMES_NAMES = "GamesFullNames"
@@ -114,7 +120,8 @@ class LFGContext(object):
                  target_role: discord.Mentionable = None,
                  max_guests: int | None = None,
                  guests: set[discord.Member] | None = None,
-                 users_to_notify: set[discord.Member] | None = None):
+                 users_to_notify: set[discord.Member] | None = None,
+                 game_settings: dict[str, list[str]] | None = None):
         super().__init__()
         self.game_option = game_option
         self.host = host
@@ -126,6 +133,9 @@ class LFGContext(object):
         self.users_to_notify = users_to_notify
         if (self.users_to_notify is None):
             self.users_to_notify = set()
+        self.game_settings = game_settings
+        if (self.game_settings is None):
+            self.game_settings = {}
 
     @classmethod
     async def from_interaction(cls,
@@ -218,10 +228,24 @@ class LFGContext(object):
                     users_to_notify.add(member)
             break
 
+        # Recover Game Settings from the Settings field
+        game_settings = {}
+        for field in embed.fields:
+            if field.name != "Settings":
+                continue
+            for line in field.value.splitlines():
+                if (": " in line):
+                    key, rest = line.split(": ", 1)
+                    values = [v.strip() for v in rest.split(",") if v.strip()]
+                    if (values):
+                        game_settings[key] = values
+            break
+
         context = cls(game_option=game_option,
                       host=host, target_role=target_role,
                       max_guests=max_guests, guests=guests,
-                      users_to_notify=users_to_notify)
+                      users_to_notify=users_to_notify,
+                      game_settings=game_settings)
 
         return context
     
@@ -342,7 +366,8 @@ class ThreadRenameModal(discord.ui.Modal):
 class Matchmaking(commands.Cog):
 
     def __init__(self, bot: commands.Bot,
-                 config : configparser.ConfigParser = None):
+                 config : configparser.ConfigParser = None,
+                 game_parameters : configparser.ConfigParser = None):
         self.bot = bot
         self.guilds : dict[int, GuildGamesConfig] = {} # dict of guild_id -> GuildGamesConfig
         self.default_guild_config = GuildGamesConfig(None)
@@ -356,6 +381,25 @@ class Matchmaking(commands.Cog):
             self.guilds[guild_id] = guild_config
 
         self.custom_emoji_re = re.compile(r"<:[\w]+:[\d]+>")
+
+        # game_command -> { parameter_name -> [accepted values] }
+        self.game_parameters: dict[str, dict[str, list[str]]] = {}
+        self._load_game_parameters(game_parameters)
+
+    def _load_game_parameters(self, parameters_config: configparser.ConfigParser):
+        """Parse a game-parameters config into self.game_parameters.
+
+        Each section is a game command; each key is a parameter name and the
+        value is the comma-separated list of acceptable values for it.
+        """
+        if (parameters_config is None):
+            return
+        for game_command in parameters_config.sections():
+            self.game_parameters[game_command] = {}
+            for param_name, raw_values in parameters_config.items(game_command):
+                values = [value.strip() for value in raw_values.split(",") if value.strip()]
+                if (values):
+                    self.game_parameters[game_command][param_name] = values
 
     def _load_guild_config(self, guild_config: GuildGamesConfig,
                            config: configparser.ConfigParser,
@@ -391,6 +435,231 @@ class Matchmaking(commands.Cog):
     def get_guild_config(self, guild_id: int) -> GuildGamesConfig:
         return self.guilds.get(guild_id, self.default_guild_config)
 
+    def register_guild_commands(self) -> None:
+        # Register one guild-specific slash command per configured game.
+        # Games configured only in the DEFAULT section are not registered:
+        # guilds not listed in the games config keep relying on /lfg.
+        registered_guild_ids = getattr(self.bot, 'provided_guild_ids', None)
+        for guild_id, guild_config in self.guilds.items():
+            guild = discord.Object(id=guild_id)
+            for game_command in guild_config.games:
+                # No local name validation: Command.__init__ runs discord.py's
+                # own validate_name, so an impossible name (e.g. "c&c" — a fine
+                # /lfg value but not a legal slash-command name) surfaces here
+                # as ValueError and is skipped instead of crashing the load.
+                try:
+                    command = self._make_game_command(game_command)
+                except ValueError as error:
+                    print(
+                        f"Skipping guild-specific command '{game_command}' for "
+                        f"guild {guild_id}: {str(error).rstrip('.')} — it remains "
+                        f"usable through /{LFG_COMMAND}."
+                    )
+                    continue
+                self.bot.tree.add_command(command, guild=guild)
+            if (registered_guild_ids is not None):
+                registered_guild_ids.add(guild_id)
+
+    def _make_game_command(self, game_command: str) -> app_commands.Command:
+        # extras is never serialized by discord.py; "help_cog" lets the /help
+        # command find this command's owning cog without hardcoding cog names.
+        return app_commands.Command(
+            name=game_command,
+            description=LFG_DESCRIPTION,
+            callback=self._make_game_callback(game_command),
+            extras={"help_cog": self},
+        )
+
+    def _make_game_callback(self, game_command: str):
+        accepted_params = self.game_parameters.get(game_command, {})
+        parameter_names = list(accepted_params.keys())
+
+        async def game_callback(interaction, **command_kwargs):
+            return await self._run_game_command(interaction, game_command, command_kwargs)
+
+        signature_parameters = [
+            inspect.Parameter(
+                "interaction",
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                annotation=discord.Interaction,
+            ),
+            inspect.Parameter(
+                "description",
+                inspect.Parameter.KEYWORD_ONLY,
+                annotation=Optional[str],
+                default=None,
+            ),
+            inspect.Parameter(
+                "max_players",
+                inspect.Parameter.KEYWORD_ONLY,
+                annotation=Optional[int],
+                default=None,
+            ),
+        ]
+        for param_name in parameter_names:
+            signature_parameters.append(
+                inspect.Parameter(
+                    param_name,
+                    inspect.Parameter.KEYWORD_ONLY,
+                    annotation=Optional[str],
+                    default=None,
+                )
+            )
+
+        descriptions = {
+            "description": "Optional description for the game.",
+            "max_players": "Optional maximum number of players (2-100).",
+        }
+        autocompletes = {}
+        for param_name in parameter_names:
+            descriptions[param_name] = f"Optional {param_name} values for this game."
+            autocompletes[param_name] = self._make_param_autocomplete(
+                game_command, param_name)
+
+        game_callback.__qualname__ = game_callback.__name__
+        game_callback.__signature__ = inspect.Signature(signature_parameters)
+        game_callback.__discord_app_commands_param_description__ = descriptions
+        game_callback.__discord_app_commands_param_autocomplete__ = autocompletes
+        return game_callback
+    def _make_param_autocomplete(self, game_command: str, param_name: str):
+        accepted_values = self.game_parameters.get(game_command, {}).get(param_name, [])
+
+        async def autocomplete(interaction, current):
+            # Discord replaces the whole field with the picked choice's value,
+            # so each choice's value is composed with the existing field prefix
+            # (everything up to the last comma): picking a value appends it as
+            # an additional comma-separated value instead of overwriting the
+            # previously picked ones.
+            #
+            # The choice's display name is the composed string too: some Discord
+            # clients commit the choice by writing its name rather than its
+            # value, and using the bare value as the name would then discard
+            # the prefix (overwriting earlier picks). With both equal, either
+            # write path preserves the full composed value.
+            prefix = current[: current.rfind(",") + 1]
+            last_token = current[len(prefix):].strip().lower()
+            already_present = {
+                token.strip().lower() for token in current.split(",")[:-1]
+            }
+
+            choices = []
+            for value in accepted_values:
+                if (last_token and last_token not in value.lower()):
+                    continue
+                if (value.lower() in already_present):
+                    continue
+                composed = prefix + value
+                if (len(composed) > 100):  # Choice string values cap at 100 chars.
+                    continue
+                choices.append(app_commands.Choice(name=composed, value=composed))
+                if (len(choices) >= common.AUTOCOMPLETE_LIMIT):
+                    break
+            return choices
+
+        autocomplete.__qualname__ = autocomplete.__name__
+        return autocomplete
+
+    @staticmethod
+    def _parse_param_values(raw_value, accepted_values):
+        if (raw_value is None):
+            return None, None
+        provided = [value.strip() for value in raw_value.split(",") if value.strip()]
+        invalid = [value for value in provided if value not in accepted_values]
+        if (invalid):
+            return None, invalid
+        return provided, None
+
+    async def _run_game_command(self, interaction, game_command, command_kwargs):
+        if (not await self._guard_lfg_channel(interaction, game_command)):
+            return
+
+        description = command_kwargs.pop("description", None)
+        max_players = command_kwargs.pop("max_players", None)
+
+        if all(value is None for value in (description, max_players, *command_kwargs.values())):
+            # No arguments at all: same guided modal route as /lfg.
+            await self._send_game_settings_modal(interaction, game_command)
+            return
+
+        parsed_parameters = {}
+        for param_name, accepted_values in self.game_parameters.get(game_command, {}).items():
+            raw_value = command_kwargs.get(param_name)
+            if (raw_value is None):
+                continue
+            values, invalid = self._parse_param_values(raw_value, accepted_values)
+            if (invalid is not None):
+                await interaction.response.send_message(
+                    f"Invalid value(s) for `{param_name}`: {', '.join(invalid)}.\n"
+                    f"Valid values: {', '.join(accepted_values)}.",
+                    ephemeral=True,
+                )
+                return
+            parsed_parameters[param_name] = values
+
+        await self._direct_lfg(interaction, game_command, description, max_players,
+                               game_settings=parsed_parameters)
+
+    async def _guard_lfg_channel(self, interaction, command_name):
+        channel = interaction.channel
+        if (channel is not None and channel.type in THREAD_TYPES):
+            await interaction.response.send_message(
+                f"The `/{command_name}` command cannot be used inside a thread. "
+                f"Use `/{RENAME_COMMAND}` to rename a game thread.",
+                ephemeral=True,
+            )
+            return False
+        if (channel is None or channel.type != discord.ChannelType.text):
+            await interaction.response.send_message(
+                f"The `/{command_name}` command can only be used in a server channel.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+    def _resolve_game_option(self, guild_id, game_identifier):
+        guild_config = self.get_guild_config(guild_id)
+        game_option = guild_config.games.get(game_identifier)
+        if (game_option is None):
+            # If discord unfortunately sent the name instead of value during
+            # autocomplete we need to check the name too.
+            for go in guild_config.games.values():
+                if go.name == game_identifier:
+                    game_option = go
+                    break
+        return game_option
+
+    async def _reject_unknown_game(self, interaction, game_identifier):
+        await interaction.response.send_message(
+            f"`{game_identifier}` is not a configured game for this server.",
+            ephemeral=True,
+        )
+
+    async def _direct_lfg(self, interaction, game_identifier, description,
+                          max_players, game_settings=None):
+        # Shared LFG-creation tail for the /lfg command (direct mode) and the
+        # dynamically-generated per-game commands.
+        game_option = self._resolve_game_option(interaction.guild_id, game_identifier)
+        if (game_option is None):
+            await self._reject_unknown_game(interaction, game_identifier)
+            return
+
+        if (max_players is not None and not (2 <= max_players <= 100)):
+            await interaction.response.send_message(
+                "`max_players` must be between 2 and 100.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer()
+        if (max_players is None):
+            max_guests = game_option.default_max_guests
+        else:
+            max_guests = max_players - 1
+        await self.create_lfg(
+            interaction, game_option, description or "", max_guests,
+            game_settings=game_settings,
+        )
+
     @staticmethod
     def parse_default_max_guests(max_players : str | None) -> int | None:
         if (not max_players):
@@ -410,70 +679,113 @@ class Matchmaking(commands.Cog):
             app_commands.Choice(name=game.name, value=game.command)
             for game in guild_config.games.values()
             if current.lower() in game.command.lower()
-        ][:25]
+        ][:common.AUTOCOMPLETE_LIMIT]
+
+    def _lfg_help_body(self, guild_config: GuildGamesConfig) -> str:
+        # Help body shared between /lfg and the per-game alias commands.
+        message = (
+            "Create a looking-for-group post using either the guided "
+            "menus or direct command arguments.\n"
+            "## Guided mode\n"
+            f"Use `/{LFG_COMMAND}` without arguments to choose a game and enter "
+            "the settings through the menus.\n"
+            f"Providing only the `game` argument "
+            f"(e.g. `/{LFG_COMMAND} game:root`) opens the settings "
+            "modal directly for that game.\n"
+            "## Direct mode\n"
+            f"`/{LFG_COMMAND} game:<game> [description:<text>] "
+            "[max_players:<number>]`\n"
+            "### game\n"
+            "The game/role to ping for this LFG post.\n"
+            "### description\n"
+            "Optional description for the game.\n"
+            "### max_players\n"
+            "Optional maximum number of players (including host) (2-100).\n"
+            "The LFG will automatically close when this number is reached.\n"
+            "Some games may have a default maximum number of players, which will be used if this argument is not provided.\n"
+        )
+        games = list(guild_config.games.values())
+        if (games):
+            alignment = len(max((game.command for game in games), key=len))
+            game_lines = []
+            for game in games:
+                line = f"- `{game.command.ljust(alignment)}`"
+                if (game.name):
+                    line += (
+                        " - "
+                        f"{utils.indefinite_article(game.name)} **{game.name}** game"
+                    )
+                settings = []
+                if (game.role):
+                    settings.append(f"role to ping: {game.role}")
+                if (game.forum):
+                    forum = game.forum
+                    if (forum.isdigit()):
+                        forum = f"<#{forum}>"
+                    settings.append(f"target forum: {forum}")
+                if (game.default_max_guests is not None):
+                    settings.append(f"players: {game.default_max_guests + 1}")
+                if (settings):
+                    line += " (" + ", ".join(settings) + ")"
+                line += "."
+                game_lines.append(line)
+            message += "## Available games\n" + "\n".join(game_lines)
+        else:
+            message += "## Available games\nNo games are configured for this server."
+        return message
+
+    def _game_parameters_help_lines(self, game_command: str) -> str | None:
+        """Render the game-parameters help section for a per-game command.
+
+        Returns None when the game has no configured parameters. Parameters
+        are direct-arguments-only (see _send_game_settings_modal), so the
+        section says so explicitly.
+        """
+        accepted_params = self.game_parameters.get(game_command)
+        if (not accepted_params):
+            return None
+        parameter_lines = [
+            f"- `{param_name}`: {', '.join(values)}"
+            for param_name, values in accepted_params.items()
+        ]
+        return (
+            "## Game parameters\n"
+            f"`/{game_command}` also accepts these arguments "
+            "(comma-separate for several values). They are only available "
+            "as command arguments, not in the guided menus:\n"
+            + "\n".join(parameter_lines)
+        )
 
     async def send_help(self, interaction: discord.Interaction, topic: str):
+        guild_config = self.get_guild_config(interaction.guild_id)
         if (topic == LFG_COMMAND):
+            message = f"# Help: /{LFG_COMMAND}\n" + self._lfg_help_body(guild_config)
+            await interaction.response.send_message(message, ephemeral=True)
+        elif (topic in guild_config.games):
+            # Server-specific per-game command: an alias for /lfg game:<topic>,
+            # so its help is the /lfg help preceded by an alias note, and —
+            # when the game has configured parameters — a parameters section.
             message = (
-                f"# Help: /{LFG_COMMAND}\n"
-                "Create a looking-for-group post using either the guided "
-                "menus or direct command arguments.\n"
-                "## Guided mode\n"
-                f"Use `/{LFG_COMMAND}` without arguments to choose a game and enter "
-                "the settings through the menus.\n"
-                "## Direct mode\n"
-                f"`/{LFG_COMMAND} game:<game> [description:<text>] "
-                "[max_players:<number>]`\n"
-                "### game\n"
-                "The game/role to ping for this LFG post.\n"
-                "### description\n"
-                "Optional description for the game.\n"
-                "### max_players\n"
-                "Optional maximum number of players (including host) (2-100).\n"
-                "The LFG will automatically close when this number is reached.\n"
-                "Some games may have a default maximum number of players, which will be used if this argument is not provided.\n"
+                f"# Help: /{topic}\n"
+                f"`/{topic}` is a shortcut for `/{LFG_COMMAND} game:{topic}` — "
+                f"the help for `/{LFG_COMMAND}` below applies to it as well.\n\n"
+                + self._lfg_help_body(guild_config)
             )
-            guild_config = self.get_guild_config(interaction.guild_id)
-            games = list(guild_config.games.values())
-            if (games):
-                alignment = len(max((game.command for game in games), key=len))
-                game_lines = []
-                for game in games:
-                    line = f"- `{game.command.ljust(alignment)}`"
-                    if (game.name):
-                        line += (
-                            " - "
-                            f"{utils.indefinite_article(game.name)} **{game.name}** game"
-                        )
-                    settings = []
-                    if (game.role):
-                        settings.append(f"role to ping: {game.role}")
-                    if (game.forum):
-                        forum = game.forum
-                        if (forum.isdigit()):
-                            forum = f"<#{forum}>"
-                        settings.append(f"target forum: {forum}")
-                    if (game.default_max_guests is not None):
-                        settings.append(f"players: {game.default_max_guests + 1}")
-                    if (settings):
-                        line += " (" + ", ".join(settings) + ")"
-                    line += "."
-                    game_lines.append(line)
-                message += "## Available games\n" + "\n".join(game_lines)
-            else:
-                message += "## Available games\nNo games are configured for this server."
+            parameters_section = self._game_parameters_help_lines(topic)
+            if (parameters_section is not None):
+                message += "\n" + parameters_section
             await interaction.response.send_message(message, ephemeral=True)
         elif (topic == RENAME_COMMAND):
             message = (
                 f"# Help: /{RENAME_COMMAND}\n"
                 "Rename a game thread created by the bot.\n"
+                "Only the host can rename a thread, and only threads created by the bot can be renamed.\n"
                 "## Guided mode\n"
                 f"`/{RENAME_COMMAND}` without arguments opens a modal to enter the new thread title.\n"
                 "## Direct mode\n"
                 f"`/{RENAME_COMMAND} title:<new title>`\n"
                 "### title\n"
                 "The new title for the thread.\n"
-                "Only the host can rename a thread, and only threads created by the bot can be renamed.\n"
             )
             await interaction.response.send_message(message, ephemeral=True)
         else:
@@ -501,9 +813,19 @@ class Matchmaking(commands.Cog):
                                        modal: discord.ui.Modal,
                                        select: discord.ui.Select
     ):
+        game_command = select.values[0]
+        await self._create_lfg_from_modal(interaction, modal, game_command)
+
+    async def _create_lfg_from_modal(self,
+                                     interaction: discord.Interaction,
+                                     modal: discord.ui.Modal,
+                                     game_command: str
+    ):
+        # Shared modal-confirmation tail for the guided mode of /lfg (after
+        # the game selection view or when only the game argument is given)
+        # and the per-game commands (game already known).
         await interaction.response.defer(ephemeral=True)
 
-        game_command = select.values[0]
         game_option = self.get_guild_config(interaction.guild_id).games.get(game_command)
 
         max_players = modal.max_players_number
@@ -512,6 +834,29 @@ class Matchmaking(commands.Cog):
         else:
             max_guests = max_players - 1
         await self.create_lfg(interaction, game_option, modal.description.value, max_guests)
+
+    async def _send_game_settings_modal(self, interaction: discord.Interaction,
+                                        game_identifier: str):
+        # Shared modal route: the game is already known (per-game slash
+        # commands, or /lfg with only the game argument), so the settings
+        # modal opens directly, without the game selection view.
+        # The modal deliberately holds only description and max_players:
+        # game parameters (games_parameters.ini) are direct-arguments-only,
+        # since Discord caps modals at 5 components.
+        game_option = self._resolve_game_option(interaction.guild_id, game_identifier)
+        if (game_option is None):
+            await self._reject_unknown_game(interaction, game_identifier)
+            return
+        game_command = game_option.command
+
+        async def on_confirm(modal_interaction: discord.Interaction,
+                             modal: discord.ui.Modal,
+                             _select: discord.ui.Select | None):
+            await self._create_lfg_from_modal(
+                modal_interaction, modal, game_command)
+
+        await interaction.response.send_modal(
+            GameSettingsModal(parent_select=None, on_confirm=on_confirm))
 
     async def process_join(self, interaction: discord.Interaction, context: LFGContext):
         if (context.host == interaction.user):
@@ -568,6 +913,12 @@ class Matchmaking(commands.Cog):
                     u.mention for u in sorted(list(context.users_to_notify), key=lambda x: x.id)
                 )
                 embed.add_field(name="Subscribed", value=sub_mentions, inline=False)
+            if (context.game_settings):
+                embed.add_field(
+                    name="Settings",
+                    value="\n".join(self._settings_lines(context.game_settings)),
+                    inline=False,
+                )
             try:
                 await message.edit(embed=embed)
             except Exception as error:
@@ -675,10 +1026,20 @@ class Matchmaking(commands.Cog):
 
         await self.remove_view(interaction)
 
+    @staticmethod
+    def _settings_lines(game_settings: dict[str, list[str]]) -> list[str]:
+        """Render a game settings dict as display lines (shared by embed writers
+        and the parser in ``LFGContext.from_interaction``)."""
+        return [
+            f"{param_name}: {', '.join(values)}"
+            for param_name, values in game_settings.items()
+        ]
+
     async def create_lfg(self, interaction: discord.Interaction,
                          game_option: GameOption,
                          description: str,
-                         max_guests: int | None):
+                         max_guests: int | None,
+                         game_settings: Optional[dict[str, list[str]]] = None):
         # Create an LFG post
         # Embed + buttons to interact
 
@@ -694,6 +1055,9 @@ class Matchmaking(commands.Cog):
 
         if (max_guests is not None):
             embed.add_field(name=f"Guests (0/{max_guests})", value="", inline=False)
+        
+        if (game_settings):
+            embed.add_field(name="Settings", value="\n".join(self._settings_lines(game_settings)), inline=False)
         
         author_avatar = common.DEFAULT_AVATAR_URL
         display_avatar = host.display_avatar
@@ -1085,44 +1449,18 @@ class Matchmaking(commands.Cog):
                   description: str | None = None,
                   max_players: app_commands.Range[int, 2, 100] | None = None,
                   ):
-        channel = interaction.channel
-        if (channel is not None and channel.type in THREAD_TYPES):
-            await interaction.response.send_message(
-                f"The `/{LFG_COMMAND}` command cannot be used inside a thread. "
-                f"Use `/{RENAME_COMMAND}` to rename a game thread.",
-                ephemeral=True,
-            )
-            return
-        if (channel is None or channel.type != discord.ChannelType.text):
-            await interaction.response.send_message(
-                f"The `/{LFG_COMMAND}` command can only be used in a server channel.",
-                ephemeral=True,
-            )
+        if (not await self._guard_lfg_channel(interaction, LFG_COMMAND)):
             return
 
         if (game is not None):
-            guild_config = self.get_guild_config(interaction.guild_id)
-            game_option = guild_config.games.get(game)
-            if (game_option is None):
-                # If discord unfortunately sent the name instead of value during autocomplete...
-                # We need to check the name too.
-                for go in guild_config.games.values():
-                    if go.name == game:
-                        game_option = go
-                        break
-            if (game_option is None):
-                await interaction.response.send_message(
-                    f"`{game}` is not a configured game for this server.",
-                    ephemeral=True,
-                )
+            if (description is None and max_players is None):
+                # Modal route: a game without settings, same guided modal as
+                # the per-game slash commands.
+                await self._send_game_settings_modal(interaction, game)
                 return
 
-            await interaction.response.defer()
-            if (max_players is None):
-                max_guests = game_option.default_max_guests
-            else:
-                max_guests = max_players - 1
-            await self.create_lfg(interaction, game_option, description or "", max_guests)
+            # Direct mode: same creation path as the per-game slash commands.
+            await self._direct_lfg(interaction, game, description, max_players)
             return
 
         if (description is not None or max_players is not None):
@@ -1149,7 +1487,12 @@ class Matchmaking(commands.Cog):
 
 async def setup(bot: commands.Bot):
     config = configparser.ConfigParser()
-    config.read('config/games.ini')
-    cog = Matchmaking(bot=bot, config=config)
+    config.read(GAMES_INI_PATH)
+    game_parameters = configparser.ConfigParser()
+    game_parameters.read(GAMES_PARAMETERS_PATH)
+    cog = Matchmaking(bot=bot, config=config, game_parameters=game_parameters)
     await bot.add_cog(cog)
     bot.add_view(LFGView(cog=cog))
+    # Register one guild-specific slash command per configured game. These are
+    # synced per guild by the bot's setup_hook after all cogs are loaded.
+    cog.register_guild_commands()

@@ -23,9 +23,14 @@ class Help(commands.Cog):
         interaction: discord.Interaction,
         current: str,
     ) -> list[app_commands.Choice[str]]:
+        messages = list(self.bot.tree.get_commands())
+        if (interaction.guild is not None):
+            # Include the guild-specific (per-game) slash commands.
+            messages.extend(self.bot.tree.get_commands(guild=interaction.guild))
+
         available_topics = {
             command.name
-            for command in self.bot.tree.get_commands()
+            for command in messages
             if command.name != common.HELP_COMMAND
         }
 
@@ -33,7 +38,7 @@ class Help(commands.Cog):
             app_commands.Choice(name=topic, value=topic)
             for topic in sorted(available_topics)
             if current.lower() in topic.lower()
-        ][:25]
+        ][:common.AUTOCOMPLETE_LIMIT]
 
     @app_commands.command(
         name=common.HELP_COMMAND,
@@ -43,6 +48,8 @@ class Help(commands.Cog):
     @app_commands.autocomplete(topic=topic_autocomplete)
     async def help(self, interaction: discord.Interaction, topic: str):
         command = self.bot.tree.get_command(topic)
+        if (command is None and interaction.guild is not None):
+            command = self.bot.tree.get_command(topic, guild=interaction.guild)
         if command is None:
             await interaction.response.send_message(
                 f"`/{topic}` is not currently available.",
@@ -50,7 +57,11 @@ class Help(commands.Cog):
             )
             return
 
+        # Per-game guild commands are not in the static map; the cog that
+        # registered the command records itself on the command's ``extras``.
         help_cog = self.bot.get_cog(HELP_COGS.get(topic, ""))
+        if (help_cog is None):
+            help_cog = getattr(command, "extras", {}).get("help_cog")
         if help_cog is None:
             await interaction.response.send_message(
                 "Help is currently unavailable.", ephemeral=True

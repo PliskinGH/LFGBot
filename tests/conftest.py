@@ -169,20 +169,42 @@ class FakeCommand:
 
 
 class FakeTree:
+    """Stands in for ``discord.app_commands.CommandTree``.
+
+    Supports global commands (``self._commands``) and per-guild commands
+    (``self._guild_commands``) keyed by guild id, mirroring the two code paths
+    the bot uses.
+    """
+
     def __init__(self, commands=None):
         self._commands = commands or []
+        self._guild_commands = {}
+        # Record of sync targets: guild ids, or None for a global sync.
+        self.sync_calls = []
 
-    def get_commands(self):
-        return self._commands
+    def add_command(self, command, /, *, guild=None, guilds=None, override=False):
+        if guild is not None:
+            self._guild_commands.setdefault(guild.id, []).append(command)
+        elif guilds is not None:
+            for g in guilds:
+                self._guild_commands.setdefault(g.id, []).append(command)
+        else:
+            self._commands.append(command)
 
-    def get_command(self, name):
-        for command in self._commands:
+    def get_commands(self, *, guild=None, type=None):
+        if guild is None:
+            return list(self._commands)
+        return list(self._guild_commands.get(guild.id, []))
+
+    def get_command(self, name, *, guild=None, type=None):
+        for command in self.get_commands(guild=guild):
             if command.name == name:
                 return command
         return None
 
-    async def sync(self, *args, **kwargs):
-        return list(self._commands)
+    async def sync(self, *args, guild=None, **kwargs):
+        self.sync_calls.append(None if guild is None else guild.id)
+        return list(self.get_commands(guild=guild))
 
 
 class FakeBot:
@@ -193,6 +215,7 @@ class FakeBot:
         self.user = FakeMember(1, "LFGBot")
         self._cogs = {}
         self._channels = {}
+        self.provided_guild_ids: set = set()
 
     def get_cog(self, cog_name):
         return self._cogs.get(cog_name)
@@ -220,6 +243,13 @@ def games_config() -> configparser.ConfigParser:
 
 
 @pytest.fixture
+def game_parameters_config() -> configparser.ConfigParser:
+    config = configparser.ConfigParser()
+    config.read(FIXTURES / "games_parameters.ini")
+    return config
+
+
+@pytest.fixture
 def rolls_config() -> configparser.ConfigParser:
     config = configparser.ConfigParser()
     config.read(FIXTURES / "rolls.ini")
@@ -232,18 +262,19 @@ def fake_bot():
 
 
 @pytest.fixture
-def matchmaking(fake_bot, games_config) -> Matchmaking:
-    return Matchmaking(bot=fake_bot, config=games_config)
+def matchmaking(fake_bot, games_config, game_parameters_config) -> Matchmaking:
+    return Matchmaking(bot=fake_bot, config=games_config,
+                       game_parameters=game_parameters_config)
 
 
 @pytest.fixture
 def descriptions():
     return [
-        {"title": "Autumn", "category": "Map", "color": 14520159},
-        {"title": "Winter", "category": "Map", "color": 16514303},
-        {"title": "Lake", "category": "Map", "color": 1752220},
-        {"title": "The Tower", "category": "Landmark", "color": 5127742},
-        {"title": "The Ferry", "category": "Landmark", "color": 11427369},
+        {"title": "Alpha", "category": "Map", "color": 14520159},
+        {"title": "Beta", "category": "Map", "color": 16514303},
+        {"title": "Gamma", "category": "Map", "color": 1752220},
+        {"title": "Delta", "category": "Landmark", "color": 5127742},
+        {"title": "Epsilon", "category": "Landmark", "color": 11427369},
     ]
 
 

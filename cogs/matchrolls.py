@@ -10,6 +10,11 @@ from common import common, utils
 
 RANDOM_COMMAND = "random"
 
+# Path to the rolls configuration (see rolls.ini).
+ROLLS_INI_PATH = 'config/rolls.ini'
+# Path to the JSON file holding the roll descriptions.
+ROLLS_DESCRIPTIONS_PATH = 'config/rolls_descriptions.json'
+
 class MatchRolls(commands.Cog):
 
     def __init__(self, bot: commands.Bot,
@@ -89,9 +94,7 @@ class MatchRolls(commands.Cog):
             app_commands.Choice(name=choice, value=choice)
             for choice in category_choices
             if current.lower() in choice.lower()
-        ][
-            :25
-        ]  # Discord allows max 25 returned options
+        ][:common.AUTOCOMPLETE_LIMIT]
 
     # random
     @app_commands.command(
@@ -152,10 +155,9 @@ class MatchRolls(commands.Cog):
 # Mandatory setup function for extensions
 async def setup(bot: commands.Bot):
     config = configparser.ConfigParser()
-    config.read('config/rolls.ini')
-    
-    json_file = open('config/rolls_descriptions.json', encoding="utf8")
-    descriptions = json.load(json_file)
-    json_file.close()
+    config.read(ROLLS_INI_PATH)
+
+    with open(ROLLS_DESCRIPTIONS_PATH, encoding="utf8") as json_file:
+        descriptions = json.load(json_file)
 
     await bot.add_cog(MatchRolls(bot, config, descriptions))
