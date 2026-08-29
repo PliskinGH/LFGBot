@@ -48,15 +48,20 @@ class LFGBot(commands.Bot):
                 await self.load_extension(f"cogs.{filename}")
                 print(f"Loaded cog package: {filename}")
 
-        # Sync commands globally (can take up to 1 hour to propagate everywhere).
         # FOR QUICK TESTING: Sync to specific test guilds for instant updates.
         if (TEST_GUILD_IDS):
             for guild_id in TEST_GUILD_IDS:
                 print(f"Syncing slash commands for test guild {guild_id}...")
                 TEST_GUILD = discord.Object(id=guild_id)
                 self.tree.copy_global_to(guild=TEST_GUILD)
-                test_synced = await self.tree.sync(guild=TEST_GUILD)
-                print(f"Synced {len(test_synced)} command(s) for test guild {guild_id}.")
+                try:
+                    test_synced = await self.tree.sync(guild=TEST_GUILD)
+                    print(f"Synced {len(test_synced)} command(s) for test guild {guild_id}.")
+                except discord.HTTPException as error:
+                    # e.g. the bot is no longer on that guild (Missing Access)
+                    # or the guild no longer exists. Log and continue so one
+                    # stale guild does not prevent the bot from starting.
+                    print(f"Failed to sync commands for test guild {guild_id}: {error}")
         else:
             # Cog setup() may have registered guild-specific slash commands and
             # recorded the target guilds in self.provided_guild_ids. Sync each of
@@ -65,9 +70,15 @@ class LFGBot(commands.Bot):
             for guild_id in sorted(self.provided_guild_ids):
                 print(f"Syncing per-guild commands for guild {guild_id}...")
                 guild = discord.Object(id=guild_id)
-                synced = await self.tree.sync(guild=guild)
-                print(f"Synced {len(synced)} command(s) for guild {guild_id}.")
-            # Sync slash commands with Discord after all Cogs are loaded
+                try:
+                    synced = await self.tree.sync(guild=guild)
+                    print(f"Synced {len(synced)} command(s) for guild {guild_id}.")
+                except discord.HTTPException as error:
+                    # e.g. the bot is no longer on that guild (Missing Access)
+                    # or the guild no longer exists. Log and continue so one
+                    # stale guild does not prevent the bot from starting.
+                    print(f"Failed to sync commands for guild {guild_id}: {error}")
+            # Sync global slash commands
             print("Syncing slash commands...")
             synced = await self.tree.sync()
             print(f"Synced {len(synced)} command(s) globally.")
