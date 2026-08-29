@@ -9,6 +9,7 @@ import pytest
 
 from cogs.matchmaking.cog import Matchmaking
 from cogs.matchmaking.constants import LFG_COMMAND, RENAME_COMMAND
+from common.utils import format_accepted_values
 from cogs.matchmaking.models import LFGContext
 from cogs.matchmaking.views import GameSettingsModal, ThreadRenameModal
 
@@ -416,7 +417,7 @@ class TestSettingsPersistence:
         embed.add_field(name="Target", value="<@&111>", inline=True)
         embed.add_field(name="Host", value=host.mention, inline=True)
         embed.add_field(name="Guests (0/4)", value="", inline=False)
-        embed.add_field(name="Settings", value="param1: alpha, delta\nparam2: first", inline=False)
+        embed.add_field(name="Settings", value="param1: Alpha One, Delta Four\nparam2: First Choice", inline=False)
 
         message = FakeMessage([embed])
         interaction = FakeInteraction(
@@ -424,6 +425,8 @@ class TestSettingsPersistence:
         )
 
         # Reconstruct the context exactly as a button press would, then join.
+        # The Settings field shows display names; they normalize back to the
+        # raw values stored in the context.
         context = await LFGContext.from_interaction(matchmaking, interaction)
         assert context.game_settings == {"param1": ["alpha", "delta"], "param2": ["first"]}
 
@@ -435,8 +438,8 @@ class TestSettingsPersistence:
         settings_field = next(
             field for field in updated_embed.fields if field.name == "Settings"
         )
-        assert "param1: alpha, delta" in settings_field.value
-        assert "param2: first" in settings_field.value
+        assert "param1: Alpha One, Delta Four" in settings_field.value
+        assert "param2: First Choice" in settings_field.value
 
 
 class TestProcessCancel:
@@ -535,22 +538,33 @@ class TestParamAutocomplete:
         interaction = FakeInteraction(user=FakeMember(1, "host"), guild_id=1)
 
         choices = await autocomplete(interaction, "al")
-        assert [(c.name, c.value) for c in choices] == [("alpha", "alpha")]
+        # The choice is the full composed string (name == value), so whichever
+        # the client writes into the field, the prefix is preserved.
+        assert [(c.name, c.value) for c in choices] == [("Alpha One", "Alpha One")]
+
+    @pytest.mark.asyncio
+    async def test_filters_by_display_name(self, matchmaking):
+        autocomplete = matchmaking._make_param_autocomplete("game_a", "param1")
+        interaction = FakeInteraction(user=FakeMember(1, "host"), guild_id=1)
+
+        # Filtering matches the display name too, not just the raw value.
+        choices = await autocomplete(interaction, "gamma t")
+        assert [(c.name, c.value) for c in choices] == [("Gamma Three", "Gamma Three")]
 
     @pytest.mark.asyncio
     async def test_composes_choices_with_existing_prefix(self, matchmaking):
         autocomplete = matchmaking._make_param_autocomplete("game_a", "param1")
         interaction = FakeInteraction(user=FakeMember(1, "host"), guild_id=1)
 
-        # Discord replaces the whole field with the picked choice's value, so
-        # after a comma the choices carry the existing picks as a prefix:
-        # picking one appends it instead of overwriting it. Both name and value
-        # are the composed string, because some clients commit the choice by
-        # writing its name; making them identical preserves the prefix either
-        # way. The already-present value is not suggested again.
+        # Discord replaces the whole field with the picked choice's name, so
+        # after a comma the choices carry the existing picks as a prefix and
+        # picking one appends it instead of overwriting it. Name and value are
+        # both the composed display-name string, so whichever the client writes
+        # the prefix survives; _parse_param_values resolves display names back
+        # to raw values. The already-present value is not suggested again.
         choices = await autocomplete(interaction, "beta,")
 
-        composed = {"beta,alpha", "beta,gamma", "beta,delta"}
+        composed = {"beta,Alpha One", "beta,Gamma Three", "beta,Delta Four"}
         assert {c.value for c in choices} == composed
         assert {c.name for c in choices} == composed
 
@@ -561,27 +575,33 @@ class TestParamAutocomplete:
 
         choices = await autocomplete(interaction, "alpha, b")
 
-        assert [(c.name, c.value) for c in choices] == [("alpha,beta", "alpha,beta")]
+        assert [(c.name, c.value) for c in choices] == [("alpha,Beta Two", "alpha,Beta Two")]
 
     @pytest.mark.asyncio
     async def test_composed_values_over_100_chars_are_skipped(self, matchmaking):
         long_value = "x" * 99
-        matchmaking.game_parameters["game_a"] = {"param1": [long_value, "ok", "ok2"]}
+        matchmaking.game_parameters["game_a"] = {
+            "param1": {long_value: long_value, "ok": "OK", "ok2": "OK2"}}
         autocomplete = matchmaking._make_param_autocomplete("game_a", "param1")
         interaction = FakeInteraction(user=FakeMember(1, "host"), guild_id=1)
 
         # Without a prefix the 99-char value still fits the 100-char cap.
         choices = await autocomplete(interaction, "")
-        assert {c.value for c in choices} == {long_value, "ok", "ok2"}
+        assert {c.value for c in choices} == {long_value, "OK", "OK2"}
 
         # With a prefix, composing the 99-char value would exceed the cap, so
         # only the short values are offered.
         choices = await autocomplete(interaction, "ok,")
-        assert {c.value for c in choices} == {"ok,ok2"}
+        assert {c.value for c in choices} == {"ok,OK2"}
 
 
 class TestParamParsing:
-    ACCEPTED = ["alpha", "beta", "gamma", "delta"]
+    ACCEPTED = {
+        "alpha": "Alpha One",
+        "beta": "Beta Two",
+        "gamma": "Gamma Three",
+        "delta": "Delta Four",
+    }
 
     def test_valid_multi_values(self, matchmaking):
         values, invalid = matchmaking._parse_param_values(
@@ -602,6 +622,20 @@ class TestParamParsing:
         values, invalid = matchmaking._parse_param_values("", self.ACCEPTED)
         assert invalid is None
         assert values == []
+
+    def test_display_names_are_normalized_to_values(self, matchmaking):
+        # A client may commit an autocomplete choice by writing its display
+        # name; display names resolve back to raw values (case-insensitively).
+        values, invalid = matchmaking._parse_param_values(
+            "Alpha One, beta", self.ACCEPTED)
+        assert invalid is None
+        assert values == ["alpha", "beta"]
+
+    def test_display_name_case_insensitive(self, matchmaking):
+        values, invalid = matchmaking._parse_param_values(
+            "alpha one", self.ACCEPTED)
+        assert invalid is None
+        assert values == ["alpha"]
 
 
 class TestGameCommandModal:
@@ -765,7 +799,7 @@ class TestGameParametersHelp:
         # Every configured parameter is listed with its accepted values
         # (derived from the fixture config).
         for param_name, values in matchmaking.game_parameters["game_a"].items():
-            assert f"- `{param_name}`: {', '.join(values)}" in content
+            assert f"- `{param_name}`: {format_accepted_values(values)}" in content
         # The parameters section comes after the shared /lfg help body.
         assert content.index("## Available games") < content.index("## Game parameters")
 
@@ -800,4 +834,6 @@ class TestCreateLfgSettings:
         settings_value = [
             field.value for field in embed.fields if field.name == "Settings"
         ][0]
-        assert "param1: alpha, delta" in settings_value
+        # Raw values in the settings dict are rendered with their display names.
+        assert "param1: Alpha One, Delta Four" in settings_value
+        assert "param2: First Choice" in settings_value

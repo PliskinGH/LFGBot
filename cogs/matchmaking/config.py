@@ -14,17 +14,19 @@ class ConfigMixin:
     def _load_game_parameters(self, parameters_config: configparser.ConfigParser):
         """Parse a game-parameters config into self.game_parameters.
 
-        Each section is a game command; each key is a parameter name and the
-        value is the comma-separated list of acceptable values for it.
+        Each section is a game command; each key is a parameter name whose
+        value is either a comma-separated list of acceptable values or a list
+        of (value, display name) pairs (see ``utils.parse_param_entries``).
+        Parameters are stored as ``{value: display_name}`` maps.
         """
         if (parameters_config is None):
             return
         for game_command in parameters_config.sections():
             self.game_parameters[game_command] = {}
             for param_name, raw_values in parameters_config.items(game_command):
-                values = [value.strip() for value in raw_values.split(",") if value.strip()]
-                if (values):
-                    self.game_parameters[game_command][param_name] = values
+                value_display = utils.parse_param_entries(raw_values)
+                if (value_display):
+                    self.game_parameters[game_command][param_name] = value_display
 
     def _load_guild_config(self, guild_config: GuildGamesConfig,
                            config: configparser.ConfigParser,

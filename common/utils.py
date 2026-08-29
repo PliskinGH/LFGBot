@@ -91,3 +91,95 @@ def safe_list_get (l, idx, default):
     return l[idx]
   except IndexError:
     return default
+
+def parse_param_entries(raw_value: str) -> dict[str, str]:
+    """Parse a game-parameter config line into a ``{value: display_name}`` map.
+
+    Accepts both bare comma-separated values (``a, b``, display == value)
+    and parenthesized value/display pairs (``(a, A), (b, B)``). No quoting
+    is required: parentheses delimit each pair and the first comma inside
+    them separates value from display, so display names may contain commas.
+    """
+    value_display = {}
+    for entry in _split_param_entries(raw_value):
+        if (not entry):
+            continue
+        if (entry.startswith("(") and entry.endswith(")")):
+            inner = entry[1:-1].strip()
+            value, _, display = inner.partition(",")
+            value = value.strip()
+            display = display.strip()
+        else:
+            value = display = entry.strip()
+        if (value):
+            value_display[value] = display or value
+    return value_display
+
+def _split_param_entries(raw_value: str) -> list[str]:
+    """Split a game-parameter config line on top-level commas (not inside parens)."""
+    entries = []
+    depth = 0
+    current = []
+    for char in raw_value:
+        if (char == "("):
+            depth += 1
+        elif (char == ")"):
+            depth -= 1
+        if (char == "," and depth == 0):
+            entries.append("".join(current).strip())
+            current = []
+        else:
+            current.append(char)
+    if (current):
+        entries.append("".join(current).strip())
+    return entries
+
+def normalize_param_values(values: list[str], value_display: dict[str, str]) -> list[str]:
+    """Resolve parameter display names back to their raw values.
+
+    ``values`` may mix raw values and display names (e.g. when a Discord
+    client commits an autocomplete choice by writing its name). Raw values
+    and unknown tokens are left unchanged so callers can validate them.
+    """
+    display_to_value = {
+        display.lower(): value for value, display in value_display.items()
+    }
+    normalized = []
+    for value in values:
+        if (value in value_display):
+            normalized.append(value)
+        elif (value.lower() in display_to_value):
+            normalized.append(display_to_value[value.lower()])
+        else:
+            normalized.append(value)
+    return normalized
+
+def render_param_values(values: list[str], value_display: dict[str, str]) -> list[str]:
+    """Map parameter raw values to their display names for user-facing rendering.
+
+    Tokens that are already display names (or unknown) are kept as-is.
+    """
+    display_to_value = {
+        display.lower(): value for value, display in value_display.items()
+    }
+    rendered = []
+    for value in values:
+        if (value in value_display):
+            rendered.append(value_display[value])
+        elif (value.lower() in display_to_value):
+            rendered.append(value)
+        else:
+            rendered.append(value)
+    return rendered
+
+def format_accepted_values(value_display: dict[str, str]) -> str:
+    """Render a ``{value: display_name}`` map as a comma-separated summary.
+
+    Used in help text and error messages, e.g.
+    ``adset (Advanced), standard``. Display names equal to their value are
+    shown bare.
+    """
+    return ", ".join(
+        display if display == value else f"{value} ({display})"
+        for value, display in value_display.items()
+    )

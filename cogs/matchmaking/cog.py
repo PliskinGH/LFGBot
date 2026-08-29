@@ -45,7 +45,7 @@ class Matchmaking(ConfigMixin, GuildCommandsMixin, HelpMixin,
 
         self.custom_emoji_re = re.compile(r"<:[\w]+:[\d]+>")
 
-        # game_command -> { parameter_name -> [accepted values] }
-        self.game_parameters: dict[str, dict[str, list[str]]] = {}
+        # game_command -> { parameter_name -> { value: display_name } }
+        self.game_parameters: dict[str, dict[str, dict[str, str]]] = {}
         self._load_game_parameters(game_parameters)
 

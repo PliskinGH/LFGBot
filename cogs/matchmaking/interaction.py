@@ -196,7 +196,9 @@ class InteractionMixin:
             if (context.game_settings):
                 embed.add_field(
                     name="Settings",
-                    value="\n".join(self._settings_lines(context.game_settings)),
+                    value="\n".join(self._settings_lines(
+                        context.game_option.command if context.game_option else None,
+                        context.game_settings)),
                     inline=False,
                 )
             try:
@@ -306,12 +308,14 @@ class InteractionMixin:
 
         await self.remove_view(interaction)
 
-    @staticmethod
-    def _settings_lines(game_settings: dict[str, list[str]]) -> list[str]:
-        """Render a game settings dict as display lines (shared by embed writers
-        and the parser in ``LFGContext.from_interaction``)."""
+    def _settings_lines(self, game_command: str | None,
+                        game_settings: dict[str, list[str]]) -> list[str]:
+        """Render a game settings dict as display lines, mapping raw values to
+        their display names from the game's parameter configuration. Unknown
+        or already-displayed tokens are kept as-is."""
+        param_mappings = self.game_parameters.get(game_command or "", {})
         return [
-            f"{param_name}: {', '.join(values)}"
+            f"{param_name}: {', '.join(utils.render_param_values(values, param_mappings.get(param_name, {})))}"
             for param_name, values in game_settings.items()
         ]
 
@@ -337,7 +341,7 @@ class InteractionMixin:
             embed.add_field(name=f"Guests (0/{max_guests})", value="", inline=False)
         
         if (game_settings):
-            embed.add_field(name="Settings", value="\n".join(self._settings_lines(game_settings)), inline=False)
+            embed.add_field(name="Settings", value="\n".join(self._settings_lines(game_option.command, game_settings)), inline=False)
         
         author_avatar = common.DEFAULT_AVATAR_URL
         display_avatar = host.display_avatar

@@ -75,7 +75,7 @@ class HelpMixin:
         if (not accepted_params):
             return None
         parameter_lines = [
-            f"- `{param_name}`: {', '.join(values)}"
+            f"- `{param_name}`: {utils.format_accepted_values(values)}"
             for param_name, values in accepted_params.items()
         ]
         return (

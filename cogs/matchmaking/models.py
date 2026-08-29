@@ -157,7 +157,11 @@ class LFGContext(object):
                     users_to_notify.add(member)
             break
 
-        # Recover Game Settings from the Settings field
+        # Recover Game Settings from the Settings field. The field shows
+        # display names (see InteractionMixin._settings_lines), so normalize
+        # them back to raw values using the game's parameter configuration.
+        game_command = game_option.command if game_option else None
+        param_mappings = cog.game_parameters.get(game_command, {})
         game_settings = {}
         for field in embed.fields:
             if field.name != "Settings":
@@ -167,7 +171,8 @@ class LFGContext(object):
                     key, rest = line.split(": ", 1)
                     values = [v.strip() for v in rest.split(",") if v.strip()]
                     if (values):
-                        game_settings[key] = values
+                        game_settings[key] = utils.normalize_param_values(
+                            values, param_mappings.get(key, {}))
             break
 
         context = cls(game_option=game_option,

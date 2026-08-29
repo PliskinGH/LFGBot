@@ -6,7 +6,7 @@ from typing import Optional
 import discord
 from discord import app_commands
 
-from common import common
+from common import common, utils
 
 from . import constants
 
@@ -102,20 +102,21 @@ class GuildCommandsMixin:
         return game_callback
 
     def _make_param_autocomplete(self, game_command: str, param_name: str):
-        accepted_values = self.game_parameters.get(game_command, {}).get(param_name, [])
+        accepted_values = self.game_parameters.get(game_command, {}).get(param_name, {})
 
         async def autocomplete(interaction, current):
-            # Discord replaces the whole field with the picked choice's value,
-            # so each choice's value is composed with the existing field prefix
-            # (everything up to the last comma): picking a value appends it as
-            # an additional comma-separated value instead of overwriting the
-            # previously picked ones.
+            # Discord replaces the whole field with the picked choice's name
+            # (this client commits choices by writing their name), so the
+            # choice's name must be the full composed field content: the
+            # existing prefix (everything up to the last comma) plus the picked
+            # display name. Picking a value then appends it as an additional
+            # comma-separated value instead of overwriting the previous picks.
             #
-            # The choice's display name is the composed string too: some Discord
-            # clients commit the choice by writing its name rather than its
-            # value, and using the bare value as the name would then discard
-            # the prefix (overwriting earlier picks). With both equal, either
-            # write path preserves the full composed value.
+            # The value is identical to the name, so whichever the client
+            # writes the field ends up the same. Display names are used, so
+            # the field (and dropdown) show the friendly names; _parse_param_values
+            # resolves them back to the raw values, and hand-typed raw values
+            # are accepted too.
             prefix = current[: current.rfind(",") + 1]
             last_token = current[len(prefix):].strip().lower()
             already_present = {
@@ -123,12 +124,14 @@ class GuildCommandsMixin:
             }
 
             choices = []
-            for value in accepted_values:
-                if (last_token and last_token not in value.lower()):
+            for value, display in accepted_values.items():
+                if (last_token
+                        and last_token not in value.lower()
+                        and last_token not in display.lower()):
                     continue
-                if (value.lower() in already_present):
+                if (value.lower() in already_present or display.lower() in already_present):
                     continue
-                composed = prefix + value
+                composed = prefix + display
                 if (len(composed) > 100):  # Choice string values cap at 100 chars.
                     continue
                 choices.append(app_commands.Choice(name=composed, value=composed))
@@ -141,10 +144,27 @@ class GuildCommandsMixin:
 
     @staticmethod
     def _parse_param_values(raw_value, accepted_values):
+        """Parse a comma-separated user input against a {value: display} map.
+
+        Accepts raw values and display names (a client may commit an
+        autocomplete choice by writing its name); returns the normalized raw
+        values, or (None, invalid_tokens) when something is not acceptable.
+        """
         if (raw_value is None):
             return None, None
-        provided = [value.strip() for value in raw_value.split(",") if value.strip()]
-        invalid = [value for value in provided if value not in accepted_values]
+        display_to_value = {
+            display.lower(): value
+            for value, display in accepted_values.items()
+        }
+        provided = []
+        invalid = []
+        for token in (part.strip() for part in raw_value.split(",") if part.strip()):
+            if (token in accepted_values):
+                provided.append(token)
+            elif (token.lower() in display_to_value):
+                provided.append(display_to_value[token.lower()])
+            else:
+                invalid.append(token)
         if (invalid):
             return None, invalid
         return provided, None
@@ -170,7 +190,7 @@ class GuildCommandsMixin:
             if (invalid is not None):
                 await interaction.response.send_message(
                     f"Invalid value(s) for `{param_name}`: {', '.join(invalid)}.\n"
-                    f"Valid values: {', '.join(accepted_values)}.",
+                    f"Valid values: {utils.format_accepted_values(accepted_values)}.",
                     ephemeral=True,
                 )
                 return
