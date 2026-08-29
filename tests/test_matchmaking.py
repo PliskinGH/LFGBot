@@ -7,14 +7,10 @@ from types import SimpleNamespace
 import discord
 import pytest
 
-from cogs.matchmaking import (
-    LFG_COMMAND,
-    RENAME_COMMAND,
-    GameSettingsModal,
-    LFGContext,
-    Matchmaking,
-    ThreadRenameModal,
-)
+from cogs.matchmaking.cog import Matchmaking
+from cogs.matchmaking.constants import LFG_COMMAND, RENAME_COMMAND
+from cogs.matchmaking.models import LFGContext
+from cogs.matchmaking.views import GameSettingsModal, ThreadRenameModal
 
 from tests.conftest import (
     FakeBot,

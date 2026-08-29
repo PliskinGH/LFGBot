@@ -20,7 +20,8 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from cogs.matchmaking import LFGContext, Matchmaking
+from cogs.matchmaking.cog import Matchmaking
+from cogs.matchmaking.models import LFGContext
 from cogs.matchrolls import MatchRolls
 
 

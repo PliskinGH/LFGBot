@@ -39,6 +39,14 @@ class LFGBot(commands.Bot):
                 # Load extension using dot-notation: cogs.filename (without .py)
                 await self.load_extension(f"cogs.{filename[:-3]}")
                 print(f"Loaded cog: {filename[:-3]}")
+            elif (os.path.isdir(os.path.join("./cogs", filename))
+                  and os.path.exists(os.path.join("./cogs", filename, "__init__.py"))
+                  and not os.path.exists(os.path.join("./cogs", filename + ".py"))):
+                # Cog package (e.g. cogs/matchmaking/). Loaded only when the
+                # single-file version is absent, so both can coexist during a
+                # migration without loading the same extension twice.
+                await self.load_extension(f"cogs.{filename}")
+                print(f"Loaded cog package: {filename}")
 
         # Sync commands globally (can take up to 1 hour to propagate everywhere).
         # FOR QUICK TESTING: Sync to specific test guilds for instant updates.
