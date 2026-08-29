@@ -1,5 +1,6 @@
 """Tests for the ``cogs/matchmaking.py`` cog."""
 import asyncio
+import aiohttp
 import configparser
 import inspect
 from types import SimpleNamespace
@@ -7,9 +8,9 @@ from types import SimpleNamespace
 import discord
 import pytest
 
+from common import common
 from cogs.matchmaking.cog import Matchmaking
 from cogs.matchmaking.constants import LFG_COMMAND, RENAME_COMMAND
-from common.utils import format_accepted_values
 from cogs.matchmaking.models import LFGContext
 from cogs.matchmaking.views import GameSettingsModal, ThreadRenameModal
 
@@ -94,47 +95,105 @@ class TestSendHelp:
         interaction = FakeInteraction(user=FakeMember(1, "host"), guild_id=1)
         _run(matchmaking.send_help(interaction, LFG_COMMAND))
 
-        content = interaction.response.messages[0][0]
+        # The usage instructions stay in the content; the games list (which
+        # grows with the number of games) goes in an embed.
+        content, embeds = interaction.response.messages[0][0], interaction.response.messages[0][1]
         assert f"# Help: /{LFG_COMMAND}" in content
         assert f"`/{LFG_COMMAND} game:<game>" in content
-        assert "- `game_a`" in content
-        assert "<@&111>" in content
-        assert "No games are configured" not in content
+        games_embed = embeds[0]
+        assert games_embed.title == "Available games"
+        assert "- `game_a`" in games_embed.description
+        assert "<@&111>" in games_embed.description
+        assert "No games are configured" not in games_embed.description
 
     def test_rename_help_includes_usage(self, matchmaking):
         interaction = FakeInteraction(user=FakeMember(1, "host"), guild_id=1)
         _run(matchmaking.send_help(interaction, RENAME_COMMAND))
 
         content = interaction.response.messages[0][0]
+        assert interaction.response.messages[0][1] is None
         assert f"# Help: /{RENAME_COMMAND}" in content
         assert f"`/{RENAME_COMMAND} title:<new title>`" in content
         assert f"`/{RENAME_COMMAND}` without arguments" in content
 
     def test_game_command_help_signals_alias_and_pastes_lfg_help(self, matchmaking):
         # game_b has no configured parameters, so its help is exactly the /lfg
-        # help (parametrized games additionally get a parameters section,
-        # covered in TestGameParametersHelp).
+        # usage plus a games embed (parametrized games additionally get a
+        # parameters embed, covered in TestGameParametersHelp).
         interaction = FakeInteraction(user=FakeMember(1, "host"), guild_id=1)
         _run(matchmaking.send_help(interaction, "game_b"))
 
-        content = interaction.response.messages[0][0]
+        content, embeds = interaction.response.messages[0][0], interaction.response.messages[0][1]
         assert "# Help: /game_b" in content
         assert f"`/game_b` is a shortcut for `/{LFG_COMMAND} game:game_b`" in content
+        # One embed: the games list.
+        assert [embed.title for embed in embeds] == ["Available games"]
 
-        # Everything after the alias note is the exact /lfg help body.
+        # Everything after the alias note is the exact /lfg usage.
         lfg_interaction = FakeInteraction(user=FakeMember(1, "host"), guild_id=1)
         _run(matchmaking.send_help(lfg_interaction, LFG_COMMAND))
         lfg_content = lfg_interaction.response.messages[0][0]
         assert content.endswith(lfg_content.split("\n", 1)[1])
-        assert "## Available games" in content
+        # The games list is in the embed (the title carries the heading).
+        assert "- `game_a`" in embeds[0].description
 
     def test_unknown_topic_falls_back_to_generic_help(self, matchmaking):
         interaction = FakeInteraction(user=FakeMember(1, "host"), guild_id=1)
         _run(matchmaking.send_help(interaction, "unknown"))
         content = interaction.response.messages[0][0]
-        assert "# Help: /unknown" in content
+        assert interaction.response.messages[0][1] is None
         assert "# Help: /unknown" in content
         assert "No detailed help is available" in content
+
+
+class TestHelpLengths:
+    """Help content and embed descriptions stay within Discord's limits."""
+
+    def _matchmaking_with_many_games(self):
+        # 200 games with roles: the games list would overflow the embed
+        # description without the truncation guard.
+        config = configparser.ConfigParser()
+        commands = ", ".join(f"game{i}" for i in range(200))
+        names = ", ".join(f"Game {i}" for i in range(200))
+        roles = ", ".join(f"<@&{100 + i}>" for i in range(200))
+        config.read_string(
+            "[DEFAULT]\n"
+            f"GamesCommands = {commands}\n"
+            f"GamesFullNames = {names}\n"
+            f"GamesRoles = {roles}\n"
+        )
+        params = configparser.ConfigParser()
+        params.read_string(
+            "[game0]\n"
+            "setup = game_setup: (a, Alpha), (b, Beta)\n"
+            "landmarks = landmarks: (x, X), (y, Y), (z, Z)\n"
+        )
+        return Matchmaking(bot=FakeBot(), config=config, game_parameters=params)
+
+    def test_long_help_stays_within_discord_limits(self):
+        matchmaking = self._matchmaking_with_many_games()
+
+        for topic in (LFG_COMMAND, "game0", RENAME_COMMAND):
+            interaction = FakeInteraction(user=FakeMember(1, "host"), guild_id=1)
+            _run(matchmaking.send_help(interaction, topic))
+
+            content, embeds = (interaction.response.messages[0][0],
+                               interaction.response.messages[0][1])
+            assert len(content) <= common.MESSAGE_CONTENT_LIMIT
+            for embed in (embeds or []):
+                assert len(embed.description) <= common.EMBED_DESCRIPTION_LIMIT
+
+    def test_games_embed_is_truncated_when_too_long(self):
+        matchmaking = self._matchmaking_with_many_games()
+        interaction = FakeInteraction(user=FakeMember(1, "host"), guild_id=1)
+
+        _run(matchmaking.send_help(interaction, LFG_COMMAND))
+
+        embeds = interaction.response.messages[0][1]
+        games_embed = embeds[0]
+        # Truncated to exactly the limit, signalling the cut.
+        assert len(games_embed.description) == common.EMBED_DESCRIPTION_LIMIT
+        assert games_embed.description.endswith("...")
 
 
 class TestRenameCommand:
@@ -709,6 +768,518 @@ class TestGameCommandModal:
         assert guests == ["Guests (0/1)"]
 
 
+class FakeMatchApiResponse:
+    """Stands in for aiohttp's response inside register_match."""
+
+    def __init__(self, status, payload, error_text=""):
+        self.status = status
+        self._payload = payload
+        self._error_text = error_text
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def text(self):
+        return self._error_text
+
+    async def json(self):
+        return self._payload
+
+
+class FakeMatchApiSession:
+    """Stands in for aiohttp.ClientSession inside register_match."""
+
+    def __init__(self, metadata=None, options_status=200,
+                 post_status=201, post_payload=None, error_text="",
+                 post_exception=None):
+        self.metadata = metadata
+        self.options_status = options_status
+        self.post_status = post_status
+        self.post_payload = post_payload if post_payload is not None else {"id": 42}
+        self.error_text = error_text
+        self.post_exception = post_exception
+        self.posted = None
+        self.options_calls = 0
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    def options(self, url):
+        self.options_calls += 1
+        return FakeMatchApiResponse(self.options_status, self.metadata)
+
+    def post(self, url, json=None):
+        self.posted = json
+        if self.post_exception is not None:
+            raise self.post_exception
+        return FakeMatchApiResponse(self.post_status, self.post_payload, self.error_text)
+
+
+class FakeThread:
+    """Stands in for a discord.Thread inside register_match."""
+
+    def __init__(self):
+        self.sent = []
+        self.jump_url = "https://discord.com/channels/1/1/1"
+
+    async def send(self, content=None, **kwargs):
+        self.sent.append(content)
+
+
+class TestAddGameSettingsPayload:
+    FIELD_MAP = {"param1": "field_one", "param2": "field_two"}
+    MULTI_FIELDS = {"field_two"}
+
+    def test_single_value_wired_when_exactly_one(self, matchmaking):
+        payload = {}
+        matchmaking._add_game_settings_payload(
+            payload, {"param1": ["alpha"]}, self.FIELD_MAP, self.MULTI_FIELDS)
+        assert payload == {"field_one": "alpha"}
+
+    def test_single_value_left_blank_when_multiple(self, matchmaking):
+        payload = {}
+        matchmaking._add_game_settings_payload(
+            payload, {"param1": ["alpha", "beta"]}, self.FIELD_MAP, self.MULTI_FIELDS)
+        assert payload == {}
+
+    def test_single_value_left_blank_when_empty(self, matchmaking):
+        payload = {}
+        matchmaking._add_game_settings_payload(
+            payload, {"param1": []}, self.FIELD_MAP, self.MULTI_FIELDS)
+        assert payload == {}
+
+    def test_multi_value_wired_as_list(self, matchmaking):
+        payload = {}
+        matchmaking._add_game_settings_payload(
+            payload, {"param2": ["first", "second"]}, self.FIELD_MAP, self.MULTI_FIELDS)
+        assert payload == {"field_two": ["first", "second"]}
+
+    def test_multi_value_with_single_value_still_list(self, matchmaking):
+        payload = {}
+        matchmaking._add_game_settings_payload(
+            payload, {"param2": ["first"]}, self.FIELD_MAP, self.MULTI_FIELDS)
+        assert payload == {"field_two": ["first"]}
+
+    def test_parameter_without_field_is_ignored(self, matchmaking):
+        payload = {"title": "T"}
+        matchmaking._add_game_settings_payload(
+            payload, {"param3": ["yes"]}, self.FIELD_MAP, self.MULTI_FIELDS)
+        assert payload == {"title": "T"}
+
+    def test_unknown_parameters_ignored(self, matchmaking):
+        payload = {"title": "T"}
+        matchmaking._add_game_settings_payload(
+            payload, {"unknown": ["x"]}, self.FIELD_MAP, self.MULTI_FIELDS)
+        assert payload == {"title": "T"}
+
+    def test_unknown_metadata_treats_fields_as_single(self, matchmaking):
+        # Metadata failure (None): every field is wired as single-valued.
+        payload = {}
+        matchmaking._add_game_settings_payload(
+            payload, {"param1": ["alpha"]}, self.FIELD_MAP, None)
+        assert payload == {"field_one": "alpha"}
+        payload = {}
+        matchmaking._add_game_settings_payload(
+            payload, {"param1": ["alpha", "beta"]}, self.FIELD_MAP, None)
+        assert payload == {}
+
+    def test_empty_settings_leave_payload_unchanged(self, matchmaking):
+        payload = {"title": "T"}
+        matchmaking._add_game_settings_payload(payload, None, self.FIELD_MAP, set())
+        matchmaking._add_game_settings_payload(payload, {}, self.FIELD_MAP, set())
+        assert payload == {"title": "T"}
+
+
+METADATA = {
+    "actions": {
+        "POST": {
+            "field_one": {"type": "string"},
+            "field_two": {"type": "multiple_choice"},
+        }
+    }
+}
+
+
+class TestGetMultiValueFields:
+    def test_parses_multi_value_types(self, matchmaking, monkeypatch):
+        session = FakeMatchApiSession(metadata=METADATA)
+        monkeypatch.setattr(aiohttp, "ClientSession", lambda headers=None: session)
+
+        fields = _run(matchmaking._get_multi_value_fields("https://api/match/"))
+
+        assert fields == {"field_two"}
+        assert session.options_calls == 1
+
+    def test_is_cached_per_url(self, matchmaking, monkeypatch):
+        session = FakeMatchApiSession(metadata=METADATA)
+        monkeypatch.setattr(aiohttp, "ClientSession", lambda headers=None: session)
+
+        first = _run(matchmaking._get_multi_value_fields("https://api/match/"))
+        second = _run(matchmaking._get_multi_value_fields("https://api/match/"))
+
+        assert first == second == {"field_two"}
+        assert session.options_calls == 1
+
+    def test_failed_metadata_returns_none(self, matchmaking, monkeypatch):
+        session = FakeMatchApiSession(metadata=METADATA, options_status=500)
+        monkeypatch.setattr(aiohttp, "ClientSession", lambda headers=None: session)
+
+        fields = _run(matchmaking._get_multi_value_fields("https://api/match/"))
+
+        assert fields is None
+        # Failures are not cached, so the metadata is retried next time.
+        assert matchmaking._match_api_metadata == {}
+
+    def test_parses_drf_multiple_choice_label(self, matchmaking, monkeypatch):
+        # DRF's SimpleMetadata labels MultipleChoiceField as "multiple choice"
+        # (with a space) — the label landmarks and hirelings get on this API.
+        metadata = {
+            "actions": {
+                "POST": {
+                    "landmarks": {"type": "multiple choice"},
+                    "board_map": {"type": "choice"},
+                }
+            }
+        }
+        session = FakeMatchApiSession(metadata=metadata)
+        monkeypatch.setattr(aiohttp, "ClientSession", lambda headers=None: session)
+
+        fields = _run(matchmaking._get_multi_value_fields("https://api/match/"))
+
+        assert fields == {"landmarks"}
+
+
+class TestGameApiFields:
+    def test_reserved_and_param_fields_parsed(self, matchmaking):
+        fields = matchmaking.game_api_fields["game_a"]
+        # Reserved api_* keys become the fixed payload component field names.
+        assert fields["api_title_field"] == "match_title"
+        assert fields["api_table_talk_url_field"] == "discussion_url"
+        assert fields["api_participants_field"] == "players"
+        assert fields["api_discord_username_field"] == "discord_name"
+        # Parameter field prefixes become param -> API field mappings.
+        assert fields["param1"] == "field_one"
+        assert fields["param2"] == "field_two"
+        # param3 has no field prefix: it is a parameter but not wired.
+        assert "param3" not in fields
+
+    def test_reserved_keys_are_not_parameters(self, matchmaking):
+        # Reserved api_* keys must not become slash command parameters.
+        params = matchmaking.game_parameters["game_a"]
+        assert set(params) == {"param1", "param2", "param3"}
+        assert not any(key.startswith("api_") for key in params)
+
+    def test_default_api_fields_are_inherited(self):
+        # A game section without explicit api_* keys still gets the fixed
+        # payload component field names from the [DEFAULT] section.
+        params = configparser.ConfigParser()
+        params.read_string(
+            "[DEFAULT]\n"
+            "api_title_field = title\n"
+            "api_table_talk_url_field = table_talk_url\n"
+            "api_participants_field = players\n"
+            "api_discord_username_field = discord_name\n"
+            "\n"
+            "[bare_game]\n"
+            "setup = game_setup: (a, Alpha)\n"
+        )
+        config = configparser.ConfigParser()
+        config.read_string(
+            "[DEFAULT]\n"
+            "GamesCommands = bare_game\n"
+            "GamesFullNames = Bare Game\n"
+        )
+        matchmaking = Matchmaking(bot=FakeBot(), config=config, game_parameters=params)
+
+        fields = matchmaking.game_api_fields["bare_game"]
+        assert fields["api_title_field"] == "title"
+        assert fields["api_table_talk_url_field"] == "table_talk_url"
+        assert fields["api_participants_field"] == "players"
+        assert fields["api_discord_username_field"] == "discord_name"
+
+    def test_default_api_fields_parsed_for_games_without_a_section(self):
+        # The [DEFAULT] api_* keys are stored separately so games that have no
+        # section in games_parameters.ini still get the fixed component names.
+        params = configparser.ConfigParser()
+        params.read_string(
+            "[DEFAULT]\n"
+            "api_title_field = title\n"
+            "api_table_talk_url_field = table_talk_url\n"
+            "api_participants_field = participants\n"
+            "api_discord_username_field = discord_username\n"
+        )
+        config = configparser.ConfigParser()
+        config.read_string(
+            "[DEFAULT]\n"
+            "GamesCommands = rootdig\n"
+            "GamesFullNames = Root Digital\n"
+        )
+        matchmaking = Matchmaking(bot=FakeBot(), config=config, game_parameters=params)
+
+        assert matchmaking.default_api_fields == {
+            "api_title_field": "title",
+            "api_table_talk_url_field": "table_talk_url",
+            "api_participants_field": "participants",
+            "api_discord_username_field": "discord_username",
+        }
+        # No section for rootdig, so game_api_fields has no entry for it...
+        assert "rootdig" not in matchmaking.game_api_fields
+
+
+class TestRegisterMatch:
+    def test_success_posts_confirmation_and_wires_settings(self, matchmaking, monkeypatch):
+        session = FakeMatchApiSession(metadata=METADATA, post_status=201, post_payload={"id": 42})
+        monkeypatch.setattr(aiohttp, "ClientSession", lambda headers=None: session)
+        thread = FakeThread()
+
+        _run(matchmaking.register_match(
+            thread, "https://api/match/", "https://site/match/",
+            None, "Title", "Game", [],
+            game_settings={"param1": ["alpha"], "param2": ["first", "second"]},
+            game_command="game_a"))
+
+        # The payload component names come from the reserved api_* keys in the
+        # fixture config, not from hardcoded names.
+        assert session.posted["match_title"] == "Title"
+        assert session.posted["discussion_url"] == thread.jump_url
+        assert session.posted["field_one"] == "alpha"
+        assert session.posted["field_two"] == ["first", "second"]
+        assert thread.sent == ["Game preregistered on Game: https://site/match/42/"]
+
+    def test_participants_wired_under_configured_names(self, matchmaking, monkeypatch):
+        session = FakeMatchApiSession(metadata=METADATA, post_status=201, post_payload={"id": 42})
+        monkeypatch.setattr(aiohttp, "ClientSession", lambda headers=None: session)
+        thread = FakeThread()
+        users = [SimpleNamespace(name="player1"), SimpleNamespace(name="player2")]
+
+        _run(matchmaking.register_match(
+            thread, "https://api/match/", None,
+            None, "Title", "Game", users,
+            game_settings={}, game_command="game_a"))
+
+        assert session.posted["players"] == [
+            {"discord_name": "player1"}, {"discord_name": "player2"},
+        ]
+
+    def test_missing_api_fields_omit_components(self, matchmaking, monkeypatch):
+        # game_b has no game_parameters section: no reserved api_* keys, so
+        # title, thread link and participants are not sent.
+        session = FakeMatchApiSession(metadata=METADATA, post_status=201, post_payload={"id": 42})
+        monkeypatch.setattr(aiohttp, "ClientSession", lambda headers=None: session)
+        thread = FakeThread()
+
+        _run(matchmaking.register_match(
+            thread, "https://api/match/", None,
+            None, "Title", "Game", [SimpleNamespace(name="p1")],
+            game_settings={}, game_command="game_b"))
+
+        assert session.posted == {}
+
+    def test_api_reject_posts_failure_message_not_url(self, matchmaking, monkeypatch):
+        session = FakeMatchApiSession(
+            metadata=METADATA, post_status=400,
+            error_text='{"field_two": ["max"]}')
+        monkeypatch.setattr(aiohttp, "ClientSession", lambda headers=None: session)
+        thread = FakeThread()
+
+        _run(matchmaking.register_match(
+            thread, "https://api/match/", "https://site/match/",
+            None, "Title", "Game", [],
+            game_settings={"param2": ["first", "second"]},
+            game_command="game_a"))
+
+        assert len(thread.sent) == 1
+        assert "failed" in thread.sent[0].lower()
+        assert "site/match" not in thread.sent[0]
+
+    def test_api_unreachable_posts_failure_message(self, matchmaking, monkeypatch):
+        # When the API cannot be reached at all (connection refused, DNS
+        # failure, timeout, ...), the request raises an exception. A failure
+        # message must be posted to the thread instead of a match URL, so the
+        # players know to submit a new game entry manually.
+        session = FakeMatchApiSession(
+            metadata=METADATA,
+            post_exception=aiohttp.ClientConnectionError("connection refused"))
+        monkeypatch.setattr(aiohttp, "ClientSession", lambda headers=None: session)
+        thread = FakeThread()
+
+        _run(matchmaking.register_match(
+            thread, "https://api/match/", "https://site/match/",
+            None, "Title", "Game", [],
+            game_settings={}, game_command="game_a"))
+
+        assert len(thread.sent) == 1
+        assert "failed" in thread.sent[0].lower()
+        assert "site/match" not in thread.sent[0]
+
+    def test_failure_message_includes_website_link(self, matchmaking, monkeypatch):
+        # The failure message must direct players to the league website as a
+        # hyperlink, so they can submit a new game entry manually.
+        session = FakeMatchApiSession(
+            metadata=METADATA, post_status=400,
+            error_text='{"field_two": ["max"]}')
+        monkeypatch.setattr(aiohttp, "ClientSession", lambda headers=None: session)
+        thread = FakeThread()
+
+        _run(matchmaking.register_match(
+            thread, "https://api/match/", "https://site/match/",
+            None, "Title", "League", [],
+            game_settings={"param2": ["first", "second"]},
+            game_command="game_a",
+            website_url="https://www.league.example/"))
+
+        assert len(thread.sent) == 1
+        assert "[League](https://www.league.example/)" in thread.sent[0]
+
+    def test_failure_message_website_name_only_without_url(self, matchmaking, monkeypatch):
+        # When only the website name is known (no URL), it is still mentioned.
+        session = FakeMatchApiSession(
+            metadata=METADATA, post_status=400,
+            error_text='{"field_two": ["max"]}')
+        monkeypatch.setattr(aiohttp, "ClientSession", lambda headers=None: session)
+        thread = FakeThread()
+
+        _run(matchmaking.register_match(
+            thread, "https://api/match/", "https://site/match/",
+            None, "Title", "League", [],
+            game_settings={"param2": ["first", "second"]},
+            game_command="game_a"))
+
+        assert len(thread.sent) == 1
+        assert "League" in thread.sent[0]
+        assert "[" not in thread.sent[0]
+
+    def test_single_value_with_multiple_values_is_not_sent(self, matchmaking, monkeypatch):
+        session = FakeMatchApiSession(metadata=METADATA, post_status=201, post_payload={"id": 42})
+        monkeypatch.setattr(aiohttp, "ClientSession", lambda headers=None: session)
+        thread = FakeThread()
+
+        _run(matchmaking.register_match(
+            thread, "https://api/match/", None,
+            None, "Title", "Game", [],
+            game_settings={"param1": ["alpha", "beta"]},
+            game_command="game_a"))
+
+        assert "field_one" not in session.posted
+
+    def test_missing_metadata_skips_multi_value_wiring(self, matchmaking, monkeypatch):
+        # When the metadata cannot be read, fields are treated as single-valued
+        # so multi-value parameters are not sent as lists.
+        session = FakeMatchApiSession(metadata=METADATA, options_status=500,
+                                      post_status=201, post_payload={"id": 42})
+        monkeypatch.setattr(aiohttp, "ClientSession", lambda headers=None: session)
+        thread = FakeThread()
+
+        _run(matchmaking.register_match(
+            thread, "https://api/match/", None,
+            None, "Title", "Game", [],
+            game_settings={"param2": ["first", "second"]},
+            game_command="game_a"))
+
+        assert "field_two" not in session.posted
+
+    def test_fixed_components_sent_via_default_inherited_fields(self, monkeypatch):
+        # A game whose section declares no api_* keys still sends the title,
+        # thread link and participants, thanks to the [DEFAULT] section.
+        params = configparser.ConfigParser()
+        params.read_string(
+            "[DEFAULT]\n"
+            "api_title_field = title\n"
+            "api_table_talk_url_field = table_talk_url\n"
+            "api_participants_field = participants\n"
+            "api_discord_username_field = discord_username\n"
+            "\n"
+            "[bare_game]\n"
+            "setup = game_setup: (a, Alpha)\n"
+        )
+        config = configparser.ConfigParser()
+        config.read_string(
+            "[DEFAULT]\n"
+            "GamesCommands = bare_game\n"
+            "GamesFullNames = Bare Game\n"
+        )
+        matchmaking = Matchmaking(bot=FakeBot(), config=config, game_parameters=params)
+
+        session = FakeMatchApiSession(metadata=METADATA, post_status=201, post_payload={"id": 42})
+        monkeypatch.setattr(aiohttp, "ClientSession", lambda headers=None: session)
+        thread = FakeThread()
+        users = [SimpleNamespace(name="p1")]
+
+        _run(matchmaking.register_match(
+            thread, "https://api/match/", None,
+            None, "Title", "Bare", users,
+            game_settings={"setup": ["a"]}, game_command="bare_game"))
+
+        assert session.posted["title"] == "Title"
+        assert session.posted["table_talk_url"] == thread.jump_url
+        assert session.posted["participants"] == [{"discord_username": "p1"}]
+        assert session.posted["game_setup"] == "a"
+
+    def test_multi_value_wired_with_drf_metadata(self, matchmaking, monkeypatch):
+        # The real DRF metadata labels multiple-choice fields "multiple choice"
+        # (with a space); they must be wired as lists in the payload.
+        metadata = {
+            "actions": {
+                "POST": {
+                    "field_one": {"type": "string"},
+                    "field_two": {"type": "multiple choice"},
+                }
+            }
+        }
+        session = FakeMatchApiSession(metadata=metadata, post_status=201, post_payload={"id": 42})
+        monkeypatch.setattr(aiohttp, "ClientSession", lambda headers=None: session)
+        thread = FakeThread()
+
+        _run(matchmaking.register_match(
+            thread, "https://api/match/", None,
+            None, "Title", "Game", [],
+            game_settings={"param1": ["alpha"], "param2": ["first", "second"]},
+            game_command="game_a"))
+
+        assert session.posted["field_one"] == "alpha"
+        assert session.posted["field_two"] == ["first", "second"]
+
+
+    def test_fixed_components_sent_for_game_without_parameters_section(self, monkeypatch):
+        # A game with a match API but no section in games_parameters.ini still
+        # sends title, thread link and participants via the [DEFAULT] api_* keys.
+        params = configparser.ConfigParser()
+        params.read_string(
+            "[DEFAULT]\n"
+            "api_title_field = title\n"
+            "api_table_talk_url_field = table_talk_url\n"
+            "api_participants_field = participants\n"
+            "api_discord_username_field = discord_username\n"
+        )
+        config = configparser.ConfigParser()
+        config.read_string(
+            "[DEFAULT]\n"
+            "GamesCommands = rootdig\n"
+            "GamesFullNames = Root Digital\n"
+        )
+        matchmaking = Matchmaking(bot=FakeBot(), config=config, game_parameters=params)
+
+        session = FakeMatchApiSession(metadata=METADATA, post_status=201, post_payload={"id": 42})
+        monkeypatch.setattr(aiohttp, "ClientSession", lambda headers=None: session)
+        thread = FakeThread()
+        users = [SimpleNamespace(name="p1")]
+
+        _run(matchmaking.register_match(
+            thread, "https://api/match/", None,
+            None, "Title", "Root Digital", users,
+            game_command="rootdig"))
+
+        assert session.posted["title"] == "Title"
+        assert session.posted["table_talk_url"] == thread.jump_url
+        assert session.posted["participants"] == [{"discord_username": "p1"}]
+
+
 class TestLfgGameOnlyModal:
     """Modal route of /lfg when only the game argument is given."""
 
@@ -792,16 +1363,20 @@ class TestGameParametersHelp:
 
         _run(matchmaking.send_help(interaction, "game_a"))
 
-        content = interaction.response.messages[0][0]
-        assert "## Game parameters" in content
-        assert "`/game_a` also accepts these arguments" in content
-        assert "only available as command arguments" in content
-        # Every configured parameter is listed with its accepted values
+        # The alias note + /lfg usage stay in the content; the games list and
+        # the parameters list are shown in embeds (they can be long).
+        content, embeds = interaction.response.messages[0][0], interaction.response.messages[0][1]
+        assert "# Help: /game_a" in content
+        assert "Available games" not in content
+        assert [embed.title for embed in embeds] == ["Available games", "Game parameters"]
+        params_embed = embeds[1]
+        description = params_embed.description
+        assert "`/game_a` also accepts these arguments" in description
+        assert "only available as command arguments" in description
+        # Every configured parameter is listed with its display names only
         # (derived from the fixture config).
         for param_name, values in matchmaking.game_parameters["game_a"].items():
-            assert f"- `{param_name}`: {format_accepted_values(values)}" in content
-        # The parameters section comes after the shared /lfg help body.
-        assert content.index("## Available games") < content.index("## Game parameters")
+            assert f"- `{param_name}`: {', '.join(values.values())}" in description
 
     def test_game_without_parameters_has_no_section(self, game_parameters_config):
         matchmaking = self._matchmaking_with_games(game_parameters_config)
@@ -809,8 +1384,9 @@ class TestGameParametersHelp:
 
         _run(matchmaking.send_help(interaction, "game_b"))
 
-        content = interaction.response.messages[0][0]
-        assert "## Game parameters" not in content
+        content, embeds = interaction.response.messages[0][0], interaction.response.messages[0][1]
+        # Only the games embed; no parameters embed.
+        assert [embed.title for embed in embeds] == ["Available games"]
         # Still the alias help.
         assert "# Help: /game_b" in content
 

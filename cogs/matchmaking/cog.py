@@ -47,5 +47,13 @@ class Matchmaking(ConfigMixin, GuildCommandsMixin, HelpMixin,
 
         # game_command -> { parameter_name -> { value: display_name } }
         self.game_parameters: dict[str, dict[str, dict[str, str]]] = {}
+        # game_command -> { parameter_name -> match API field name }
+        self.game_api_fields: dict[str, dict[str, str]] = {}
+        # Fixed payload component field names from the [DEFAULT] section of
+        # games_parameters.ini; inherited by every game (including games
+        # without a section there), overridden by each game's own api_* keys.
+        self.default_api_fields: dict[str, str] = {}
+        # match_api_url -> set of multi-value field names (from API metadata)
+        self._match_api_metadata: dict[str, set[str]] = {}
         self._load_game_parameters(game_parameters)
 

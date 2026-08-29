@@ -75,9 +75,9 @@ class TestRandomCommand:
 
         await self._call_random(matchrolls, interaction, "not-a-set")
 
-        content, embed, ephemeral, _ = interaction.response.messages[0]
+        content, embeds, ephemeral, _ = interaction.response.messages[0]
         assert content == "No item found in the set or subset for `not-a-set`."
-        assert embed is None
+        assert embeds is None
         assert ephemeral is True
 
     @pytest.mark.asyncio
@@ -87,9 +87,10 @@ class TestRandomCommand:
 
         await self._call_random(matchrolls, interaction, "map")
 
-        content, embed, ephemeral, _ = interaction.response.messages[0]
+        content, embeds, ephemeral, _ = interaction.response.messages[0]
         assert content is None
         assert ephemeral is False  # public by default
+        embed = embeds[0]
         assert embed.title == "Random Map: Alpha"
         assert embed.author.name == "host"
         assert "Randomly chosen among: Alpha, Beta, Gamma." in embed.footer.text
@@ -101,7 +102,7 @@ class TestRandomCommand:
 
         await self._call_random(matchrolls, interaction, "map", display=False)
 
-        content, embed, ephemeral, _ = interaction.response.messages[0]
+        content, embeds, ephemeral, _ = interaction.response.messages[0]
         assert ephemeral is True
 
     @pytest.mark.asyncio
@@ -112,7 +113,8 @@ class TestRandomCommand:
         # subset "2" selects the FIRST TWO items of [Alpha, Beta, Gamma].
         await self._call_random(matchrolls, interaction, "map", subset="2")
 
-        content, embed, ephemeral, _ = interaction.response.messages[0]
+        content, embeds, ephemeral, _ = interaction.response.messages[0]
+        embed = embeds[0]
         assert embed.title == "Random Map: Alpha"
         assert "Randomly chosen among: Alpha, Beta." in embed.footer.text
 
@@ -124,7 +126,7 @@ class TestRandomCommand:
         # A range beyond the cardinality yields an empty pool -> "no item".
         await self._call_random(matchrolls, interaction, "map", subset="4-9")
 
-        content, embed, ephemeral, _ = interaction.response.messages[0]
+        content, embeds, ephemeral, _ = interaction.response.messages[0]
         assert content == "No item found in the set or subset for `map`."
 
 

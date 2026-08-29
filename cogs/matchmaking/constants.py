@@ -71,3 +71,12 @@ THREAD_TYPES = [discord.ChannelType.public_thread,
                 discord.ChannelType.news_thread]
 
 GUESTS_OVER_LIMIT = " and others..."
+
+# Reserved keys in games_parameters.ini sections mapping the fixed match
+# payload components (title, thread link, participants) to their API field
+# names. Keys starting with API_FIELD_PREFIX are never treated as parameters.
+API_FIELD_PREFIX = "api_"
+API_TITLE_FIELD_KEY = API_FIELD_PREFIX + "title_field"
+API_TABLE_TALK_URL_FIELD_KEY = API_FIELD_PREFIX + "table_talk_url_field"
+API_PARTICIPANTS_FIELD_KEY = API_FIELD_PREFIX + "participants_field"
+API_DISCORD_USERNAME_FIELD_KEY = API_FIELD_PREFIX + "discord_username_field"

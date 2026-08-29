@@ -120,9 +120,11 @@ class FakeResponse:
         self.deferred = ephemeral
         return None
 
-    async def send_message(self, content=None, embed=None, ephemeral=False,
-                           view=None, **kwargs):
-        self.messages.append((content, embed, ephemeral, view))
+    async def send_message(self, content=None, embed=None, embeds=None,
+                           ephemeral=False, view=None, **kwargs):
+        if (embed is not None):
+            embeds = [embed] + (embeds or [])
+        self.messages.append((content, embeds, ephemeral, view))
         self.done = True
         return None
 

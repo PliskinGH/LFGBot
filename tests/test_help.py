@@ -16,10 +16,11 @@ from tests.conftest import (
 
 
 @pytest.fixture
-def bot_with_commands(games_config):
+def bot_with_commands(games_config, game_parameters_config):
     """A FakeBot whose 'Matchmaking' cog is registered (as the real bot does)."""
     bot = FakeBot()
-    bot.add_cog(Matchmaking(bot=bot, config=games_config))
+    bot.add_cog(Matchmaking(bot=bot, config=games_config,
+                            game_parameters=game_parameters_config))
     return bot
 
 
@@ -106,8 +107,12 @@ class TestHelpCommand:
         interaction = FakeInteraction(user=FakeMember(1, "host"), guild_id=1)
         await Help.help.callback(help_cog, interaction, "game_a")
 
+        # game_a is parametrized: the alias help is content, the games list
+        # and the parameters list are in embeds.
         content = interaction.response.messages[0][0]
         assert "# Help: /game_a" in content
+        embeds = interaction.response.messages[0][1]
+        assert [embed.title for embed in embeds] == ["Available games", "Game parameters"]
 
     @pytest.mark.parametrize(
         "topic,expected",
@@ -133,7 +138,8 @@ class TestHelpCommand:
 
         await Help.help.callback(help_cog, interaction, topic)
 
-        # Matchmaking.send_help receives (interaction, topic) and sends its help text.
+        # Matchmaking.send_help receives (interaction, topic) and sends its
+        # help text as plain content (these topics have no parameters embed).
         content = interaction.response.messages[0][0]
         assert expected in content
 

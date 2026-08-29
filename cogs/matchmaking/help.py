@@ -2,7 +2,7 @@
 
 import discord
 
-from common import utils
+from common import common, utils
 
 from . import constants
 from .models import GuildGamesConfig
@@ -11,9 +11,14 @@ from .models import GuildGamesConfig
 class HelpMixin:
     """Help text generation and the send_help entry point."""
 
-    def _lfg_help_body(self, guild_config: GuildGamesConfig) -> str:
-        # Help body shared between /lfg and the per-game alias commands.
-        message = (
+    def _lfg_help_intro(self) -> str:
+        """The fixed /lfg usage instructions, shown as message content.
+
+        This part does not depend on the server's games, so it stays short
+        even when a guild configures many games (the game list goes in an
+        embed, whose description allows more characters than the content).
+        """
+        return (
             "Create a looking-for-group post using either the guided "
             "menus or direct command arguments.\n"
             "## Guided mode\n"
@@ -34,52 +39,75 @@ class HelpMixin:
             "The LFG will automatically close when this number is reached.\n"
             "Some games may have a default maximum number of players, which will be used if this argument is not provided.\n"
         )
+
+    def _lfg_help_games(self, guild_config: GuildGamesConfig) -> str:
+        """The per-server list of available games, shown in an embed.
+
+        This part grows with the number of configured games, so it lives in
+        the embed (whose description allows up to 4096 characters) rather
+        than the message content (capped at 2000). The embed's title is
+        "Available games", so the description is only the game lines.
+        """
         games = list(guild_config.games.values())
-        if (games):
-            alignment = len(max((game.command for game in games), key=len))
-            game_lines = []
-            for game in games:
-                line = f"- `{game.command.ljust(alignment)}`"
-                if (game.name):
-                    line += (
-                        " - "
-                        f"{utils.indefinite_article(game.name)} **{game.name}** game"
-                    )
-                settings = []
-                if (game.role):
-                    settings.append(f"role to ping: {game.role}")
-                if (game.forum):
-                    forum = game.forum
-                    if (forum.isdigit()):
-                        forum = f"<#{forum}>"
-                    settings.append(f"target forum: {forum}")
-                if (game.default_max_guests is not None):
-                    settings.append(f"players: {game.default_max_guests + 1}")
-                if (settings):
-                    line += " (" + ", ".join(settings) + ")"
-                line += "."
-                game_lines.append(line)
-            message += "## Available games\n" + "\n".join(game_lines)
-        else:
-            message += "## Available games\nNo games are configured for this server."
-        return message
+        if (not games):
+            return "No games are configured for this server."
+        alignment = len(max((game.command for game in games), key=len))
+        game_lines = []
+        for game in games:
+            line = f"- `{game.command.ljust(alignment)}`"
+            if (game.name):
+                line += (
+                    " - "
+                    f"{utils.indefinite_article(game.name)} **{game.name}** game"
+                )
+            settings = []
+            if (game.role):
+                settings.append(f"role to ping: {game.role}")
+            if (game.forum):
+                forum = game.forum
+                if (forum.isdigit()):
+                    forum = f"<#{forum}>"
+                settings.append(f"target forum: {forum}")
+            if (game.default_max_guests is not None):
+                settings.append(f"players: {game.default_max_guests + 1}")
+            if (settings):
+                line += " (" + ", ".join(settings) + ")"
+            line += "."
+            game_lines.append(line)
+        return "\n".join(game_lines)
+
+    @staticmethod
+    def _embed(title: str, description: str) -> discord.Embed:
+        """Build an embed, truncating its description to Discord's limit."""
+        if (len(description) > common.EMBED_DESCRIPTION_LIMIT):
+            description = description[:common.EMBED_DESCRIPTION_LIMIT - 3] + "..."
+        return discord.Embed(title=title, description=description)
+
+    def _games_embed(self, guild_config: GuildGamesConfig) -> discord.Embed:
+        return self._embed("Available games", self._lfg_help_games(guild_config))
+
+    def _params_embed(self, game_command: str) -> discord.Embed | None:
+        section = self._game_parameters_help_lines(game_command)
+        if (section is None):
+            return None
+        return self._embed("Game parameters", section)
 
     def _game_parameters_help_lines(self, game_command: str) -> str | None:
-        """Render the game-parameters help section for a per-game command.
+        """Render the game-parameters section for a per-game command.
 
-        Returns None when the game has no configured parameters. Parameters
-        are direct-arguments-only (see _send_game_settings_modal), so the
-        section says so explicitly.
+        Returns None when the game has no configured parameters, otherwise
+        the embed description listing each parameter with its display names
+        only (the raw values are internal codes). Parameters are
+        direct-arguments-only (see _send_game_settings_modal).
         """
         accepted_params = self.game_parameters.get(game_command)
         if (not accepted_params):
             return None
         parameter_lines = [
-            f"- `{param_name}`: {utils.format_accepted_values(values)}"
+            f"- `{param_name}`: {', '.join(values.values())}"
             for param_name, values in accepted_params.items()
         ]
         return (
-            "## Game parameters\n"
             f"`/{game_command}` also accepts these arguments "
             "(comma-separate for several values). They are only available "
             "as command arguments, not in the guided menus:\n"
@@ -88,26 +116,27 @@ class HelpMixin:
 
     async def send_help(self, interaction: discord.Interaction, topic: str):
         guild_config = self.get_guild_config(interaction.guild_id)
+        embeds = []
         if (topic == constants.LFG_COMMAND):
-            message = f"# Help: /{constants.LFG_COMMAND}\n" + self._lfg_help_body(guild_config)
-            await interaction.response.send_message(message, ephemeral=True)
+            content = f"# Help: /{constants.LFG_COMMAND}\n\n" + self._lfg_help_intro()
+            embeds.append(self._games_embed(guild_config))
         elif (topic in guild_config.games):
             # Server-specific per-game command: an alias for /lfg game:<topic>,
-            # so its help is the /lfg help preceded by an alias note, and —
-            # when the game has configured parameters — a parameters section.
-            message = (
-                f"# Help: /{topic}\n"
+            # so its help is the /lfg usage preceded by an alias note; the
+            # server's games and the game's parameters go in embeds.
+            content = (
+                f"# Help: /{topic}\n\n"
                 f"`/{topic}` is a shortcut for `/{constants.LFG_COMMAND} game:{topic}` — "
                 f"the help for `/{constants.LFG_COMMAND}` below applies to it as well.\n\n"
-                + self._lfg_help_body(guild_config)
+                + self._lfg_help_intro()
             )
-            parameters_section = self._game_parameters_help_lines(topic)
-            if (parameters_section is not None):
-                message += "\n" + parameters_section
-            await interaction.response.send_message(message, ephemeral=True)
+            embeds.append(self._games_embed(guild_config))
+            params_embed = self._params_embed(topic)
+            if (params_embed is not None):
+                embeds.append(params_embed)
         elif (topic == constants.RENAME_COMMAND):
-            message = (
-                f"# Help: /{constants.RENAME_COMMAND}\n"
+            content = (
+                f"# Help: /{constants.RENAME_COMMAND}\n\n"
                 "Rename a game thread created by the bot.\n"
                 "Only the host can rename a thread, and only threads created by the bot can be renamed.\n"
                 "## Guided mode\n"
@@ -117,10 +146,13 @@ class HelpMixin:
                 "### title\n"
                 "The new title for the thread.\n"
             )
-            await interaction.response.send_message(message, ephemeral=True)
         else:
-            message = (
-                f"# Help: /{topic}\n"
-                "No detailed help is available for this command yet."
-            )
-            await interaction.response.send_message(message, ephemeral=True)
+            content = f"# Help: /{topic}\n\nNo detailed help is available for this command yet."
+
+        if (len(content) > common.MESSAGE_CONTENT_LIMIT):
+            # Safety net: plain content is capped at 2000 characters. The
+            # variable parts (games list, parameters) live in embeds, so the
+            # content is fixed length and truncating it would only cut the tail.
+            content = content[:common.MESSAGE_CONTENT_LIMIT - 3] + "..."
+        await interaction.response.send_message(
+            content=content, embeds=embeds or None, ephemeral=True)
