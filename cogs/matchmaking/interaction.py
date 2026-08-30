@@ -4,9 +4,11 @@ from typing import Optional
 
 import discord
 
-from common import utils, common
+from common import common
+from common.utils import get_default_emoji_url, get_id_from_mention, indefinite_article
 
 from . import constants
+from . import utils
 from .models import GameOption, LFGContext
 from .views import GameSettingsModal, LFGView
 
@@ -299,7 +301,7 @@ class InteractionMixin:
         message = interaction.message
         embed = message.embeds[0] if message.embeds else None
         if (embed is not None):
-            emoji_url = utils.get_default_emoji_url(emoji)
+            emoji_url = get_default_emoji_url(emoji)
             embed.set_footer(text=footer_text, icon_url=emoji_url)
             try:
                 await message.edit(embed=embed)
@@ -351,7 +353,7 @@ class InteractionMixin:
                          icon_url=author_avatar)
         
         embed.title = "Looking for " 
-        embed.title += utils.indefinite_article(game_option.name)
+        embed.title += indefinite_article(game_option.name)
         embed.title += " " + game_option.name + " game"
 
         gameIcon = game_option.icon
@@ -366,7 +368,7 @@ class InteractionMixin:
 
         role_id = None
         if (len(game_option.role)):
-            role_id = utils.get_id_from_mention(game_option.role)
+            role_id = get_id_from_mention(game_option.role)
         target_role = None
         if (role_id is not None):
             target_role = interaction.guild.get_role(role_id)

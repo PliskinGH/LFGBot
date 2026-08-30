@@ -6,9 +6,10 @@ from typing import Optional
 import discord
 from discord import app_commands
 
-from common import common, utils
+from common import common
 
 from . import constants
+from . import utils
 
 
 class GuildCommandsMixin:

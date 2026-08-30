@@ -4,7 +4,9 @@ import re
 
 import discord
 
-from common import utils
+from common.utils import get_id_from_mention
+
+from . import utils
 
 
 class GameOption(object):
@@ -94,7 +96,7 @@ class LFGContext(object):
         host = None
         for field in embed.fields:
             if field.name == "Host":
-                h_id = utils.get_id_from_mention(field.value)
+                h_id = get_id_from_mention(field.value)
                 if h_id:
                     host = guild.get_member(h_id)
                     if host is None:
@@ -107,7 +109,7 @@ class LFGContext(object):
         target_role = None
         for field in embed.fields:
             if field.name == "Target":
-                t_id = utils.get_id_from_mention(field.value)
+                t_id = get_id_from_mention(field.value)
                 if t_id:
                     target_role = (guild.get_role(t_id) or 
                                    guild.get_member(t_id) or 

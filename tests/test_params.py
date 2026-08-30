@@ -1,7 +1,7 @@
-"""Tests for the game-parameter helpers in ``common/utils.py`` — config entry
-parsing and value/display-name conversion."""
+"""Tests for the game-parameter helpers in ``cogs/matchmaking/utils.py`` — config
+entry parsing and value/display-name conversion."""
 
-from common.utils import (
+from cogs.matchmaking.utils import (
     format_accepted_values,
     normalize_param_values,
     parse_param_entries,

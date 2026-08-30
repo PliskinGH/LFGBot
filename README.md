@@ -1,16 +1,18 @@
 # LFGBot
 
-A config-driven **Looking-for-Group (LFG) bot** for Discord, built with
-[discord.py](https://github.com/Rapptz/discord.py). Servers, games, roles,
-forum channels, and league-website integration are all defined in `config/`,
-so supporting new games or servers requires no code changes.
+A **Looking-for-Group (LFG) bot** for Discord, built with
+[discord.py](https://github.com/Rapptz/discord.py).
+
+Servers, games, roles, forum channels, and league-website integration are defined in `config/` or
+dynamically by Discord server admins, so supporting new games or servers requires no
+code changes.
 
 ## Commands
 
 | Command | Description |
 | --- | --- |
 | `/lfg [game] [description] [max_players]` | Post an LFG. Without `game:`, a guided game-selection view opens. |
-| `/<game command>` (per guild) | LFG shortcut for a configured game, with optional per-game parameters (e.g. `/rdl map:autumn,winter deck:standard`). |
+| `/<game command>` (per server) | LFG shortcut for a configured game, with optional per-game parameters (e.g. `/rdl map:autumn,winter deck:standard`). |
 | `/rename [title]` | Rename a bot-created game thread (host only). |
 | `/random category:<category> [subset:<subset>] [display:<true\|false>]` | Random item from a configured set; subsets accept indices/ranges (e.g. `2,5-9`). |
 | `/help [topic]` | Help for a command. |
@@ -38,39 +40,62 @@ into the corresponding message embed.
 
 ### Running a bot instance
 
-You need
-- Python **3.14** and the dependencies from `requirements.txt`: `pip install -r requirements.txt`
-- A Discord bot invited with the `bot` and `applications.commands` scopes, the
-  **Server Members Intent** enabled, and permissions to post, create threads,
-  and mention roles
-- The environment variables below
+#### Installation
+
+Requires Python **3.14** installation and:
+```bash
+pip install -r requirements.txt
+```
+
+The bot must be invited with the `bot` and `applications.commands` scopes, the **Server
+Members Intent** enabled, and permissions to post, create threads, and
+mention roles.
+
+#### Environment variables
 
 | Variable | Required | Description |
 | --- | --- | --- |
 | `DISCORD_TOKEN` | Yes | The bot token. |
+| `DATABASE_URL` | No | Bot database connection URL; see below. |
+| `TEST_DATABASE_URL` | No | Test suite only. |
 | *(per-game API tokens)* | No | Named by `GamesAPITokenEnvVars` in `config/games.ini`. |
 
-To run the bot:
+
+#### Database configuration (optional)
+
+With `DATABASE_URL` set (e.g. `postgres://user:password@host/dbname`), the
+server configuration is read from the database instead of the `config/`
+files. Without it (or when the database is unreachable), the bot uses the config files.
+
+The storage layer uses Tortoise ORM and is database-agnostic
+(but needs an async driver, e.g. `asyncpg` in `requirements.txt`).
+The database itself must be created before hand;
+but if it is empty, its tables are seeded from the `config/` files on first start.
+
+#### Run
+
 ```bash
 python bot.py
 ```
 
 ### Using a preconfigured bot
 
-Alternatively, you can add the main bot instance to your server (contact the maintainer)
-and add your guild configuration to this repository's config files (pull request is possible).
-
-In the future, dynamic configuration by server admins will be possible (through some SQL persistence).
+Alternatively, add the main bot instance to your server (contact the maintainer)
+and configure it dynamically as a Discord server admin.
 
 ## Configuration
 
-Everything is configured in `config/`. List values are comma-separated and
-positionally aligned (index *i* of every key describes game *i*).
+The defaults are defined in `config/`; when the bot uses its database, Discord
+server admins manage their configuration dynamically.
+
+List values are
+comma-separated and positionally aligned (index *i* of every key describes
+game *i*).
 
 ### `config/games.ini` — servers and games
 
-Each section is a guild (`ID` = the guild ID); `[DEFAULT]` applies to every
-other guild. Per game:
+Each section is a Discord server (`ID` = the server ID); `[DEFAULT]` applies
+to every other server. Per game:
 
 | Key | Description |
 | --- | --- |
@@ -82,7 +107,7 @@ other guild. Per game:
 | `GamesRegistrationAPI` / `GamesMatchAPI` / `GamesMatchURL` / `GamesAPITokenEnvVars` | League website endpoints, match URL, and env var holding the API token. |
 | `GamesWebsiteURL` / `GamesRegistrationURL` / `GamesProfileURL` | Links shown when participants are not registered. |
 
-Guilds listed in `games.ini` get one slash command per game, on top of the global `/lfg` command.
+Servers listed in `games.ini` get one slash command per game, on top of the global `/lfg` command.
 
 ### `config/games_parameters.ini` — game parameters
 
@@ -107,7 +132,7 @@ houserule = my_houserule: yes,no
 ### `config/rolls.ini` and `config/rolls_descriptions.json` — `/random`
 
 `rolls.ini` maps categories to comma-separated item sets (`[DEFAULT]` applies
-everywhere; guild sections can override). `rolls_descriptions.json` optionally
+everywhere; server sections can override). `rolls_descriptions.json` optionally
 provides a Discord embed per item.
 
 ## League website integration

@@ -4,6 +4,7 @@ from discord.ext import commands
 from dotenv import load_dotenv
 
 from common import utils
+from db import Database
 
 load_dotenv()
 
@@ -13,6 +14,9 @@ PREFIX = os.getenv('COMMAND_PREFIX')
 # commands to (e.g. "123,456,789") for quick testing across several
 # servers, instead of waiting for global command propagation.
 TEST_GUILD_IDS = utils.split_config_list(os.getenv('TEST_GUILD_ID'))
+# Optional configuration database (see db/); without it, or when the database
+# cannot be reached, the bot falls back to the config files.
+DATABASE_URL = os.getenv('DATABASE_URL')
 if (PREFIX is None):
     PREFIX = "!"
 
@@ -30,9 +34,12 @@ class LFGBot(commands.Bot):
         # while extensions are loaded and consumed in setup_hook to sync those
         # guilds. Only relevant outside TEST_GUILD_ID mode.
         self.provided_guild_ids: set[int] = set()
+        # Postgres-backed configuration store; None in config-file mode.
+        self.db: Database | None = None
 
     async def setup_hook(self):
         """Runs automatically before the bot connects to Discord."""
+        await self._init_database()
         # Loop through files in the ./cogs directory
         for filename in os.listdir("./cogs"):
             if filename.endswith(".py"):
@@ -82,6 +89,31 @@ class LFGBot(commands.Bot):
             print("Syncing slash commands...")
             synced = await self.tree.sync()
             print(f"Synced {len(synced)} command(s) globally.")
+
+    async def _init_database(self):
+        """Initialize the optional Postgres-backed configuration store; on
+        any failure the bot falls back to the config files."""
+        if (not DATABASE_URL):
+            print("DATABASE_URL not set: guild configuration comes from the config files.")
+            return
+        try:
+            self.db = Database(DATABASE_URL)
+            fresh = await self.db.initialize()
+        except Exception as error:
+            print(f"Database initialization failed ({error}); "
+                  "falling back to the config files.")
+            if (self.db is not None):
+                try:
+                    await self.db.close()
+                except Exception:
+                    pass
+            self.db = None
+            return
+        if (fresh):
+            print("Database initialized: empty database, "
+                  "cogs will seed it from the config files.")
+        else:
+            print("Database initialized: loading guild configuration from the database.")
 
     async def on_ready(self):
         print(f"Logged in as {self.user} (ID: {self.user.id})")
