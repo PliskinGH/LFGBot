@@ -69,8 +69,11 @@ files. Without it (or when the database is unreachable), the bot uses the config
 
 The storage layer uses Tortoise ORM and is database-agnostic
 (but needs an async driver, e.g. `asyncpg` in `requirements.txt`).
-The database itself must be created before hand;
-but if it is empty, its tables are seeded from the `config/` files on first start.
+The database itself must be created and migrated before hand:
+```bash
+python -m tortoise -c db.orm_config.TORTOISE_ORM migrate
+```
+If it is empty at startup (first run of the bot), its tables are seeded from the `config/` files.
 
 #### Run
 

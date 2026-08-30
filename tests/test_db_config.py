@@ -9,10 +9,12 @@ parsing/mapping tests run everywhere.
 import os
 
 import pytest
-from tortoise import Tortoise, connections
+from tortoise import connections
+from tortoise.migrations.api.migrate import migrate as apply_migrations
 
 from db import models
 from db.db import Database
+from db.orm_config import orm_config
 
 from cogs.matchmaking import db_config
 from cogs.matchmaking.cog import Matchmaking
@@ -31,34 +33,36 @@ def _safe_url(url: str) -> str:
     return f"{scheme}://***@{rest.partition('@')[2]}"
 
 
-async def _reset_schema():
-    """Empty the tables so each test starts from a fresh schema."""
+async def _drop_all_tables():
+    """Drop the bot's tables and the migration history, for a clean test run."""
     await connections.get("default").execute_script(
-        "DROP TABLE IF EXISTS game_parameter_values, game_parameters, "
-        "game_api_field_overrides, default_api_fields, games, guilds CASCADE")
-    await Tortoise.generate_schemas(safe=True)
+        "DROP TABLE IF EXISTS tortoise_migrations, game_parameter_values, "
+        "game_parameters, game_api_field_overrides, default_api_fields, "
+        "games, guilds CASCADE")
 
 
 @pytest.fixture
 async def db():
-    """A Database on the test database, starting from an empty schema.
+    """A Database on the test database, from a clean migrated schema.
 
     The test database is provisioned by the environment (CI service or local
-    Postgres); each test empties its schema for isolation.
+    Postgres). Like the deploy step, the schema is built from the committed
+    migrations; each test drops it and re-applies them for isolation.
     """
     url = _test_database_url()
     if (not url):
         pytest.skip("No TEST_DATABASE_URL configured; skipping database tests.")
     database = Database(url)
     try:
+        # Schema is built from the committed migrations (the deploy step);
+        # each test drops it and re-applies them for isolation.
+        await apply_migrations(config=orm_config(url))
+        await _drop_all_tables()
+        await apply_migrations(config=orm_config(url))
         await database.initialize()
     except Exception as error:
         await database.close()
         pytest.skip(f"Database at {_safe_url(url)} is unreachable: {error}")
-    # Empty the schema so this test starts fresh and the database reports
-    # first initialization.
-    await _reset_schema()
-    database.fresh = True
     yield database
     await database.close()
 

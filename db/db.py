@@ -4,17 +4,19 @@
 initialization failure degrades to config-file mode (Tortoise ORM).
 
 The database itself is provisioned by the host (e.g. Dokku's
-``postgres:create``/``postgres:link``); the bot only creates its tables on
-first start.
+``postgres:create``/``postgres:link``), and the schema is managed by the
+committed migrations in ``db/migrations``, applied at deploy time with
+``tortoise -c db.orm_config.TORTOISE_ORM migrate``.
 """
 
 from tortoise import Tortoise
 
 from . import models
+from .orm_config import orm_config
 
 
 class Database:
-    """Owns the Tortoise connection lifecycle and the schema creation."""
+    """Owns the Tortoise connection lifecycle."""
 
     def __init__(self, url: str):
         self._url = url
@@ -22,10 +24,9 @@ class Database:
         self.fresh: bool = False
 
     async def initialize(self) -> bool:
-        """Create missing tables and report whether the database is empty
-        (a first initialization that should be seeded from the config files)."""
-        await Tortoise.init(db_url=self._url, modules={"models": ["db.models"]})
-        await Tortoise.generate_schemas(safe=True)
+        """Connect and report whether the database is empty (a first
+        initialization that should be seeded from the config files)."""
+        await Tortoise.init(config=orm_config(self._url))
         self.fresh = (await models.Guild.all().count() == 0)
         return self.fresh
 
