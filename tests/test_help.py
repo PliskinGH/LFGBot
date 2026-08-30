@@ -2,7 +2,7 @@
 import pytest
 
 from cogs.help import Help
-from common.common import HELP_COMMAND
+from common.constants import HELP_COMMAND
 from cogs.matchmaking.cog import Matchmaking
 from cogs.matchmaking.constants import LFG_COMMAND, RENAME_COMMAND
 

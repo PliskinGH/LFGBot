@@ -7,7 +7,7 @@ Created on Tue Mar 29 18:21:04 2022
 
 import re
 
-from common.common import *
+from common.constants import *
 
 def split_config_list(value):
     if (value is None):

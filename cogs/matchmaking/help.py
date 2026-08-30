@@ -2,7 +2,7 @@
 
 import discord
 
-from common import common, utils
+from common import constants as common_constants, utils
 
 from . import constants
 from .models import GuildGamesConfig
@@ -38,6 +38,10 @@ class HelpMixin:
             "Optional maximum number of players (including host) (2-100).\n"
             "The LFG will automatically close when this number is reached.\n"
             "Some games may have a default maximum number of players, which will be used if this argument is not provided.\n"
+            # Discord strips trailing newlines from message content, so a
+            # zero-width space keeps the two blank lines that separate the
+            # text from the embeds below.
+            "\u200b"
         )
 
     def _lfg_help_games(self, guild_config: GuildGamesConfig) -> str:
@@ -79,8 +83,8 @@ class HelpMixin:
     @staticmethod
     def _embed(title: str, description: str) -> discord.Embed:
         """Build an embed, truncating its description to Discord's limit."""
-        if (len(description) > common.EMBED_DESCRIPTION_LIMIT):
-            description = description[:common.EMBED_DESCRIPTION_LIMIT - 3] + "..."
+        if (len(description) > common_constants.EMBED_DESCRIPTION_LIMIT):
+            description = description[:common_constants.EMBED_DESCRIPTION_LIMIT - 3] + "..."
         return discord.Embed(title=title, description=description)
 
     def _games_embed(self, guild_config: GuildGamesConfig) -> discord.Embed:
@@ -149,10 +153,11 @@ class HelpMixin:
         else:
             content = f"# Help: /{topic}\n\nNo detailed help is available for this command yet."
 
-        if (len(content) > common.MESSAGE_CONTENT_LIMIT):
+        
+        if (len(content) > common_constants.MESSAGE_CONTENT_LIMIT):
             # Safety net: plain content is capped at 2000 characters. The
             # variable parts (games list, parameters) live in embeds, so the
             # content is fixed length and truncating it would only cut the tail.
-            content = content[:common.MESSAGE_CONTENT_LIMIT - 3] + "..."
+            content = content[:common_constants.MESSAGE_CONTENT_LIMIT - 3] + "..."
         await interaction.response.send_message(
             content=content, embeds=embeds or None, ephemeral=True)

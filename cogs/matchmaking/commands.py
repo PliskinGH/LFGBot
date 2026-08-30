@@ -3,7 +3,7 @@
 import discord
 from discord import app_commands
 
-from common import common, utils
+from common import constants as common_constants, utils
 from common.ui import DynamicSelectView
 
 from . import constants
@@ -102,7 +102,7 @@ class CommandsMixin:
             app_commands.Choice(name=game.name, value=game.command)
             for game in guild_config.games.values()
             if current.lower() in game.command.lower()
-        ][:common.AUTOCOMPLETE_LIMIT]
+        ][:common_constants.AUTOCOMPLETE_LIMIT]
 
     @app_commands.command(
         name=constants.LFG_COMMAND, description=constants.LFG_DESCRIPTION

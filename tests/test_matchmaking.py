@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import discord
 import pytest
 
-from common import common
+from common import constants
 from cogs.matchmaking.cog import Matchmaking
 from cogs.matchmaking.constants import LFG_COMMAND, RENAME_COMMAND
 from cogs.matchmaking.models import LFGContext
@@ -179,9 +179,9 @@ class TestHelpLengths:
 
             content, embeds = (interaction.response.messages[0][0],
                                interaction.response.messages[0][1])
-            assert len(content) <= common.MESSAGE_CONTENT_LIMIT
+            assert len(content) <= constants.MESSAGE_CONTENT_LIMIT
             for embed in (embeds or []):
-                assert len(embed.description) <= common.EMBED_DESCRIPTION_LIMIT
+                assert len(embed.description) <= constants.EMBED_DESCRIPTION_LIMIT
 
     def test_games_embed_is_truncated_when_too_long(self):
         matchmaking = self._matchmaking_with_many_games()
@@ -192,7 +192,7 @@ class TestHelpLengths:
         embeds = interaction.response.messages[0][1]
         games_embed = embeds[0]
         # Truncated to exactly the limit, signalling the cut.
-        assert len(games_embed.description) == common.EMBED_DESCRIPTION_LIMIT
+        assert len(games_embed.description) == constants.EMBED_DESCRIPTION_LIMIT
         assert games_embed.description.endswith("...")
 
 

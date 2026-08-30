@@ -6,7 +6,7 @@ from typing import Optional
 import discord
 from discord import app_commands
 
-from common import common
+from common import constants as common_constants
 
 from . import constants
 from . import utils
@@ -136,7 +136,7 @@ class GuildCommandsMixin:
                 if (len(composed) > 100):  # Choice string values cap at 100 chars.
                     continue
                 choices.append(app_commands.Choice(name=composed, value=composed))
-                if (len(choices) >= common.AUTOCOMPLETE_LIMIT):
+                if (len(choices) >= common_constants.AUTOCOMPLETE_LIMIT):
                     break
             return choices
 

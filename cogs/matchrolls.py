@@ -6,7 +6,7 @@ import random
 import configparser
 import json
 
-from common import common, utils
+from common import constants, utils
 
 RANDOM_COMMAND = "random"
 
@@ -37,7 +37,7 @@ class MatchRolls(commands.Cog):
         roll_sets = []
         categories = []
         configured_sets = []
-        if (guild == common.CONFIG_DEFAULT):
+        if (guild == constants.CONFIG_DEFAULT):
             configured_items = self.config.defaults().items()
         else:
             configured_items = self.config.items(guild)
@@ -85,7 +85,7 @@ class MatchRolls(commands.Cog):
         guild_id = interaction.guild_id
         guild = utils.get_guild_from_config(self.config, guild_id)
 
-        if (guild == common.CONFIG_DEFAULT):
+        if (guild == constants.CONFIG_DEFAULT):
             category_choices = list(self.config.defaults().keys())
         else:
             category_choices = self.config.options(guild)
@@ -94,7 +94,7 @@ class MatchRolls(commands.Cog):
             app_commands.Choice(name=choice, value=choice)
             for choice in category_choices
             if current.lower() in choice.lower()
-        ][:common.AUTOCOMPLETE_LIMIT]
+        ][:constants.AUTOCOMPLETE_LIMIT]
 
     # random
     @app_commands.command(
@@ -140,7 +140,7 @@ class MatchRolls(commands.Cog):
             if ("title" in description):
                 if ("category" in description):
                     embed.title = "Random " + description["category"] + ": " + description["title"]
-                author_avatar = common.DEFAULT_AVATAR_URL
+                author_avatar = constants.DEFAULT_AVATAR_URL
                 display_avatar = interaction.user.display_avatar
                 if (display_avatar is not None):
                     author_avatar = display_avatar.url

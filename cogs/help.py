@@ -2,7 +2,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from common import common
+from common import constants
 from cogs.matchmaking.cog import Matchmaking
 from cogs.matchmaking.constants import LFG_COMMAND, RENAME_COMMAND
 from cogs.matchrolls import MatchRolls, RANDOM_COMMAND
@@ -32,17 +32,17 @@ class Help(commands.Cog):
         available_topics = {
             command.name
             for command in messages
-            if command.name != common.HELP_COMMAND
+            if command.name != constants.HELP_COMMAND
         }
 
         return [
             app_commands.Choice(name=topic, value=topic)
             for topic in sorted(available_topics)
             if current.lower() in topic.lower()
-        ][:common.AUTOCOMPLETE_LIMIT]
+        ][:constants.AUTOCOMPLETE_LIMIT]
 
     @app_commands.command(
-        name=common.HELP_COMMAND,
+        name=constants.HELP_COMMAND,
         description="Get help with an LFG Bot command.",
     )
     @app_commands.describe(topic="The command to get help with.")

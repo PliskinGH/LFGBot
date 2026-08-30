@@ -4,7 +4,7 @@ from typing import Optional
 
 import discord
 
-from common import common
+from common import constants as common_constants
 from common.utils import get_default_emoji_url, get_id_from_mention, indefinite_article
 
 from . import constants
@@ -345,7 +345,7 @@ class InteractionMixin:
         if (game_settings):
             embed.add_field(name="Settings", value="\n".join(self._settings_lines(game_option.command, game_settings)), inline=False)
         
-        author_avatar = common.DEFAULT_AVATAR_URL
+        author_avatar = common_constants.DEFAULT_AVATAR_URL
         display_avatar = host.display_avatar
         if (display_avatar is not None):
             author_avatar = display_avatar.url
@@ -358,7 +358,7 @@ class InteractionMixin:
 
         gameIcon = game_option.icon
         if (not(len(gameIcon))):
-            gameIcon = common.DEFAULT_AVATAR_URL
+            gameIcon = common_constants.DEFAULT_AVATAR_URL
         embed.set_thumbnail(url=gameIcon)
 
         gameColor = game_option.color

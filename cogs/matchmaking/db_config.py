@@ -11,7 +11,7 @@ import configparser
 
 from tortoise.transactions import in_transaction
 
-from common import common
+from common import constants as common_constants
 from db import models
 
 from . import constants
@@ -43,7 +43,7 @@ class LoadedConfig:
 def _get_guild_id(config: configparser.ConfigParser, section: str) -> int | None:
     """The section's ``ID`` key, or None when absent or blank."""
     try:
-        return config.getint(section, common.CONFIG_ID, fallback=None)
+        return config.getint(section, common_constants.CONFIG_ID, fallback=None)
     except ValueError:
         return None
 
@@ -52,7 +52,7 @@ def loaded_config_from_ini(config: configparser.ConfigParser,
                            game_parameters: configparser.ConfigParser) -> LoadedConfig:
     """Parse the games config files into a LoadedConfig (file-based mode)."""
     loaded = LoadedConfig()
-    ConfigMixin._load_guild_config(loaded.default_guild_config, config, common.CONFIG_DEFAULT)
+    ConfigMixin._load_guild_config(loaded.default_guild_config, config, common_constants.CONFIG_DEFAULT)
     for guild in config.sections():
         guild_id = _get_guild_id(config, guild)
         if (guild_id is None):

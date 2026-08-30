@@ -5,7 +5,7 @@ import re
 
 from discord.ext import commands
 
-from common import common
+from common import constants
 
 from .commands import CommandsMixin
 from .config import ConfigMixin
@@ -53,9 +53,9 @@ class Matchmaking(ConfigMixin, GuildCommandsMixin, HelpMixin,
             # File-based mode: parse the config files.
             self.guilds : dict[int, GuildGamesConfig] = {} # dict of guild_id -> GuildGamesConfig
             self.default_guild_config = GuildGamesConfig(None)
-            self._load_guild_config(self.default_guild_config, config, common.CONFIG_DEFAULT)
+            self._load_guild_config(self.default_guild_config, config, constants.CONFIG_DEFAULT)
             for guild in config.sections():
-                guild_id = config.getint(guild, common.CONFIG_ID, fallback=None)
+                guild_id = config.getint(guild, constants.CONFIG_ID, fallback=None)
                 if (guild_id is None):
                     continue
                 guild_config = GuildGamesConfig(guild_id)
