@@ -40,6 +40,21 @@ class GuildCommandsMixin:
             if (registered_guild_ids is not None):
                 registered_guild_ids.add(guild_id)
 
+    def unregister_guild_commands(self) -> None:
+        """Remove the dynamic per-game commands registered for configured guilds.
+
+        Used before re-registering after a configuration change (admin
+        commands): discord.py refuses to add a command that already exists
+        for a guild.
+        """
+        for guild_id, guild_config in self.guilds.items():
+            guild = discord.Object(id=guild_id)
+            for game_command in guild_config.games:
+                try:
+                    self.bot.tree.remove_command(game_command, guild=guild)
+                except Exception:
+                    pass
+
     def _make_game_command(self, game_command: str) -> app_commands.Command:
         # extras is never serialized by discord.py; "help_cog" lets the /help
         # command find this command's owning cog without hardcoding cog names.

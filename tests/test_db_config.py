@@ -213,3 +213,49 @@ class TestSeeding:
         assert cog.get_guild_config(90401) is cog.guilds[90401]
         assert "game_c" in cog.get_guild_config(90401).games
 
+
+class TestAdminPersistence:
+    """Runtime admin edits: per-guild seeding, adds, updates and deletes."""
+
+    async def test_ensure_guild_config_copies_defaults(self, db, games_config,
+                                                       game_parameters_config):
+        await db_config.seed_db_from_config(games_config, game_parameters_config)
+        await db_config.ensure_guild_config(42424)
+        loaded = await db_config.load_config_from_db()
+        assert set(loaded.guilds.keys()) == {90401, 42424}
+        guild = loaded.guilds[42424]
+        # The guild gets its own complete configuration copied from the
+        # defaults (the sentinel guild id 0), parameters included.
+        assert list(guild.games.keys()) == list(loaded.default_guild_config.games.keys())
+        assert "param1" in loaded.game_parameters["game_a"]
+
+    async def test_add_game_creates_and_duplicate_rejected(self, db, games_config,
+                                                           game_parameters_config):
+        await db_config.seed_db_from_config(games_config, game_parameters_config)
+        await db_config.ensure_guild_config(42424)
+        assert await db_config.add_game(
+            42424, "newgame", name="New Game", role="<@&999>") is True
+        assert await db_config.add_game(42424, "newgame", name="Other") is False
+        loaded = await db_config.load_config_from_db()
+        game = loaded.guilds[42424].games["newgame"]
+        assert game.name == "New Game"
+        assert game.role == "<@&999>"
+
+    async def test_update_game_changes_existing(self, db, games_config,
+                                                game_parameters_config):
+        await db_config.seed_db_from_config(games_config, game_parameters_config)
+        await db_config.ensure_guild_config(42424)
+        assert await db_config.update_game(42424, "game_a", name="Renamed") is True
+        loaded = await db_config.load_config_from_db()
+        assert loaded.guilds[42424].games["game_a"].name == "Renamed"
+        assert await db_config.update_game(42424, "missing", name="X") is False
+
+    async def test_delete_game_removes_row(self, db, games_config,
+                                           game_parameters_config):
+        await db_config.seed_db_from_config(games_config, game_parameters_config)
+        await db_config.ensure_guild_config(42424)
+        assert await db_config.delete_game(42424, "game_a") is True
+        loaded = await db_config.load_config_from_db()
+        assert "game_a" not in loaded.guilds[42424].games
+        assert await db_config.delete_game(42424, "game_a") is False
+

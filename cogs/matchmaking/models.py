@@ -18,23 +18,42 @@ class GameOption(object):
                  api_token_env_var, website_url,
                  registration_url, profile_url,
                  default_max_guests):
-        self.name = name
+        # Games added dynamically via /games may leave options unset (None);
+        # normalize them to empty strings so the rest of the cog can rely on
+        # these fields being strings. ``command`` is required and
+        # ``default_max_guests`` stays int-or-None on purpose.
+        self.name = name or ""
         self.command = command
-        self.role = role
-        self.icon = icon
-        self.color = color
-        self.forum = forum
-        self.tag = tag
-        self.visibility = visibility
-        self.message = message
-        self.registration_api = registration_api
-        self.match_api = match_api
-        self.match_url = match_url
-        self.api_token_env_var = api_token_env_var
-        self.website_url = website_url
-        self.registration_url = registration_url
-        self.profile_url = profile_url
+        self.role = role or ""
+        self.icon = icon or ""
+        self.color = color or ""
+        self.forum = forum or ""
+        self.tag = tag or ""
+        self.visibility = visibility or ""
+        self.message = message or ""
+        self.registration_api = registration_api or ""
+        self.match_api = match_api or ""
+        self.match_url = match_url or ""
+        self.api_token_env_var = api_token_env_var or ""
+        self.website_url = website_url or ""
+        self.registration_url = registration_url or ""
+        self.profile_url = profile_url or ""
         self.default_max_guests = default_max_guests
+
+    def settings_summary(self) -> list[str]:
+        """The game's configured settings, as short text fragments.
+
+        Shared by the /help game list and the /games list admin command;
+        callers join the fragments with their own separators.
+        """
+        settings = []
+        if (self.role):
+            settings.append(f"role to ping: {self.role}")
+        if (self.forum):
+            settings.append(f"target forum: {self.forum}")
+        if (self.default_max_guests is not None):
+            settings.append(f"players: {self.default_max_guests + 1}")
+        return settings
 
 
 class GuildGamesConfig(object):

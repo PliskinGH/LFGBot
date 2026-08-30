@@ -16,6 +16,7 @@ code changes.
 | `/rename [title]` | Rename a bot-created game thread (host only). |
 | `/random category:<category> [subset:<subset>] [display:<true\|false>]` | Random item from a configured set; subsets accept indices/ranges (e.g. `2,5-9`). |
 | `/help [topic]` | Help for a command. |
+| `/games add \| update \| remove \| list` | Server managers: edit the server's games dynamically (database mode only). |
 
 ### LFG posts
 
@@ -88,14 +89,15 @@ and configure it dynamically as a Discord server admin.
 
 ## Configuration
 
-The defaults are defined in `config/`; when the bot uses its database, Discord
-server admins manage their configuration dynamically.
+The defaults are defined in `config/`.
+List values are comma-separated and positionally aligned
+(index *i* of every key describes game *i*).
 
-List values are
-comma-separated and positionally aligned (index *i* of every key describes
-game *i*).
+When the bot is in database-mode, Discord server admins can manage their configuration dynamically. Skip in this case to the [last subsection](#dynamic-configuration-(database-mode)).
 
-### `config/games.ini` — servers and games
+### Servers and games
+
+Config file: `config/games.ini`
 
 Each section is a Discord server (`ID` = the server ID); `[DEFAULT]` applies
 to every other server. Per game:
@@ -104,7 +106,7 @@ to every other server. Per game:
 | --- | --- |
 | `GamesCommands` / `GamesFullNames` | Short command name and display name of each game. |
 | `GamesRoles` / `GamesIcons` / `GamesColors` | Role to ping, embed icon, embed colour. |
-| `GamesForums` / `GamesTags` / `GamesVisibility` | Where game threads are created: forum channel, forum tag, `0` for private threads. |
+| `GamesForums` / `GamesTags` / `GamesVisibility` | Where game threads are created: forum channel (as a mention, like roles), forum tag, `0` for private threads. |
 | `GamesMaxPlayers` | Default maximum players (2–100, including the host); the game auto-starts when full. |
 | `GamesMessages` | Extra message added to the game-start ping. |
 | `GamesRegistrationAPI` / `GamesMatchAPI` / `GamesMatchURL` / `GamesAPITokenEnvVars` | League website endpoints, match URL, and env var holding the API token. |
@@ -112,7 +114,9 @@ to every other server. Per game:
 
 Servers listed in `games.ini` get one slash command per game, on top of the global `/lfg` command.
 
-### `config/games_parameters.ini` — game parameters
+### Game parameters
+
+Config file: `config/games_parameters.ini`
 
 Optional parameters for each game's slash command; the section name must match
 a `GamesCommands` entry in `games.ini`:
@@ -132,11 +136,34 @@ houserule = my_houserule: yes,no
 - Reserved `api_*` keys map the fixed match payload fields (title, thread
   link, participants).
 
-### `config/rolls.ini` and `config/rolls_descriptions.json` — `/random`
+### Random command configuration
+
+Files: `config/rolls.ini` and `config/rolls_descriptions.json`
 
 `rolls.ini` maps categories to comma-separated item sets (`[DEFAULT]` applies
 everywhere; server sections can override). `rolls_descriptions.json` optionally
 provides a Discord embed per item.
+
+### Dynamic configuration (database mode)
+
+With `DATABASE_URL` set, server managers (`manage_guild` permission) can edit
+their server's games at runtime (no code or restart needed). The commands
+write to the database and take effect immediately:
+
+| Command | Description |
+| --- | --- |
+| `/games add <command> [options...]` | Add a game (`command` must be 1–32 lowercase letters/digits/`_`). |
+| `/games update <game> [options...]` | Change an existing game's options (only the provided ones). |
+| `/games remove <game>` | Remove a game. |
+| `/games list` | Show the server's configured games. |
+
+Options mirror the `games.ini` keys (name, role, icon, color, forum,
+tag, visibility, message, `max_players`, and the league API/website URLs).
+`role` and `forum` must be given as Discord mentions.
+
+Changes re-register and sync the per-game slash commands for that guild
+immediately. If that sync fails, the change is
+still saved and synced after the next restart of the bot.
 
 ## League website integration
 

@@ -205,6 +205,20 @@ class FakeTree:
                 return command
         return None
 
+    def remove_command(self, name, *, guild=None):
+        if guild is None:
+            for index, command in enumerate(self._commands):
+                if command.name == name:
+                    return self._commands.pop(index)
+            return None
+        commands = self._guild_commands.get(guild.id)
+        if (commands is None):
+            return None
+        for index, command in enumerate(commands):
+            if command.name == name:
+                return commands.pop(index)
+        return None
+
     async def sync(self, *args, guild=None, **kwargs):
         self.sync_calls.append(None if guild is None else guild.id)
         return list(self.get_commands(guild=guild))

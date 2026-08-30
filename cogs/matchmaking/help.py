@@ -64,16 +64,7 @@ class HelpMixin:
                     " - "
                     f"{utils.indefinite_article(game.name)} **{game.name}** game"
                 )
-            settings = []
-            if (game.role):
-                settings.append(f"role to ping: {game.role}")
-            if (game.forum):
-                forum = game.forum
-                if (forum.isdigit()):
-                    forum = f"<#{forum}>"
-                settings.append(f"target forum: {forum}")
-            if (game.default_max_guests is not None):
-                settings.append(f"players: {game.default_max_guests + 1}")
+            settings = game.settings_summary()
             if (settings):
                 line += " (" + ", ".join(settings) + ")"
             line += "."

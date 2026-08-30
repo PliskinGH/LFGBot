@@ -6,6 +6,7 @@ from discord.ext import commands
 
 from common import constants
 
+from .admin import AdminMixin
 from .commands import CommandsMixin
 from .config import ConfigMixin
 from .db_config import LoadedConfig
@@ -16,7 +17,7 @@ from .match import MatchMixin
 from .models import GuildGamesConfig
 
 
-class Matchmaking(ConfigMixin, GuildCommandsMixin, HelpMixin,
+class Matchmaking(AdminMixin, ConfigMixin, GuildCommandsMixin, HelpMixin,
                   InteractionMixin, MatchMixin, CommandsMixin,
                   commands.Cog):
     """LFG and game-thread management cog.

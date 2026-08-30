@@ -9,8 +9,6 @@ jobs:
   test:
     runs-on: ubuntu-latest
     env:
-      # The suite runs against this dedicated test database (never the bot's
-      # DATABASE_URL); the Postgres service below provisions it.
       TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/lfgbot_ci
     services:
       postgres:

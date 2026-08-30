@@ -21,3 +21,12 @@ EMBED_DESCRIPTION_LIMIT = 4096
 INTERVAL_RE = re.compile(r"^[0-9\-\,]*$")
 MENTION_RE = re.compile(r"<(?:@!?|@&|#)(\d+)>")
 CUSTOM_EMOJI_RE = re.compile(r"<:[\w]+:[\d]+>")
+
+# Discord slash-command names: 1-32 characters, lowercase, alphanumeric or
+# underscore (used when registering dynamic per-game commands).
+COMMAND_NAME_RE = re.compile(r"^[a-z0-9_]{1,32}$")
+# Anchored mention forms, stricter than MENTION_RE (which is also used with
+# fullmatch): role/user mentions for role fields, channel mentions for forum
+# fields. Anything else would not resolve at runtime.
+ROLE_MENTION_RE = re.compile(r"^<(?:@!?|@&)(\d+)>$")
+CHANNEL_MENTION_RE = re.compile(r"^<#(\d+)>$")

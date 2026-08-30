@@ -209,4 +209,83 @@ async def load_config_from_db() -> LoadedConfig:
     loaded.default_api_fields = {field.key: field.field_name for field in default_fields}
     return loaded
 
+# --------------------------------------------------------------------------- #
+# Runtime admin edits (persisted to the database, then the cog reloads)
+# --------------------------------------------------------------------------- #
+
+def _game_fields(game: models.Game) -> dict:
+    """The GameOption fields of a Game row, for copying or updating."""
+    return {
+        "name": game.name,
+        "role": game.role,
+        "icon": game.icon,
+        "color": game.color,
+        "forum": game.forum,
+        "tag": game.tag,
+        "visibility": game.visibility,
+        "message": game.message,
+        "registration_api": game.registration_api,
+        "match_api": game.match_api,
+        "match_url": game.match_url,
+        "api_token_env_var": game.api_token_env_var,
+        "website_url": game.website_url,
+        "registration_url": game.registration_url,
+        "profile_url": game.profile_url,
+        "default_max_guests": game.default_max_guests,
+    }
+
+
+async def ensure_guild_config(guild_id: int) -> None:
+    """Give the guild its own configuration row, seeded from the defaults.
+
+    Guilds without a row fall back to the sentinel default config; the first
+    admin edit copies those defaults into a per-guild row so the guild gets a
+    complete, independent configuration.
+    """
+    if (guild_id == DEFAULT_GUILD_ID):
+        return
+    if (await models.Guild.get_or_none(guild_id=guild_id) is not None):
+        return
+    async with in_transaction():
+        guild = await models.Guild.create(guild_id=guild_id)
+        for game in await models.Game.filter(guild_id=DEFAULT_GUILD_ID).order_by("id"):
+            new_game = await models.Game.create(
+                guild=guild, command=game.command, **_game_fields(game))
+            for parameter in await models.GameParameter.filter(
+                    game_id=game.id).order_by("id"):
+                new_parameter = await models.GameParameter.create(
+                    game=new_game, name=parameter.name, api_field=parameter.api_field)
+                for value in await models.ParameterValue.filter(
+                        parameter_id=parameter.id).order_by("id"):
+                    await models.ParameterValue.create(
+                        parameter=new_parameter,
+                        value=value.value, display_name=value.display_name)
+            for override in await models.GameApiFieldOverride.filter(game_id=game.id):
+                await models.GameApiFieldOverride.create(
+                    game=new_game, key=override.key, field_name=override.field_name)
+
+
+async def add_game(guild_id: int, command: str, **fields) -> bool:
+    """Create a game row; whether it was created (False if it already exists)."""
+    _, created = await models.Game.get_or_create(
+        guild_id=guild_id, command=command, defaults=fields)
+    return created
+
+
+async def update_game(guild_id: int, command: str, **fields) -> bool:
+    """Update an existing game row; whether it existed."""
+    game = await models.Game.get_or_none(guild_id=guild_id, command=command)
+    if (game is None):
+        return False
+    for key, value in fields.items():
+        setattr(game, key, value)
+    await game.save(update_fields=list(fields.keys()))
+    return True
+
+
+async def delete_game(guild_id: int, command: str) -> bool:
+    """Delete a game row, cascading to its parameters; whether it existed."""
+    return (await models.Game.filter(
+        guild_id=guild_id, command=command).delete()) > 0
+
 

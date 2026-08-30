@@ -61,13 +61,14 @@ class MatchMixin:
         
         forum_id = ""
         if (game_option.forum):
-            forum_id = game_option.forum
+            # Forums are stored as mentions, resolved like roles.
+            forum_id = utils.get_id_from_mention(game_option.forum)
         forum = None
         tag_name = ""
         if (game_option.tag):
             tag_name = game_option.tag
-        if (len(forum_id)):
-            forum = self.bot.get_channel(int(forum_id))
+        if (forum_id):
+            forum = self.bot.get_channel(forum_id)
         if (forum is not None):
             thread_in_forum = True
             thread_channel = forum

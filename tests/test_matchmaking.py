@@ -11,7 +11,7 @@ import pytest
 from common import constants
 from cogs.matchmaking.cog import Matchmaking
 from cogs.matchmaking.constants import LFG_COMMAND, RENAME_COMMAND
-from cogs.matchmaking.models import LFGContext
+from cogs.matchmaking.models import GameOption, LFGContext
 from cogs.matchmaking.views import GameSettingsModal, ThreadRenameModal
 
 from tests.conftest import (
@@ -144,6 +144,69 @@ class TestSendHelp:
         assert interaction.response.messages[0][1] is None
         assert "# Help: /unknown" in content
         assert "No detailed help is available" in content
+
+
+class TestMinimalDynamicGame:
+    """A game added via /games add with only a command has every option unset
+    (None); the LFG flow must treat those as empty instead of crashing."""
+
+    def _minimal_game_option(self):
+        return GameOption(
+            name=None, command="minimal", role=None, icon=None, color=None,
+            forum=None, tag=None, visibility=None, message=None,
+            registration_api=None, match_api=None, match_url=None,
+            api_token_env_var=None, website_url=None, registration_url=None,
+            profile_url=None, default_max_guests=None)
+
+    def test_none_fields_are_normalized_to_empty_strings(self):
+        game = self._minimal_game_option()
+        assert game.name == ""
+        assert game.role == ""
+        assert game.icon == ""
+        assert game.color == ""
+        assert game.forum == ""
+        assert game.tag == ""
+        assert game.visibility == ""
+        assert game.message == ""
+        assert game.registration_api == ""
+        assert game.match_api == ""
+        assert game.match_url == ""
+        assert game.api_token_env_var == ""
+        assert game.website_url == ""
+        assert game.registration_url == ""
+        assert game.profile_url == ""
+        assert game.default_max_guests is None
+        assert game.command == "minimal"
+        assert game.settings_summary() == []
+
+    @pytest.mark.asyncio
+    async def test_create_lfg_does_not_crash_on_unset_fields(self, matchmaking):
+        interaction = FakeInteraction(user=FakeMember(1, "host"))
+        await matchmaking.create_lfg(
+            interaction, self._minimal_game_option(), "desc", None)
+        content, _, embed, _ = interaction.followup.sent[0]
+        assert content == ""  # no role to ping
+        assert "Looking for" in embed.title
+        assert all(field.name != "Target" for field in embed.fields)
+        # No icon configured -> falls back to the default avatar.
+        assert embed.thumbnail is not None
+
+    @pytest.mark.asyncio
+    async def test_create_game_thread_uses_forum_mention_and_tolerates_none(
+            self, matchmaking):
+        # A configured forum: the thread goes there (the fake's LFG-channel
+        # branch cannot build a real thread object). message=None is treated
+        # as empty and must not crash the game-start ping.
+        forum_channel = FakeChannel(
+            id=555, name="root-forum", type_=discord.ChannelType.forum)
+        matchmaking.bot._channels = {555: forum_channel}
+        game_option = self._minimal_game_option()
+        game_option.forum = "<#555>"
+        message = FakeMessage([discord.Embed(description="desc")])
+        interaction = FakeInteraction(user=FakeMember(1, "host"), message=message)
+        context = LFGContext(game_option=game_option, host=interaction.user)
+        await matchmaking.create_game_thread(interaction, context)
+        assert forum_channel.created_kwargs["name"] == "desc"
 
 
 class TestHelpLengths:
