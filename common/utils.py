@@ -5,9 +5,13 @@ Created on Tue Mar 29 18:21:04 2022
 @author: Pliskin
 """
 
-import re
-
-from common.constants import *
+from common.constants import (
+    CONFIG_DEFAULT,
+    CONFIG_ID,
+    CUSTOM_EMOJI_RE,
+    INTERVAL_RE,
+    MENTION_RE,
+)
 
 def split_config_list(value):
     if (value is None):
@@ -29,7 +33,7 @@ def get_guild_from_config(config, guild_id):
 
 def parse_intervals(string, cardinal):
     value_list = []
-    if not(re.match(r'^[0-9\-\,]*$', string)):
+    if not(INTERVAL_RE.match(string)):
         return value_list
     
     intervals = []
@@ -69,18 +73,18 @@ def get_default_emoji_url(emoji):
     url = f"https://twemoji.maxcdn.com/v/latest/72x72/{emoji_id:x}.png"
     return url
 
-def clean_thread_title(title, re):
-    # Thread title = title with stripped patterns (re) < 100 characters
+def clean_thread_title(title, pattern=CUSTOM_EMOJI_RE):
+    # Thread title = title with matched patterns stripped, capped at 100 chars
     if (title is None):
         title = ""
     if (len(title)):
-        title = "".join(re.split(title)).strip()
+        title = "".join(pattern.split(title)).strip()
     if (len(title) > 100): # discord refuses thread if title too long
         title = title[:100]
     return title
 
 def get_id_from_mention(mention: str) -> int | None:
-    match = re.match(r"^<(?:@!?|@&|#)([0-9]+)>$", mention)
+    match = MENTION_RE.fullmatch(mention)
     
     if match:
         return int(match.group(1))

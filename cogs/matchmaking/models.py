@@ -1,11 +1,11 @@
 """Data models for the matchmaking cog: GameOption, GuildGamesConfig, LFGContext."""
 
-import re
-
 import discord
 
+from common.constants import MENTION_RE
 from common.utils import get_id_from_mention
 
+from . import constants
 from . import utils
 
 
@@ -83,7 +83,7 @@ class LFGContext(object):
         # Recover Game Option from title
         game_option = None
         title = embed.title or ""
-        m = re.search(r"Looking for (?:an? )?(.+?) game$", title)
+        m = constants.LFG_TITLE_RE.search(title)
         if m:
             game_name = m.group(1).strip()
             guild_config = cog.get_guild_config(interaction.guild_id)
@@ -125,12 +125,12 @@ class LFGContext(object):
         max_guests = None
         for field in embed.fields:
             if field.name.startswith("Guests"):
-                m = re.search(r"Guests \((\d+)(?:/(\d+))?\)", field.name)
+                m = constants.GUESTS_FIELD_RE.search(field.name)
                 if m:
                     if m.group(2):
                         max_guests = int(m.group(2))
 
-                ids = re.findall(r"<@!?(\d+)>", field.value)
+                ids = MENTION_RE.findall(field.value)
                 for i in ids:
                     u_id = int(i)
                     member = guild.get_member(u_id)
@@ -147,7 +147,7 @@ class LFGContext(object):
         for field in embed.fields:
             if field.name != "Subscribed":
                 continue
-            ids = re.findall(r"<@!?([0-9]+)>", field.value)
+            ids = MENTION_RE.findall(field.value)
             for i in ids:
                 u_id = int(i)
                 member = guild.get_member(u_id)

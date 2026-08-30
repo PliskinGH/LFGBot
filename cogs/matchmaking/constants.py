@@ -1,5 +1,7 @@
 """Constants for the matchmaking cog."""
 
+import re
+
 import discord
 
 LFG_COMMAND = "lfg"
@@ -80,3 +82,8 @@ API_TITLE_FIELD_KEY = API_FIELD_PREFIX + "title_field"
 API_TABLE_TALK_URL_FIELD_KEY = API_FIELD_PREFIX + "table_talk_url_field"
 API_PARTICIPANTS_FIELD_KEY = API_FIELD_PREFIX + "participants_field"
 API_DISCORD_USERNAME_FIELD_KEY = API_FIELD_PREFIX + "discord_username_field"
+
+# Compiled once at import time and reused everywhere: naming the pattern
+# is self-documenting and avoids re-parsing it on each invocation.
+LFG_TITLE_RE = re.compile(r"Looking for (?:an? )?(.+?) game$")
+GUESTS_FIELD_RE = re.compile(r"Guests \((\d+)(?:/(\d+))?\)")

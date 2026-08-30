@@ -1,10 +1,10 @@
 """Unit tests for the pure helper functions in ``common/utils.py``."""
 import configparser
-import re
 
 import pytest
 
 from common import utils
+from common.constants import CUSTOM_EMOJI_RE
 
 
 class TestSplitConfigList:
@@ -98,21 +98,21 @@ class TestGetDefaultEmojiUrl:
 
 class TestCleanThreadTitle:
     def test_none_becomes_empty_string(self):
-        assert utils.clean_thread_title(None, re.compile(r"")) == ""
+        assert utils.clean_thread_title(None) == ""
 
     def test_strips_custom_emoji_patterns(self):
-        custom = re.compile(r"<:[a-zA-Z0-9_]+:[0-9]+>")
+        custom = CUSTOM_EMOJI_RE
         assert utils.clean_thread_title("Game <:game:123456> post", custom) == (
             "Game  post"
         )
 
     def test_strips_whitespace(self):
-        custom = re.compile(r"<:[a-zA-Z0-9_]+:[0-9]+>")
+        custom = CUSTOM_EMOJI_RE
         assert utils.clean_thread_title("  spoiler-free  ", custom) == "spoiler-free"
 
     def test_truncates_over_100_characters(self):
         title = "x" * 120
-        assert utils.clean_thread_title(title, re.compile(r"")) == "x" * 100
+        assert utils.clean_thread_title(title) == "x" * 100
 
 
 class TestGetIdFromMention:

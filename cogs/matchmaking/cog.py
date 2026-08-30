@@ -1,7 +1,6 @@
 """The concrete Matchmaking cog, composing the feature mixins."""
 
 import configparser
-import re
 
 from discord.ext import commands
 
@@ -62,8 +61,6 @@ class Matchmaking(ConfigMixin, GuildCommandsMixin, HelpMixin,
                 self._load_guild_config(guild_config, config, guild)
                 self.guilds[guild_id] = guild_config
             self._load_game_parameters(game_parameters)
-
-        self.custom_emoji_re = re.compile(r"<:[\w]+:[\d]+>")
 
         # match_api_url -> set of multi-value field names (from API metadata)
         self._match_api_metadata: dict[str, set[str]] = {}

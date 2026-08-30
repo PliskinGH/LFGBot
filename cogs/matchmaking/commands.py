@@ -50,7 +50,7 @@ class CommandsMixin:
     async def rename_thread(self, interaction: discord.Interaction,
                                  title: str):
         channel = interaction.channel
-        new_name = utils.clean_thread_title(title, self.custom_emoji_re)
+        new_name = utils.clean_thread_title(title)
         if (not new_name):
             await interaction.response.send_message(
                 "Thread title cannot be empty.", ephemeral=True

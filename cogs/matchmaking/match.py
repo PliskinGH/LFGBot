@@ -48,7 +48,7 @@ class MatchMixin:
         thread_embed = None
         
         # Thread title = embed description without custom emojis
-        thread_title = utils.clean_thread_title(embed.description, self.custom_emoji_re)
+        thread_title = utils.clean_thread_title(embed.description)
         if (thread_title is None or not(len(thread_title))):
             thread_title = embed.title
         if (thread_title is None or not(len(thread_title))):
