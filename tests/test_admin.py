@@ -329,10 +329,13 @@ class TestGamesList:
         assert "Game A" in content
 
     @pytest.mark.asyncio
-    async def test_requires_manage_guild(self, monkeypatch):
+    async def test_available_to_non_managers(self, monkeypatch):
+        # /games list is read-only: unlike the other subcommands it is not
+        # gated behind the manage_guild permission.
         cog = _cog(monkeypatch)
         interaction = FakeInteraction(user=FakeMember(1, "Rando"), guild_id=42424)
         await Matchmaking.games_list.callback(cog, interaction)
-        assert (interaction.response.messages[0][0]
-                == "Only server managers can change the game configuration.")
+        content = interaction.response.messages[0][0]
+        assert "game_a" in content
+        assert "Only server managers" not in content
 

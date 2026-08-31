@@ -329,8 +329,8 @@ class AdminMixin:
 
     @games.command(name="list", description="List the games configured for this server.")
     async def games_list(self, interaction: discord.Interaction):
-        if (not await self._guard_admin(interaction)):
-            return
+        # Read-only, so unlike the other /games subcommands it is not gated
+        # behind the manage_guild permission.
         games = self.get_guild_config(interaction.guild_id).games
         if (not games):
             await interaction.response.send_message(

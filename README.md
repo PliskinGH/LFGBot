@@ -155,7 +155,7 @@ write to the database and take effect immediately:
 | `/games add <command> [options...]` | Add a game (`command` must be 1–32 lowercase letters/digits/`_`). |
 | `/games update <command> [options...]` | Change an existing game's options (only the provided ones). |
 | `/games remove <command>` | Remove a game. |
-| `/games list` | Show the server's configured games. |
+| `/games list` | Show the server's configured games (read only). |
 
 Options mirror the `games.ini` keys (name, role, icon, color, forum,
 tag, visibility, message, `max_players`, and the league API/website URLs).

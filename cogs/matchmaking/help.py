@@ -121,9 +121,9 @@ class HelpMixin:
             # named "games" still gets the admin help for this topic.
             content = (
                 f"# Help: /{constants.GAMES_COMMAND}\n\n"
-                "Manage the games configured for this server. These commands "
-                "are only available to server managers, and they only work "
-                "when the bot runs in database mode.\n"
+                "Manage the games configured for this server (only available in database mode).\n"
+                "The `add`, `update` and `remove` subcommands are only available to "
+                "server managers.\n"
                 "Changes are saved immediately and the per-game slash commands "
                 "are re-registered for this server.\n"
                 "## Subcommands\n"
