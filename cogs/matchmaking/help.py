@@ -115,6 +115,43 @@ class HelpMixin:
         if (topic == constants.LFG_COMMAND):
             content = f"# Help: /{constants.LFG_COMMAND}\n\n" + self._lfg_help_intro()
             embeds.append(self._games_embed(guild_config))
+        elif (topic == constants.GAMES_COMMAND):
+            # The admin command group (see admin.py). Checked before the
+            # per-game commands so a server that registered a game literally
+            # named "games" still gets the admin help for this topic.
+            content = (
+                f"# Help: /{constants.GAMES_COMMAND}\n\n"
+                "Manage the games configured for this server. These commands "
+                "are only available to server managers, and they only work "
+                "when the bot runs in database mode.\n"
+                "Changes are saved immediately and the per-game slash commands "
+                "are re-registered for this server.\n"
+                "## Subcommands\n"
+                f"- `/{constants.GAMES_COMMAND} add command:<command> [options...]`: "
+                "add a game.\n"
+                f"- `/{constants.GAMES_COMMAND} update command:<command> [options...]`: "
+                "change an existing game (only the provided options).\n"
+                f"- `/{constants.GAMES_COMMAND} remove command:<command>`: remove a game.\n"
+                f"- `/{constants.GAMES_COMMAND} list`: show the games configured "
+                "for this server.\n"
+                "## Options\n"
+                "`name`, `role`, `icon`, `color`, `forum`, `tag`, `visibility`, "
+                "`message`, `registration_api`, `match_api`, `match_url`, "
+                "`website_url`, `registration_url`, `profile_url`, "
+                "`max_players`.\n"
+                "### command\n"
+                "The game's slash command name: 1-32 lowercase letters, digits "
+                "or underscores.\n"
+                "### name\n"
+                "The game's display name.\n"
+                "### role\n"
+                "The role mention to ping on each LFG for the game.\n"
+                "### forum\n"
+                "The forum channel mention where the game's threads are created.\n"
+                "### max_players\n"
+                "The default maximum number of players (2-100, host included); "
+                "the game starts automatically when it is full.\n"
+            )
         elif (topic in guild_config.games):
             # Server-specific per-game command: an alias for /lfg game:<topic>,
             # so its help is the /lfg usage preceded by an alias note; the
@@ -150,5 +187,12 @@ class HelpMixin:
             # variable parts (games list, parameters) live in embeds, so the
             # content is fixed length and truncating it would only cut the tail.
             content = content[:common_constants.MESSAGE_CONTENT_LIMIT - 3] + "..."
-        await interaction.response.send_message(
-            content=content, embeds=embeds or None, ephemeral=True)
+        # discord.py tells an omitted embeds argument apart from an explicitly
+        # passed None (utils.MISSING sentinel): an explicit None crashes with
+        # len(None) in discord.http.handle_message_parameters, so the argument
+        # must be omitted when there is no embed.
+        if (embeds):
+            await interaction.response.send_message(
+                content=content, embeds=embeds, ephemeral=True)
+        else:
+            await interaction.response.send_message(content=content, ephemeral=True)

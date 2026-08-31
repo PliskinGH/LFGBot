@@ -153,8 +153,8 @@ write to the database and take effect immediately:
 | Command | Description |
 | --- | --- |
 | `/games add <command> [options...]` | Add a game (`command` must be 1–32 lowercase letters/digits/`_`). |
-| `/games update <game> [options...]` | Change an existing game's options (only the provided ones). |
-| `/games remove <game>` | Remove a game. |
+| `/games update <command> [options...]` | Change an existing game's options (only the provided ones). |
+| `/games remove <command>` | Remove a game. |
 | `/games list` | Show the server's configured games. |
 
 Options mirror the `games.ini` keys (name, role, icon, color, forum,

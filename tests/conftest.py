@@ -103,6 +103,11 @@ class FakeMessage:
         return None
 
 
+# Sentinel mirroring discord.utils.MISSING: lets the fake tell an omitted
+# argument apart from an explicitly passed None, like the real library does.
+_MISSING = object()
+
+
 class FakeResponse:
     """Stands in for ``discord.Interaction.response``."""
 
@@ -120,11 +125,21 @@ class FakeResponse:
         self.deferred = ephemeral
         return None
 
-    async def send_message(self, content=None, embed=None, embeds=None,
-                           ephemeral=False, view=None, **kwargs):
+    async def send_message(self, content=None, embed=None,
+                           embeds=_MISSING, ephemeral=False, view=None,
+                           **kwargs):
+        # Mirror discord.http.handle_message_parameters: embeds participates
+        # with a MISSING default there, and an explicitly passed embeds=None
+        # crashes in it (len(None)). Callers must omit the argument instead.
+        if (embeds is not _MISSING):
+            if (embeds is None):
+                raise TypeError("object of type 'NoneType' has no len()")
+            if (len(embeds) > 10):
+                raise ValueError("embeds has a maximum of 10 elements.")
+        recorded_embeds = None if (embeds is _MISSING) else embeds
         if (embed is not None):
-            embeds = [embed] + (embeds or [])
-        self.messages.append((content, embeds, ephemeral, view))
+            recorded_embeds = [embed] + (recorded_embeds or [])
+        self.messages.append((content, recorded_embeds, ephemeral, view))
         self.done = True
         return None
 

@@ -216,15 +216,15 @@ class TestGamesUpdate:
         interaction = FakeInteraction(user=_manager(), guild_id=42424)
         written = {}
 
-        async def fake_update(guild_id, game, **fields):
-            written["update"] = (guild_id, game, fields)
+        async def fake_update(guild_id, command, **fields):
+            written["update"] = (guild_id, command, fields)
             return True
 
         monkeypatch.setattr(db_config, "update_game", fake_update)
         await Matchmaking.games_update.callback(
-            cog, interaction, game="game_a", name="New Name", max_players=4)
-        guild_id, game, fields = written["update"]
-        assert (guild_id, game) == (42424, "game_a")
+            cog, interaction, command="game_a", name="New Name", max_players=4)
+        guild_id, command, fields = written["update"]
+        assert (guild_id, command) == (42424, "game_a")
         assert fields == {"name": "New Name", "default_max_guests": 3}
         assert cog.bot.tree.sync_calls == [42424]
         assert interaction.response.messages[0][0] == "Game `game_a` updated."
@@ -236,7 +236,7 @@ class TestGamesUpdate:
         calls = []
         monkeypatch.setattr(db_config, "update_game", lambda *a, **k: calls.append(1))
         await Matchmaking.games_update.callback(
-            cog, interaction, game="game_a", role="123")
+            cog, interaction, command="game_a", role="123")
         assert calls == []
         assert "role" in interaction.response.messages[0][0]
         assert "mention" in interaction.response.messages[0][0]
@@ -248,7 +248,7 @@ class TestGamesUpdate:
         calls = []
         monkeypatch.setattr(db_config, "update_game", lambda *a, **k: calls.append(1))
         await Matchmaking.games_update.callback(
-            cog, interaction, game="game_a", forum="1068560342671700088")
+            cog, interaction, command="game_a", forum="1068560342671700088")
         assert calls == []
         assert "forum" in interaction.response.messages[0][0]
         assert "mention" in interaction.response.messages[0][0]
@@ -258,12 +258,12 @@ class TestGamesUpdate:
         cog = _cog(monkeypatch)
         interaction = FakeInteraction(user=_manager(), guild_id=42424)
 
-        async def fake_update(guild_id, game, **fields):
+        async def fake_update(guild_id, command, **fields):
             return False
 
         monkeypatch.setattr(db_config, "update_game", fake_update)
         await Matchmaking.games_update.callback(
-            cog, interaction, game="game_a", name="X")
+            cog, interaction, command="game_a", name="X")
         assert "not configured" in interaction.response.messages[0][0]
 
     @pytest.mark.asyncio
@@ -272,7 +272,7 @@ class TestGamesUpdate:
         interaction = FakeInteraction(user=_manager(), guild_id=42424)
         calls = []
         monkeypatch.setattr(db_config, "update_game", lambda *a, **k: calls.append(1))
-        await Matchmaking.games_update.callback(cog, interaction, game="game_a")
+        await Matchmaking.games_update.callback(cog, interaction, command="game_a")
         assert calls == []
         assert "Nothing to update" in interaction.response.messages[0][0]
 
@@ -280,7 +280,7 @@ class TestGamesUpdate:
     async def test_autocomplete_lists_games(self, monkeypatch):
         cog = _cog(monkeypatch)
         interaction = FakeInteraction(user=_manager(), guild_id=42424)
-        choices = await cog.games_update_game_autocomplete(interaction, "game")
+        choices = await cog.games_update_command_autocomplete(interaction, "game_a")
         assert [(choice.name, choice.value) for choice in choices] == [("game_a", "game_a")]
 
 
@@ -294,7 +294,7 @@ class TestGamesRemove:
             return guild_id == 42424 and command == "game_a"
 
         monkeypatch.setattr(db_config, "delete_game", fake_delete)
-        await Matchmaking.games_remove.callback(cog, interaction, game="game_a")
+        await Matchmaking.games_remove.callback(cog, interaction, command="game_a")
         assert cog.bot.tree.sync_calls == [42424]
         assert interaction.response.messages[0][0] == "Game `game_a` removed."
 
@@ -307,14 +307,14 @@ class TestGamesRemove:
             return False
 
         monkeypatch.setattr(db_config, "delete_game", fake_delete)
-        await Matchmaking.games_remove.callback(cog, interaction, game="game_a")
+        await Matchmaking.games_remove.callback(cog, interaction, command="game_a")
         assert "not configured" in interaction.response.messages[0][0]
 
     @pytest.mark.asyncio
     async def test_autocomplete_lists_games(self, monkeypatch):
         cog = _cog(monkeypatch)
         interaction = FakeInteraction(user=_manager(), guild_id=42424)
-        choices = await cog.games_remove_game_autocomplete(interaction, "game")
+        choices = await cog.games_remove_command_autocomplete(interaction, "game_a")
         assert [(choice.name, choice.value) for choice in choices] == [("game_a", "game_a")]
 
 

@@ -4,7 +4,7 @@ import pytest
 from cogs.help import Help
 from common.constants import HELP_COMMAND
 from cogs.matchmaking.cog import Matchmaking
-from cogs.matchmaking.constants import LFG_COMMAND, RENAME_COMMAND
+from cogs.matchmaking.constants import GAMES_COMMAND, LFG_COMMAND, RENAME_COMMAND
 
 from tests.conftest import (
     FakeBot,
@@ -119,6 +119,7 @@ class TestHelpCommand:
         [
             (LFG_COMMAND, f"# Help: /{LFG_COMMAND}"),
             (RENAME_COMMAND, f"# Help: /{RENAME_COMMAND}"),
+            (GAMES_COMMAND, f"# Help: /{GAMES_COMMAND}"),
         ],
     )
     @pytest.mark.asyncio
@@ -130,6 +131,7 @@ class TestHelpCommand:
                 FakeCommand("lfg"),
                 FakeCommand("random"),
                 FakeCommand("rename"),
+                FakeCommand(GAMES_COMMAND),
                 FakeCommand(HELP_COMMAND),
             ]
         )

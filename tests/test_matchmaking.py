@@ -10,7 +10,7 @@ import pytest
 
 from common import constants
 from cogs.matchmaking.cog import Matchmaking
-from cogs.matchmaking.constants import LFG_COMMAND, RENAME_COMMAND
+from cogs.matchmaking.constants import GAMES_COMMAND, LFG_COMMAND, RENAME_COMMAND
 from cogs.matchmaking.models import GameOption, LFGContext
 from cogs.matchmaking.views import GameSettingsModal, ThreadRenameModal
 
@@ -115,6 +115,27 @@ class TestSendHelp:
         assert f"# Help: /{RENAME_COMMAND}" in content
         assert f"`/{RENAME_COMMAND} title:<new title>`" in content
         assert f"`/{RENAME_COMMAND}` without arguments" in content
+
+    def test_games_help_includes_subcommands_and_option_rules(self, matchmaking):
+        interaction = FakeInteraction(user=FakeMember(1, "host"), guild_id=1)
+        _run(matchmaking.send_help(interaction, GAMES_COMMAND))
+
+        # Plain content only: the text fits well within Discord's message
+        # limit, so no embed is needed.
+        content = interaction.response.messages[0][0]
+        assert interaction.response.messages[0][1] is None
+        assert f"# Help: /{GAMES_COMMAND}" in content
+        assert f"`/{GAMES_COMMAND} add command:<command> [options...]`" in content
+        assert f"`/{GAMES_COMMAND} update command:<command> [options...]`" in content
+        assert f"`/{GAMES_COMMAND} remove command:<command>`" in content
+        assert f"`/{GAMES_COMMAND} list`" in content
+        # The option rules and guard conditions are documented.
+        assert "role mention" in content
+        assert "forum channel mention" in content
+        assert "1-32 lowercase letters" in content
+        assert "server managers" in content
+        assert "database mode" in content
+        assert len(content) <= constants.MESSAGE_CONTENT_LIMIT
 
     def test_game_command_help_signals_alias_and_pastes_lfg_help(self, matchmaking):
         # game_b has no configured parameters, so its help is exactly the /lfg

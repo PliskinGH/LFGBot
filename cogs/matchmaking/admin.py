@@ -246,13 +246,13 @@ class AdminMixin:
 
     @games.command(name="update", description="Update an existing game on this server.")
     @app_commands.describe(
-        game="The game's slash command name.",
+        command="The game's slash command name.",
         **_GAME_OPTION_DESCRIPTIONS,
     )
     async def games_update(
         self,
         interaction: discord.Interaction,
-        game: str,
+        command: str,
         name: Optional[str] = None,
         role: Optional[str] = None,
         icon: Optional[str] = None,
@@ -283,38 +283,38 @@ class AdminMixin:
             await interaction.response.send_message(error, ephemeral=True)
             return
         guild_id = interaction.guild_id
-        if (not await db_config.update_game(guild_id, game, **fields)):
+        if (not await db_config.update_game(guild_id, command, **fields)):
             await interaction.response.send_message(
-                f"`{game}` is not configured for this server.", ephemeral=True)
+                f"`{command}` is not configured for this server.", ephemeral=True)
             return
         await self._refresh_config()
         await self._sync_guild(interaction)
         await interaction.response.send_message(
-            f"Game `{game}` updated.", ephemeral=True)
+            f"Game `{command}` updated.", ephemeral=True)
 
-    @games_update.autocomplete("game")
-    async def games_update_game_autocomplete(
+    @games_update.autocomplete("command")
+    async def games_update_command_autocomplete(
         self, interaction: discord.Interaction, current: str):
         return await self._games_autocomplete(interaction, current)
 
     @games.command(name="remove", description="Remove a game from this server.")
-    @app_commands.describe(game="The game's slash command name.")
-    async def games_remove(self, interaction: discord.Interaction, game: str):
+    @app_commands.describe(command="The game's slash command name.")
+    async def games_remove(self, interaction: discord.Interaction, command: str):
         if (not await self._guard_admin(interaction)
                 or not await self._guard_database(interaction)):
             return
-        removed = await db_config.delete_game(interaction.guild_id, game)
+        removed = await db_config.delete_game(interaction.guild_id, command)
         if (not removed):
             await interaction.response.send_message(
-                f"`{game}` is not configured for this server.", ephemeral=True)
+                f"`{command}` is not configured for this server.", ephemeral=True)
             return
         await self._refresh_config()
         await self._sync_guild(interaction)
         await interaction.response.send_message(
-            f"Game `{game}` removed.", ephemeral=True)
+            f"Game `{command}` removed.", ephemeral=True)
 
-    @games_remove.autocomplete("game")
-    async def games_remove_game_autocomplete(
+    @games_remove.autocomplete("command")
+    async def games_remove_command_autocomplete(
         self, interaction: discord.Interaction, current: str):
         return await self._games_autocomplete(interaction, current)
 

@@ -18,6 +18,8 @@ LFG_START_CUSTOM_ID = "lfg_view:start"
 RENAME_COMMAND = "rename"
 RENAME_DESCRIPTION = "Rename a game thread."
 
+GAMES_COMMAND = "games"
+
 # Path to the games configuration (see games.ini): guild sections and their games.
 GAMES_INI_PATH = 'config/games.ini'
 # Path to the optional per-game parameter configuration (see games_parameters.ini).

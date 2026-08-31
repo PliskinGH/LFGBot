@@ -366,17 +366,6 @@ class InteractionMixin:
             gameColor = host.colour
         embed.colour = gameColor
 
-        role_id = None
-        if (len(game_option.role)):
-            role_id = get_id_from_mention(game_option.role)
-        target_role = None
-        if (role_id is not None):
-            target_role = interaction.guild.get_role(role_id)
-            if (target_role is None):
-                target_role = interaction.guild.get_member(role_id)
-            if (target_role is None):
-                target_role = interaction.guild.get_channel(role_id)
-
         # View for the buttons
         view = LFGView(cog=self)
         
