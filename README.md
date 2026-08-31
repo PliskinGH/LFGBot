@@ -93,7 +93,7 @@ The defaults are defined in `config/`.
 List values are comma-separated and positionally aligned
 (index *i* of every key describes game *i*).
 
-When the bot is in database-mode, Discord server admins can manage their configuration dynamically. Skip in this case to the [last subsection](#dynamic-configuration-(database-mode)).
+When the bot is in database-mode, Discord server admins can manage their configuration dynamically. Skip in this case to the [last subsection](#dynamic-configuration-database-mode).
 
 ### Servers and games
 

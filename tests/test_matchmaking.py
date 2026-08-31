@@ -205,12 +205,34 @@ class TestMinimalDynamicGame:
         interaction = FakeInteraction(user=FakeMember(1, "host"))
         await matchmaking.create_lfg(
             interaction, self._minimal_game_option(), "desc", None)
-        content, _, embed, _ = interaction.followup.sent[0]
+        # The LFG post goes out as a regular channel message (not an
+        # interaction followup), and the deferred placeholder is removed.
+        content, embed, _ = interaction.channel.sent[0]
         assert content == ""  # no role to ping
         assert "Looking for" in embed.title
+        # The deferred placeholder is answered with an ephemeral confirmation.
+        confirmation_content, confirmation_ephemeral, _, _ = interaction.followup.sent[0]
+        assert confirmation_content == "The LFG post was created!"
+        assert confirmation_ephemeral is True
         assert all(field.name != "Target" for field in embed.fields)
         # No icon configured -> falls back to the default avatar.
         assert embed.thumbnail is not None
+
+    @pytest.mark.asyncio
+    async def test_create_lfg_failure_confirms_ephemerally(self, matchmaking):
+        interaction = FakeInteraction(user=FakeMember(1, "host"))
+
+        async def failing_send(**kwargs):
+            raise RuntimeError("cannot send")
+
+        interaction.channel.send = failing_send
+        await matchmaking.create_lfg(
+            interaction, self._minimal_game_option(), "desc", None)
+
+        assert interaction.channel.sent == []
+        content, ephemeral, _, _ = interaction.followup.sent[0]
+        assert content == "The LFG post could not be created."
+        assert ephemeral is True
 
     @pytest.mark.asyncio
     async def test_create_game_thread_uses_forum_mention_and_tolerates_none(
@@ -808,9 +830,10 @@ class TestGameCommandModal:
             interaction, "game_a", {"description": "hi"}))
 
         assert interaction.response.modals == []
-        # Direct route: deferred and the LFG post was created.
-        assert interaction.response.deferred is not None
-        assert interaction.followup.sent
+        # Direct route: deferred ephemerally (a public defer would make the
+        # creation confirmation followup public too), then the LFG post.
+        assert interaction.response.deferred is True
+        assert interaction.channel.sent
 
     def test_game_modal_confirm_creates_lfg(self, matchmaking):
         host = FakeMember(100, "Host")
@@ -820,7 +843,7 @@ class TestGameCommandModal:
         _run(matchmaking._create_lfg_from_modal(
             confirmation, self._modal_stub(max_players_number=4), "game_a"))
 
-        embed = confirmation.followup.sent[0][2]
+        embed = confirmation.channel.sent[0][1]
         guests = [f.name for f in embed.fields if f.name.startswith("Guests")]
         # Modal max_players=4 -> 3 guests.
         assert guests == ["Guests (0/3)"]
@@ -835,7 +858,7 @@ class TestGameCommandModal:
         modal = command.response.modals[0]
         _run(modal.on_confirm(confirmation, self._modal_stub(), None))
 
-        embed = confirmation.followup.sent[0][2]
+        embed = confirmation.channel.sent[0][1]
         guests = [f.name for f in embed.fields if f.name.startswith("Guests")]
         # Fixture game_a default max players = 5 -> 4 guests.
         assert guests == ["Guests (0/4)"]
@@ -847,7 +870,7 @@ class TestGameCommandModal:
         _run(matchmaking.process_game_settings(
             interaction, self._modal_stub(max_players_number=2), select))
 
-        embed = interaction.followup.sent[0][2]
+        embed = interaction.channel.sent[0][1]
         guests = [f.name for f in embed.fields if f.name.startswith("Guests")]
         assert guests == ["Guests (0/1)"]
 
@@ -1391,9 +1414,10 @@ class TestLfgGameOnlyModal:
             matchmaking, interaction, game="game_a", description="hi"))
 
         assert interaction.response.modals == []
-        # Direct route: deferred and the LFG post was created.
-        assert interaction.response.deferred is not None
-        assert interaction.followup.sent
+        # Direct route: deferred ephemerally (a public defer would make the
+        # creation confirmation followup public too), then the LFG post.
+        assert interaction.response.deferred is True
+        assert interaction.channel.sent
 
     def test_game_only_unknown_game_rejected(self, matchmaking):
         interaction = FakeInteraction(user=FakeMember(100, "Host"), guild_id=1)
@@ -1413,7 +1437,7 @@ class TestLfgGameOnlyModal:
         modal = command.response.modals[0]
         _run(modal.on_confirm(confirmation, self._modal_stub(), None))
 
-        embed = confirmation.followup.sent[0][2]
+        embed = confirmation.channel.sent[0][1]
         guests = [f.name for f in embed.fields if f.name.startswith("Guests")]
         # Fixture game_a default max players = 5 -> 4 guests.
         assert guests == ["Guests (0/4)"]
@@ -1488,7 +1512,7 @@ class TestCreateLfgSettings:
             game_settings={"param1": ["alpha", "delta"], "param2": ["first"]},
         )
 
-        embed = interaction.followup.sent[0][2]
+        embed = interaction.channel.sent[0][1]
         field_names = [field.name for field in embed.fields]
         assert "Settings" in field_names
         settings_value = [

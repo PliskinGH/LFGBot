@@ -78,6 +78,11 @@ class FakeChannel:
         self.created_kwargs = None
         self.message = None  # FakeMessage returned by fetch_message
         self.edited_kwargs = None
+        self.sent = []  # (content, embed, view) tuples recorded by send
+
+    async def send(self, content=None, embed=None, view=None, **kwargs):
+        self.sent.append((content, embed, view))
+        return None
 
     async def create_thread(self, **kwargs):
         self.created_kwargs = kwargs

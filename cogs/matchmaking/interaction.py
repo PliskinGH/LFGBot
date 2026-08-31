@@ -67,7 +67,9 @@ class InteractionMixin:
             )
             return
 
-        await interaction.response.defer()
+        # Defer ephemerally: the LFG post itself is sent as a regular channel
+        # message.
+        await interaction.response.defer(ephemeral=True)
         if (max_players is None):
             max_guests = game_option.default_max_guests
         else:
@@ -368,9 +370,24 @@ class InteractionMixin:
 
         # View for the buttons
         view = LFGView(cog=self)
-        
+
+        posted = False
         try:
-            await interaction.followup.send(content=game_option.role, embed=embed, view=view, ephemeral=False)
+            # Post as a regular channel message rather than an interaction
+            # followup: followups are webhook-executed messages, and mention
+            # notifications from them seem unreliable.
+            await interaction.channel.send(content=game_option.role, embed=embed, view=view)
+            posted = True
+        except Exception as error:
+            print(error)
+        try:
+            if (posted):
+                await interaction.followup.send(
+                    content="The LFG post was created!", ephemeral=True)
+            else:
+                await interaction.followup.send(
+                    content="The LFG post could not be created.",
+                    ephemeral=True)
         except Exception as error:
             print(error)
 
