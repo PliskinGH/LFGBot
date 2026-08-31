@@ -301,16 +301,18 @@ class InteractionMixin:
                          emoji: str = constants.EMOJI_START,
                          footer_text: str = "Game closed/full. Sorry!"):
         message = interaction.message
+        if (message is None):
+            return
+        
         embed = message.embeds[0] if message.embeds else None
         if (embed is not None):
             emoji_url = get_default_emoji_url(emoji)
             embed.set_footer(text=footer_text, icon_url=emoji_url)
-            try:
-                await message.edit(embed=embed)
-            except Exception as error:
-                print(error)
 
-        await self.remove_view(interaction)
+        try:
+            await message.edit(embed=embed, view=None)
+        except Exception as error:
+            print(error)
 
     def _settings_lines(self, game_command: str | None,
                         game_settings: dict[str, list[str]]) -> list[str]:
@@ -413,9 +415,3 @@ class InteractionMixin:
             except Exception as e:
                 print(e)
                 print("Failed to DM " + user_to_notify.display_name)
-
-    async def remove_view(self, interaction: discord.Interaction):
-        if interaction.response.is_done():
-            await interaction.message.edit(view=None)
-        else:
-            await interaction.response.edit_message(view=None)
