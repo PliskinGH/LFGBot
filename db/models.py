@@ -39,7 +39,7 @@ class Game(models.Model):
     registration_api = fields.TextField(null=True)
     match_api = fields.TextField(null=True)
     match_url = fields.TextField(null=True)
-    api_token_env_var = fields.TextField(null=True)
+    api_token = fields.TextField(default="", db_default="")
     website_url = fields.TextField(null=True)
     registration_url = fields.TextField(null=True)
     profile_url = fields.TextField(null=True)

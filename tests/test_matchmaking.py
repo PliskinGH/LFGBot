@@ -178,7 +178,7 @@ class TestMinimalDynamicGame:
             name=None, command="minimal", role=None, icon=None, color=None,
             forum=None, tag=None, visibility=None, message=None,
             registration_api=None, match_api=None, match_url=None,
-            api_token_env_var=None, website_url=None, registration_url=None,
+            api_token=None, website_url=None, registration_url=None,
             profile_url=None, default_max_guests=None)
 
     def test_none_fields_are_normalized_to_empty_strings(self):
@@ -194,7 +194,7 @@ class TestMinimalDynamicGame:
         assert game.registration_api == ""
         assert game.match_api == ""
         assert game.match_url == ""
-        assert game.api_token_env_var == ""
+        assert game.api_token == ""
         assert game.website_url == ""
         assert game.registration_url == ""
         assert game.profile_url == ""

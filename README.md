@@ -59,7 +59,7 @@ mention roles.
 | `DISCORD_TOKEN` | Yes | The bot token. |
 | `DATABASE_URL` | No | Bot database connection URL; see below. |
 | `TEST_DATABASE_URL` | No | Test suite only. |
-| *(per-game API tokens)* | No | Named by `GamesAPITokenEnvVars` in `config/games.ini`. |
+| *(per-game API tokens)* | Config-file mode only | Named by `GamesAPITokenEnvVars` in `config/games.ini`. |
 
 
 #### Database configuration (optional)
@@ -182,8 +182,15 @@ still saved and synced after the next restart of the bot.
 For games with `GamesRegistrationAPI`/`GamesMatchAPI` configured, the bot
 verifies participants' registration on the given website and registers the
 match (title, thread link, participants, and any parameters mapped to API
-fields). API tokens are read from the env var named in
-`GamesAPITokenEnvVars`.
+fields).
+
+API tokens are secrets: they are never displayed anywhere (the `/games list`
+output only shows whether one is set).
+In database mode, server admins set or
+rotate them with `/games add` / `/games update` (`api_token`), and clear them
+with `api_token:-`.
+In config file mode, only env vars are named, which are resolved
+to the token value when the configuration is loaded.
 
 ## License
 

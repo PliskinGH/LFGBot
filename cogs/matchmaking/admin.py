@@ -25,6 +25,7 @@ _GAME_OPTION_DESCRIPTIONS = {
     "registration_api": "League registration API URL.",
     "match_api": "League match API URL.",
     "match_url": "League match URL.",
+    "api_token": "API token for match submissions; use `-` to clear it.",
     "website_url": "League website URL.",
     "registration_url": "League registration URL.",
     "profile_url": "League profile URL.",
@@ -119,13 +120,14 @@ class AdminMixin:
         name="", role="", icon="", color="",
         forum=None, tag=None, visibility=None, message=None,
         registration_api=None, match_api=None, match_url=None,
+        api_token="",
         website_url=None, registration_url=None, profile_url=None,
         max_players=None,
     ) -> tuple[dict, str | None]:
         """The Game fields from add options; returns (fields, error message).
 
-        ``api_token_env_var`` is deliberately not settable here: it names an
-        environment variable of the bot, which a server admin does not control.
+        ``api_token`` is the token VALUE (a secret, never displayed): config
+        files resolve their env var at load time, admins set it via /games.
         """
         mention_error = AdminMixin._mention_error(role, forum)
         if (mention_error is not None):
@@ -147,6 +149,7 @@ class AdminMixin:
             "registration_api": registration_api,
             "match_api": match_api,
             "match_url": match_url,
+            "api_token": api_token,
             "website_url": website_url,
             "registration_url": registration_url,
             "profile_url": profile_url,
@@ -159,12 +162,15 @@ class AdminMixin:
         name=None, role=None, icon=None, color=None,
         forum=None, tag=None, visibility=None, message=None,
         registration_api=None, match_api=None, match_url=None,
+        api_token=None,
         website_url=None, registration_url=None, profile_url=None,
         max_players=None,
     ) -> tuple[dict, str | None]:
         """The Game fields to change from update options; (fields, error).
 
         Only the provided options are touched; omitted ones keep their value.
+        ``api_token`` accepts ``-`` as the reset sentinel (Discord cannot send
+        an empty string), which clears the token.
         """
         mention_error = AdminMixin._mention_error(role, forum)
         if (mention_error is not None):
@@ -176,6 +182,7 @@ class AdminMixin:
             ("message", message),
             ("registration_api", registration_api), ("match_api", match_api),
             ("match_url", match_url),
+            ("api_token", "" if (api_token == "-") else api_token),
             ("website_url", website_url), ("registration_url", registration_url),
             ("profile_url", profile_url),
         ):
@@ -242,6 +249,7 @@ class AdminMixin:
         registration_api: Optional[str] = None,
         match_api: Optional[str] = None,
         match_url: Optional[str] = None,
+        api_token: Optional[str] = None,
         website_url: Optional[str] = None,
         registration_url: Optional[str] = None,
         profile_url: Optional[str] = None,
@@ -260,7 +268,7 @@ class AdminMixin:
             name=name, role=role, icon=icon, color=color,
             forum=forum, tag=tag, visibility=visibility, message=message,
             registration_api=registration_api, match_api=match_api,
-            match_url=match_url,
+            match_url=match_url, api_token=api_token or "",
             website_url=website_url, registration_url=registration_url,
             profile_url=profile_url, max_players=max_players)
         if (error is not None):
@@ -302,6 +310,7 @@ class AdminMixin:
         registration_api: Optional[str] = None,
         match_api: Optional[str] = None,
         match_url: Optional[str] = None,
+        api_token: Optional[str] = None,
         website_url: Optional[str] = None,
         registration_url: Optional[str] = None,
         profile_url: Optional[str] = None,
@@ -314,7 +323,7 @@ class AdminMixin:
             name=name, role=role, icon=icon, color=color,
             forum=forum, tag=tag, visibility=visibility, message=message,
             registration_api=registration_api, match_api=match_api,
-            match_url=match_url,
+            match_url=match_url, api_token=api_token,
             website_url=website_url, registration_url=registration_url,
             profile_url=profile_url, max_players=max_players)
         if (error is not None):
@@ -390,6 +399,10 @@ class AdminMixin:
             if (option.name):
                 details.append(f"**{option.name}**")
             details.extend(option.settings_summary())
+            # The token itself is a secret and is never displayed; admins
+            # only see whether one is configured.
+            details.append("api token: set" if option.api_token
+                           else "api token: not set")
             if (details):
                 lines.append(f"`{command}` — " + " · ".join(details))
             else:

@@ -1,6 +1,7 @@
 """Configuration loading for the matchmaking cog: games.ini parsing and config lookup."""
 
 import configparser
+import os
 
 from common.utils import safe_list_get, split_config_list
 
@@ -65,6 +66,11 @@ class ConfigMixin:
             configdict[arg] = split_config_list(config.get(section, arg, fallback=None))
         for game in configdict[constants.CONFIG_GAMES_COMMANDS]:
             index = configdict[constants.CONFIG_GAMES_COMMANDS].index(game)
+            # The config file names an environment variable per game; the
+            # token VALUE is resolved at load time and stored instead of the
+            # name (server admins manage tokens via /games, not env vars).
+            token_env_var = safe_list_get(
+                configdict[constants.CONFIG_GAMES_API_TOKEN_ENV_VARS], index, None)
             game_option = GameOption(
                 name=safe_list_get(configdict[constants.CONFIG_GAMES_NAMES], index, ""),
                 command=game,
@@ -78,7 +84,7 @@ class ConfigMixin:
                 registration_api=safe_list_get(configdict[constants.CONFIG_GAMES_REGISTRATION_API], index, None),
                 match_api=safe_list_get(configdict[constants.CONFIG_GAMES_MATCH_API], index, None),
                 match_url=safe_list_get(configdict[constants.CONFIG_GAMES_MATCH_URL], index, None),
-                api_token_env_var=safe_list_get(configdict[constants.CONFIG_GAMES_API_TOKEN_ENV_VARS], index, None),
+                api_token=(os.getenv(token_env_var) or "") if (token_env_var) else "",
                 website_url=safe_list_get(configdict[constants.CONFIG_GAMES_WEBSITE_URL], index, None),
                 registration_url=safe_list_get(configdict[constants.CONFIG_GAMES_REGISTRATION_URL], index, None),
                 profile_url=safe_list_get(configdict[constants.CONFIG_GAMES_PROFILE_URL], index, None),

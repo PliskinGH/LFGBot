@@ -21,7 +21,7 @@ async def _loaded_config() -> db_config.LoadedConfig:
         name="Game A", command="game_a", role="", icon="", color="",
         forum=None, tag=None, visibility=None, message=None,
         registration_api=None, match_api=None, match_url=None,
-        api_token_env_var=None, website_url=None, registration_url=None,
+        api_token=None, website_url=None, registration_url=None,
         profile_url=None, default_max_guests=None)
     loaded.guilds[42424] = guild
     # One game parameter (with its match API field), held under the DEFAULT
@@ -354,6 +354,71 @@ class TestGamesList:
         content = interaction.response.messages[0][0]
         assert content == "Only server managers can change the game configuration."
         assert "game_a" not in content
+
+
+class TestGameApiToken:
+    @pytest.mark.asyncio
+    async def test_add_stores_token_value(self, monkeypatch):
+        cog = _cog(monkeypatch)
+        interaction = FakeInteraction(user=_manager(), guild_id=42424)
+        written = {}
+
+        async def fake_ensure(guild_id):
+            return None
+
+        async def fake_add(guild_id, command, **fields):
+            written["add"] = fields
+            return True
+
+        monkeypatch.setattr(db_config, "ensure_guild_config", fake_ensure)
+        monkeypatch.setattr(db_config, "add_game", fake_add)
+        await Matchmaking.games_add.callback(
+            cog, interaction, command="root", api_token="secret-value")
+        # The token VALUE is stored (a secret); there is no env-var name.
+        assert written["add"]["api_token"] == "secret-value"
+        assert interaction.followup.sent[0][0] == "Game `root` added."
+
+    @pytest.mark.asyncio
+    async def test_update_rotates_token(self, monkeypatch):
+        cog = _cog(monkeypatch)
+        interaction = FakeInteraction(user=_manager(), guild_id=42424)
+        written = {}
+
+        async def fake_update(guild_id, command, **fields):
+            written["update"] = fields
+            return True
+
+        monkeypatch.setattr(db_config, "update_game", fake_update)
+        await Matchmaking.games_update.callback(
+            cog, interaction, command="game_a", api_token="rotated-secret")
+        assert written["update"] == {"api_token": "rotated-secret"}
+        assert interaction.followup.sent[0][0] == "Game `game_a` updated."
+
+    @pytest.mark.asyncio
+    async def test_update_dash_clears_token(self, monkeypatch):
+        cog = _cog(monkeypatch)
+        interaction = FakeInteraction(user=_manager(), guild_id=42424)
+        written = {}
+
+        async def fake_update(guild_id, command, **fields):
+            written["update"] = fields
+            return True
+
+        monkeypatch.setattr(db_config, "update_game", fake_update)
+        await Matchmaking.games_update.callback(
+            cog, interaction, command="game_a", api_token="-")
+        assert written["update"] == {"api_token": ""}
+
+    @pytest.mark.asyncio
+    async def test_list_never_displays_the_token(self, monkeypatch):
+        cog = _cog(monkeypatch)
+        cog.get_guild_config(42424).games["game_a"].api_token = "super-secret"
+        interaction = FakeInteraction(user=_manager(), guild_id=42424)
+        await Matchmaking.games_list.callback(cog, interaction)
+        message = interaction.response.messages[0][0]
+        # Only the presence is shown, never the value.
+        assert "api token: set" in message
+        assert "super-secret" not in message
 
 
 class TestParameterError:

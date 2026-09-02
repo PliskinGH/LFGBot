@@ -1,7 +1,5 @@
 """Match handling: thread creation, registration check, and match API registration."""
 
-import os
-
 import aiohttp
 import discord
 
@@ -109,10 +107,8 @@ class MatchMixin:
         if (game_option.match_url):
             match_url = game_option.match_url
         auth_token = None
-        if (game_option.api_token_env_var):
-            token_env_var = game_option.api_token_env_var
-            if (token_env_var):
-                auth_token = os.getenv(token_env_var)
+        if (game_option.api_token):
+            auth_token = game_option.api_token
         website_url = None
         if (game_option.website_url):
             website_url = game_option.website_url

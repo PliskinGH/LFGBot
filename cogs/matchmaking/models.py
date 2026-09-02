@@ -30,7 +30,7 @@ class GameOption(object):
                  tag, visibility, message,
                  registration_api, match_api,
                  match_url,
-                 api_token_env_var, website_url,
+                 api_token, website_url,
                  registration_url, profile_url,
                  default_max_guests):
         # Games added dynamically via /games may leave options unset (None);
@@ -49,7 +49,7 @@ class GameOption(object):
         self.registration_api = registration_api or ""
         self.match_api = match_api or ""
         self.match_url = match_url or ""
-        self.api_token_env_var = api_token_env_var or ""
+        self.api_token = api_token or ""
         self.website_url = website_url or ""
         self.registration_url = registration_url or ""
         self.profile_url = profile_url or ""

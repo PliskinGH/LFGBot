@@ -6,6 +6,7 @@ never used for tests. The test database must be provisioned beforehand
 when TEST_DATABASE_URL is unset or the server is unreachable. The pure
 parsing/mapping tests run everywhere.
 """
+import configparser
 import os
 
 import pytest
@@ -218,6 +219,87 @@ class TestSeeding:
         assert cog.get_guild_config(999999) is cog.default_guild_config
         assert cog.get_guild_config(90401) is cog.guilds[90401]
         assert "game_c" in cog.get_guild_config(90401).games
+
+
+class TestTokenConfigParsing:
+    """The config files name env vars; the token VALUE is stored instead."""
+
+    def _token_cog(self, monkeypatch, token_env_value):
+        parser = configparser.ConfigParser()
+        parser["DEFAULT"] = {
+            "GamesCommands": "game_t",
+            "GamesFullNames": "Token Game",
+            "GamesRoles": "<@&111>",
+            "GamesAPITokenEnvVars": "LFG_TEST_GAME_TOKEN",
+        }
+        if (token_env_value is not None):
+            monkeypatch.setenv("LFG_TEST_GAME_TOKEN", token_env_value)
+        else:
+            monkeypatch.delenv("LFG_TEST_GAME_TOKEN", raising=False)
+        return Matchmaking(bot=FakeBot(), config=parser,
+                           game_parameters=configparser.ConfigParser())
+
+    def test_env_var_is_resolved_to_the_token_value(self, monkeypatch):
+        cog = self._token_cog(monkeypatch, "resolved-secret")
+        option = cog.get_guild_config(42424).games["game_t"]
+        assert option.api_token == "resolved-secret"
+
+    def test_unset_env_var_stores_blank_token(self, monkeypatch):
+        cog = self._token_cog(monkeypatch, None)
+        option = cog.get_guild_config(42424).games["game_t"]
+        assert option.api_token == ""
+
+
+class TestTokenSeeding:
+    async def test_seed_stores_token_value_not_env_var(
+            self, db, monkeypatch):
+        parser = configparser.ConfigParser()
+        parser["DEFAULT"] = {
+            "GamesCommands": "game_t",
+            "GamesFullNames": "Token Game",
+            "GamesRoles": "<@&111>",
+            "GamesAPITokenEnvVars": "LFG_TEST_GAME_TOKEN",
+        }
+        monkeypatch.setenv("LFG_TEST_GAME_TOKEN", "seeded-secret")
+        await db_config.seed_db_from_config(parser, configparser.ConfigParser())
+        game = await models.Game.get_or_none(guild_id=0, command="game_t")
+        assert game is not None
+        # The resolved token value is persisted; the env-var name is gone
+        # (the column was dropped by migration 0003).
+        assert game.api_token == "seeded-secret"
+
+
+class TestTokenMigrationBackfill:
+    """Migration 0003: api_token_env_var rows are backfilled from os.environ."""
+
+    async def test_env_vars_are_resolved_during_migration(self, monkeypatch):
+        url = os.environ["TEST_DATABASE_URL"]
+        database = Database(url)
+        try:
+            # Rebuild the OLD schema (through 0002: the env-var column still
+            # exists, api_token not yet added) from a clean slate.
+            await apply_migrations(config=orm_config(url))
+            await _drop_all_tables()
+            await apply_migrations(config=orm_config(url),
+                                   target="models.0002_auto_20260902_1526")
+            client = connections.get("default")
+            await client.execute_script(
+                "INSERT INTO guilds (guild_id) VALUES (42424)")
+            await client.execute_script(
+                "INSERT INTO games (guild_id, command, name, role, icon, color,"
+                " api_token_env_var) VALUES"
+                " (42424, 'legacy_game', 'Legacy', '', '', '',"
+                " 'LFG_TEST_LEGACY_TOKEN')")
+            monkeypatch.setenv("LFG_TEST_LEGACY_TOKEN", "backfilled-secret")
+            # Migrate the rest of the way: the backfill resolves the env var.
+            await apply_migrations(config=orm_config(url),
+                                   target="models.0003_auto_20260902_1615")
+            rows = await client.execute_query_dict(
+                "SELECT command, api_token FROM games WHERE guild_id = 42424")
+            assert rows == [{"command": "legacy_game",
+                             "api_token": "backfilled-secret"}]
+        finally:
+            await database.close()
 
 
 class TestAdminPersistence:
