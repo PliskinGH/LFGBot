@@ -25,7 +25,7 @@ An LFG post is an embed with four buttons:
 | Button | Effect |
 | --- | --- |
 | 👍 **Join/Leave** | Sign up or withdraw. |
-| 🔔 **Toggle Notification** | Get notified when someone joins. |
+| 🔔 **Toggle Notification** | Get notified when someone joins or game is cancelled). |
 | ❌ **Cancel** | Host only: cancel the LFG. |
 | ✅ **Start** | Host only: start the game. |
 

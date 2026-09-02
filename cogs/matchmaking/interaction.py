@@ -212,9 +212,18 @@ class InteractionMixin:
                 print(error)
 
         if (is_joining):
-            # Notify users
-            await self.notify_players(interaction.channel, context.host, interaction.user, context.users_to_notify)
-            pass
+            # Notify the subscribed users, except the player who just joined.
+            if (context.host in context.users_to_notify):
+                await self.notify_players(
+                    {context.host},
+                    self._join_notification_message(
+                        interaction.channel, interaction.user, is_host=True),
+                    exclude=interaction.user)
+            await self.notify_players(
+                context.users_to_notify - {context.host},
+                self._join_notification_message(
+                    interaction.channel, interaction.user, is_host=False),
+                exclude=interaction.user)
 
         await interaction.followup.send(
             content=(f"You have joined the game!" if is_joining
@@ -255,8 +264,10 @@ class InteractionMixin:
             print(error)
 
         await interaction.followup.send(
-            content=(f"You will be notified when someone joins the game!" if is_subscribing
-                     else f"You will no longer be notified when someone joins the game!"), ephemeral=True
+            content=(f"You will be notified when someone joins the game"
+                     f" or when it is cancelled!" if is_subscribing
+                     else f"You will no longer be notified when someone joins"
+                          f" the game or when it is cancelled!"), ephemeral=True
         )
 
     async def process_cancel(self, interaction: discord.Interaction, context: LFGContext):
@@ -272,6 +283,13 @@ class InteractionMixin:
                               emoji=constants.EMOJI_CANCEL,
                               footer_text="Game cancelled. Sorry!")
         
+        # Notify the subscribed users, except the host.
+        await self.notify_players(
+            context.users_to_notify,
+            self._cancel_notification_message(
+                interaction.channel, interaction.user),
+            exclude=interaction.user)
+
         await interaction.followup.send(
             content=f"The game has been canceled.", ephemeral=True
         )
@@ -400,23 +418,35 @@ class InteractionMixin:
         except Exception as error:
             print(error)
 
-    async def notify_players(self, channel, host, new_player, users_to_notify):
-        for user_to_notify in users_to_notify:
-            if (user_to_notify == new_player):
-                continue
+    def _join_notification_message(self, channel, new_player,
+                                   is_host: bool) -> str:
+        message_to_send = "A new player (" + new_player.display_name + ")"
+        message_to_send += " has joined your game"
+        message_to_send += " in the LFG channel "
+        message_to_send += channel.mention + ".\n"
+        if (is_host):
+            message_to_send += "When the game is full,"
+            message_to_send += " you can start the thread using "
+            message_to_send += constants.EMOJI_START + ", which will ping"
+            message_to_send += " all the players. GLHF!"
+        else:
+            message_to_send += "When the game thread starts,"
+            message_to_send += " you will be pinged there. GLHF!"
+        return message_to_send
 
-            message_to_send = "A new player (" + new_player.display_name + ")"
-            message_to_send += " has joined your game"
-            message_to_send += " in the LFG channel "
-            message_to_send += channel.mention + ".\n"
-            if (user_to_notify == host):
-                message_to_send += "When the game is full,"
-                message_to_send += " you can start the thread using "
-                message_to_send += constants.EMOJI_START + ", which will ping"
-                message_to_send += " all the players. GLHF!"
-            else:
-                message_to_send += "When the game thread starts,"
-                message_to_send += " you will be pinged there. GLHF!"
+    def _cancel_notification_message(self, channel, host) -> str:
+        message_to_send = "The game you subscribed to in the LFG channel "
+        message_to_send += channel.mention
+        message_to_send += " has been cancelled by the host ("
+        message_to_send += host.display_name + "). Sorry!"
+        return message_to_send
+
+    async def notify_players(self, users_to_notify, message_to_send: str,
+                             exclude=None) -> None:
+        """DM ``message_to_send`` to every subscribed user (except ``exclude``)."""
+        for user_to_notify in users_to_notify:
+            if (exclude is not None and user_to_notify == exclude):
+                continue
             try:
                 await user_to_notify.send(message_to_send)
             except Exception as e:

@@ -11,7 +11,7 @@ import pytest
 from common import constants
 from cogs.matchmaking.cog import Matchmaking
 from cogs.matchmaking.constants import (
-    DEFAULT_GUILD_ID, GAMES_COMMAND, LFG_COMMAND, RENAME_COMMAND,
+    DEFAULT_GUILD_ID, EMOJI_START, GAMES_COMMAND, LFG_COMMAND, RENAME_COMMAND,
 )
 from cogs.matchmaking.models import GameOption, LFGContext
 from cogs.matchmaking.views import GameSettingsModal, ThreadRenameModal
@@ -549,6 +549,33 @@ class TestProcessJoin:
         assert guest1 not in context.guests
 
     @pytest.mark.asyncio
+    async def test_join_notifies_subscribers(self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        subscriber = FakeMember(101, "Subby")
+        joiner = FakeMember(102, "Joiny")
+        embed = discord.Embed(title="Looking for a Game A game")
+        embed.add_field(name="Host", value=host.mention, inline=True)
+        interaction = FakeInteraction(
+            user=joiner,
+            guild=FakeGuild(id=1,
+                            members={m.id: m for m in (host, subscriber, joiner)}),
+            message=FakeMessage([embed]),
+        )
+        context = LFGContext(
+            host=host, max_guests=4, users_to_notify={host, subscriber})
+
+        await matchmaking.process_join(interaction, context)
+
+        # Host gets the host variant, other subscribers the subscriber
+        # variant, and the joiner is not DM'd about their own join.
+        assert "A new player (Joiny) has joined your game" in host.sent_content
+        assert "When the game is full" in host.sent_content
+        assert ("A new player (Joiny) has joined your game"
+                in subscriber.sent_content)
+        assert "When the game thread starts" in subscriber.sent_content
+        assert not hasattr(joiner, "sent_content")
+
+    @pytest.mark.asyncio
     async def test_guest_joins_and_embed_updates(self, matchmaking):
         host = FakeMember(100, "Hosty")
         guest1 = FakeMember(101, "G1")
@@ -643,6 +670,63 @@ class TestProcessCancel:
 
         assert message.edited is not None
         assert interaction.followup.sent[0][0] == "The game has been canceled."
+
+    @pytest.mark.asyncio
+    async def test_cancel_notifies_subscribers(self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        subscriber = FakeMember(101, "Subby")
+        watcher = FakeMember(102, "Watcher")
+        interaction = FakeInteraction(user=host)
+        context = LFGContext(
+            host=host, users_to_notify={host, subscriber, watcher})
+
+        await matchmaking.process_cancel(interaction, context)
+
+        # Every subscriber is told the game was cancelled, except the host
+        # who cancelled it themselves.
+        assert ("has been cancelled by the host (Hosty)"
+                in subscriber.sent_content)
+        assert ("has been cancelled by the host (Hosty)"
+                in watcher.sent_content)
+        assert not hasattr(host, "sent_content")
+        assert interaction.followup.sent[0][0] == "The game has been canceled."
+
+
+class TestNotificationMessages:
+    def test_join_message_host_variant(self, matchmaking):
+        joiner = FakeMember(102, "Joiny")
+
+        message = matchmaking._join_notification_message(
+            FakeChannel(id=7), joiner, is_host=True)
+
+        assert message == (
+            "A new player (Joiny) has joined your game"
+            " in the LFG channel <#7>.\n"
+            "When the game is full, you can start the thread using "
+            + EMOJI_START + ", which will ping all the players. GLHF!")
+
+    def test_join_message_subscriber_variant(self, matchmaking):
+        joiner = FakeMember(102, "Joiny")
+
+        message = matchmaking._join_notification_message(
+            FakeChannel(id=7), joiner, is_host=False)
+
+        assert message == (
+            "A new player (Joiny) has joined your game"
+            " in the LFG channel <#7>.\n"
+            "When the game thread starts, you will be pinged there. GLHF!")
+
+    def test_cancel_message(self, matchmaking):
+        host = FakeMember(100, "Hosty")
+
+        message = matchmaking._cancel_notification_message(
+            FakeChannel(id=7), host)
+
+        assert message == (
+            "The game you subscribed to in the LFG channel <#7>"
+            " has been cancelled by the host (Hosty). Sorry!")
+
+
 class TestGuildCommandRegistration:
     def test_registers_per_guild_commands_only(self, matchmaking):
         matchmaking.bot.provided_guild_ids = set()
