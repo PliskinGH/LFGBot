@@ -156,6 +156,7 @@ write to the database and take effect immediately:
 | `/games update <command> [options...]` | Change an existing game's options (only the provided ones). |
 | `/games remove <command>` | Remove a game. |
 | `/games list` | Show the server's configured games. |
+| `/games show <game>` | Show the detailed configuration for a game. |
 | `/games parameter add <game> <name> [display_name] [api_field] <values>` | Add a parameter (see below). |
 | `/games parameter update <game> <name> [display_name] [api_field] [values]` | Change a parameter: only the provided options; `-` in `api_field`/`display_name` resets it. |
 | `/games parameter remove <game> <name>` | Remove a parameter. |
@@ -164,6 +165,9 @@ write to the database and take effect immediately:
 Options mirror the `games.ini` keys (name, role, icon, color, forum,
 tag, visibility, message, `max_players`, and the league API/website URLs).
 `role` and `forum` must be given as Discord mentions.
+The reserved match-payload field names can also be overridden per game with
+`title_field`, `table_talk_url_field`, `participants_field` and
+`discord_username_field` (`-` resets them to the default).
 
 Parameters manage each game's slash-command options at runtime, like the
 `games_parameters.ini` sections. The parameter `name` becomes the slash
@@ -184,10 +188,8 @@ verifies participants' registration on the given website and registers the
 match (title, thread link, participants, and any parameters mapped to API
 fields).
 
-API tokens are secrets: they are never displayed anywhere (the `/games list`
-output only shows whether one is set).
-In database mode, server admins set or
-rotate them with `/games add` / `/games update` (`api_token`), and clear them
+API tokens are secrets: they are never displayed anywhere (`/games show` only says whether one is set).
+In database mode, server admins can set them with `/games add` / `/games update` (`api_token`), and clear them
 with `api_token:-`.
 In config file mode, only env vars are named, which are resolved
 to the token value when the configuration is loaded.

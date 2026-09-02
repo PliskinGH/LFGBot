@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import discord
 import pytest
 
-from cogs.matchmaking import db_config
+from cogs.matchmaking import constants, db_config
 from cogs.matchmaking.cog import Matchmaking
 from cogs.matchmaking.constants import DEFAULT_GUILD_ID
 from cogs.matchmaking.models import GameOption, GuildGamesConfig
@@ -410,15 +410,189 @@ class TestGameApiToken:
         assert written["update"] == {"api_token": ""}
 
     @pytest.mark.asyncio
-    async def test_list_never_displays_the_token(self, monkeypatch):
+    async def test_list_does_not_mention_the_token(self, monkeypatch):
+        # /games list stays a compact summary: the api token, not even its
+        # set/not-set state, is only shown by /games show.
         cog = _cog(monkeypatch)
         cog.get_guild_config(42424).games["game_a"].api_token = "super-secret"
         interaction = FakeInteraction(user=_manager(), guild_id=42424)
         await Matchmaking.games_list.callback(cog, interaction)
         message = interaction.response.messages[0][0]
-        # Only the presence is shown, never the value.
-        assert "api token: set" in message
+        assert "api token" not in message
         assert "super-secret" not in message
+
+
+class TestGamesShow:
+    @pytest.mark.asyncio
+    async def test_requires_manage_guild(self, monkeypatch):
+        cog = _cog(monkeypatch)
+        interaction = FakeInteraction(user=FakeMember(1, "Rando"), guild_id=42424)
+        await Matchmaking.games_show.callback(cog, interaction, game="game_a")
+        assert (interaction.response.messages[0][0]
+                == "Only server managers can change the game configuration.")
+
+    @pytest.mark.asyncio
+    async def test_missing_game(self, monkeypatch):
+        cog = _cog(monkeypatch)
+        interaction = FakeInteraction(user=_manager(), guild_id=42424)
+        await Matchmaking.games_show.callback(cog, interaction, game="game_x")
+        assert ("`game_x` is not configured for this server."
+                in interaction.response.messages[0][0])
+
+    @pytest.mark.asyncio
+    async def test_shows_everything_but_not_the_token_value(self, monkeypatch):
+        cog = _cog(monkeypatch)
+        interaction = FakeInteraction(user=_manager(), guild_id=42424)
+        cog.guilds[42424].games["game_a"] = GameOption(
+            name="Game A", command="game_a", role="<@&111>", icon="",
+            color="", forum="<#123>", tag="98765", visibility="0",
+            message="Please check the rules.",
+            registration_api="https://reg.example",
+            match_api="https://api.example",
+            match_url="https://match.example", api_token="super-secret",
+            website_url="https://site.example",
+            registration_url="https://signup.example",
+            profile_url="https://profile.example",
+            default_max_guests=4)
+        cog.game_parameters[DEFAULT_GUILD_ID]["game_a"]["param1"][
+            "display_name"] = "Param One"
+        await Matchmaking.games_show.callback(cog, interaction, game="game_a")
+        text = interaction.response.messages[0][0]
+        assert "**Game A** — `/game_a`" in text
+        assert "Role to ping: <@&111>" in text
+        assert "Forum: <#123> (tag: 98765)" in text
+        assert "Threads: private" in text
+        assert 'Extra message: "Please check the rules."' in text
+        assert "Default max players: 5" in text
+        assert "Registration API: https://reg.example" in text
+        assert "Match API: https://api.example" in text
+        assert "Match URL: https://match.example" in text
+        assert ("Links: website: https://site.example · "
+                "registration: https://signup.example · "
+                "profile: https://profile.example") in text
+        assert "API token: set" in text
+        # The token value itself is a secret and must never appear.
+        assert "super-secret" not in text
+        assert ("- `param1` (Param One): `alpha` (Alpha One), `beta` (Beta Two)"
+                " — sent as `field_one`") in text
+
+    @pytest.mark.asyncio
+    async def test_minimal_game_and_discord_only_parameter(self, monkeypatch):
+        cog = _cog(monkeypatch)
+        interaction = FakeInteraction(user=_manager(), guild_id=42424)
+        cog.game_api_fields[DEFAULT_GUILD_ID]["game_a"].clear()
+        await Matchmaking.games_show.callback(cog, interaction, game="game_a")
+        text = interaction.response.messages[0][0]
+        assert "**Game A** — `/game_a`" in text
+        assert "API token: not set" in text
+        assert "Role to ping" not in text
+        assert "- `param1`: `alpha` (Alpha One), `beta` (Beta Two) — Discord-only" in text
+        assert "sent as" not in text
+
+    @pytest.mark.asyncio
+    async def test_show_lists_payload_fields(self, monkeypatch):
+        # The reserved match-payload fields: defaults plus the game's own
+        # overrides, merged like register_match does.
+        cog = _cog(monkeypatch)
+        interaction = FakeInteraction(user=_manager(), guild_id=42424)
+        cog.default_api_fields[constants.API_TITLE_FIELD_KEY] = "match_title"
+        cog.game_api_fields[DEFAULT_GUILD_ID]["game_a"][
+            constants.API_PARTICIPANTS_FIELD_KEY] = "players"
+        await Matchmaking.games_show.callback(cog, interaction, game="game_a")
+        text = interaction.response.messages[0][0]
+        assert ("API payload fields: title → `match_title` · "
+                "participants → `players`") in text
+
+
+class TestGameApiFields:
+    """The reserved match-payload component fields (title, participants...)."""
+
+    @pytest.mark.asyncio
+    async def test_add_stores_reserved_fields(self, monkeypatch):
+        cog = _cog(monkeypatch)
+        interaction = FakeInteraction(user=_manager(), guild_id=42424)
+        written = {}
+
+        async def fake_ensure(guild_id):
+            return None
+
+        async def fake_add(guild_id, command, **fields):
+            written["add"] = fields
+            return True
+
+        monkeypatch.setattr(db_config, "ensure_guild_config", fake_ensure)
+        monkeypatch.setattr(db_config, "add_game", fake_add)
+        await Matchmaking.games_add.callback(
+            cog, interaction, command="root",
+            title_field="match_title", participants_field="players")
+        assert written["add"]["api_fields"] == {
+            constants.API_TITLE_FIELD_KEY: "match_title",
+            constants.API_PARTICIPANTS_FIELD_KEY: "players",
+        }
+        assert interaction.followup.sent[0][0] == "Game `root` added."
+
+    @pytest.mark.asyncio
+    async def test_update_sets_reserved_fields(self, monkeypatch):
+        cog = _cog(monkeypatch)
+        interaction = FakeInteraction(user=_manager(), guild_id=42424)
+        written = {}
+
+        async def fake_update(guild_id, command, **fields):
+            written["update"] = fields
+            return True
+
+        monkeypatch.setattr(db_config, "update_game", fake_update)
+        await Matchmaking.games_update.callback(
+            cog, interaction, command="game_a", title_field="renamed_title")
+        # No game columns were touched: only the api-field override changed.
+        assert written["update"] == {
+            "api_fields": {constants.API_TITLE_FIELD_KEY: "renamed_title"}}
+        assert interaction.followup.sent[0][0] == "Game `game_a` updated."
+
+    @pytest.mark.asyncio
+    async def test_update_dash_clears_reserved_field(self, monkeypatch):
+        # "-" removes the override: the game falls back to the default field.
+        cog = _cog(monkeypatch)
+        interaction = FakeInteraction(user=_manager(), guild_id=42424)
+        written = {}
+
+        async def fake_update(guild_id, command, **fields):
+            written["update"] = fields
+            return True
+
+        monkeypatch.setattr(db_config, "update_game", fake_update)
+        await Matchmaking.games_update.callback(
+            cog, interaction, command="game_a", table_talk_url_field="-")
+        assert written["update"] == {
+            "api_fields": {constants.API_TABLE_TALK_URL_FIELD_KEY: None}}
+
+    @pytest.mark.asyncio
+    async def test_update_rejects_invalid_field_name(self, monkeypatch):
+        cog = _cog(monkeypatch)
+        interaction = FakeInteraction(user=_manager(), guild_id=42424)
+        calls = []
+        monkeypatch.setattr(
+            db_config, "update_game", lambda *a, **k: calls.append(1))
+        await Matchmaking.games_update.callback(
+            cog, interaction, command="game_a", title_field="bad field")
+        assert calls == []
+        assert "title_field" in interaction.response.messages[0][0]
+
+    @pytest.mark.asyncio
+    async def test_unset_arguments_keep_current_overrides(self, monkeypatch):
+        cog = _cog(monkeypatch)
+        interaction = FakeInteraction(user=_manager(), guild_id=42424)
+        written = {}
+
+        async def fake_update(guild_id, command, **fields):
+            written["update"] = fields
+            return True
+
+        monkeypatch.setattr(db_config, "update_game", fake_update)
+        await Matchmaking.games_update.callback(
+            cog, interaction, command="game_a", api_token="rotated")
+        # api_fields is not passed: db_config keeps the current overrides.
+        assert written["update"] == {"api_token": "rotated"}
 
 
 class TestParameterError:

@@ -11,6 +11,7 @@ from . import constants
 from . import db_config
 from . import utils
 from .config import ConfigMixin
+from .models import GameOption
 
 # Option descriptions shared by /games add and /games update.
 _GAME_OPTION_DESCRIPTIONS = {
@@ -30,6 +31,20 @@ _GAME_OPTION_DESCRIPTIONS = {
     "registration_url": "League registration URL.",
     "profile_url": "League profile URL.",
     "max_players": "Default maximum players (2-100, host included).",
+    "title_field": "Match API field receiving the title; `-` resets to the default.",
+    "table_talk_url_field": "Match API field receiving the thread URL; `-` resets to the default.",
+    "participants_field": "Match API field receiving the participants; `-` resets to the default.",
+    "discord_username_field": "Match API field receiving each Discord name; `-` resets to the default.",
+}
+
+# Reserved match-payload component fields: /games add|update argument name
+# -> canonical api_* key stored as a per-game override of the default payload
+# field names. Unlike the game columns above they are not Game model fields.
+_API_FIELD_ARGUMENTS = {
+    "title_field": constants.API_TITLE_FIELD_KEY,
+    "table_talk_url_field": constants.API_TABLE_TALK_URL_FIELD_KEY,
+    "participants_field": constants.API_PARTICIPANTS_FIELD_KEY,
+    "discord_username_field": constants.API_DISCORD_USERNAME_FIELD_KEY,
 }
 
 
@@ -94,6 +109,32 @@ class AdminMixin:
         if (forum and not common_constants.CHANNEL_MENTION_RE.match(forum)):
             return "`forum` must be a channel mention."
         return None
+
+    @staticmethod
+    def _api_fields_error(
+            values: dict[str, Optional[str]]
+    ) -> tuple[dict[str, Optional[str]], Optional[str]]:
+        """The reserved api_* overrides from /games add|update arguments.
+
+        Returns ``(api_fields, error)``: a mapping of canonical api_* keys to
+        the requested field name (``None`` = clear the override, falling back
+        to the default), or an error message when a value is malformed.
+        Arguments left out (None) keep the current override untouched.
+        """
+        api_fields = {}
+        for argument, key in _API_FIELD_ARGUMENTS.items():
+            value = values.get(argument)
+            if (value is None):
+                continue
+            if (value == "-"):
+                api_fields[key] = None
+            elif (not common_constants.API_FIELD_RE.match(value)):
+                return {}, (f"`{argument}` must be a non-empty field name "
+                            "(letters, digits, underscores), or `-` to reset "
+                            "it to the default.")
+            else:
+                api_fields[key] = value
+        return api_fields, None
 
     async def _guard_admin(self, interaction: discord.Interaction) -> bool:
         """Reject non-managers with an ephemeral message."""
@@ -193,8 +234,6 @@ class AdminMixin:
             if (default_max_guests is None):
                 return None, "`max_players` must be between 2 and 100."
             fields["default_max_guests"] = default_max_guests
-        if (not fields):
-            return None, "Nothing to update: provide at least one option."
         return fields, None
 
     async def _refresh_config(self) -> None:
@@ -254,6 +293,10 @@ class AdminMixin:
         registration_url: Optional[str] = None,
         profile_url: Optional[str] = None,
         max_players: Optional[int] = None,
+        title_field: Optional[str] = None,
+        table_talk_url_field: Optional[str] = None,
+        participants_field: Optional[str] = None,
+        discord_username_field: Optional[str] = None,
     ):
         if (not await self._guard_admin(interaction)
                 or not await self._guard_database(interaction)):
@@ -274,13 +317,25 @@ class AdminMixin:
         if (error is not None):
             await interaction.response.send_message(error, ephemeral=True)
             return
-        
+        api_fields, error = self._api_fields_error({
+            "title_field": title_field,
+            "table_talk_url_field": table_talk_url_field,
+            "participants_field": participants_field,
+            "discord_username_field": discord_username_field,
+        })
+        if (error is not None):
+            await interaction.response.send_message(error, ephemeral=True)
+            return
+
         # Defer to avoid the 3s timeout.
         await interaction.response.defer(ephemeral=True)
-        
+
         guild_id = interaction.guild_id
         await db_config.ensure_guild_config(guild_id)
-        if (not await db_config.add_game(guild_id, command, **fields)):
+        add_kwargs = dict(fields)
+        if (api_fields):
+            add_kwargs["api_fields"] = api_fields
+        if (not await db_config.add_game(guild_id, command, **add_kwargs)):
             await interaction.followup.send(
                 f"`{command}` is already configured; use `/games update` "
                 "to change it.", ephemeral=True)
@@ -315,6 +370,10 @@ class AdminMixin:
         registration_url: Optional[str] = None,
         profile_url: Optional[str] = None,
         max_players: Optional[int] = None,
+        title_field: Optional[str] = None,
+        table_talk_url_field: Optional[str] = None,
+        participants_field: Optional[str] = None,
+        discord_username_field: Optional[str] = None,
     ):
         if (not await self._guard_admin(interaction)
                 or not await self._guard_database(interaction)):
@@ -326,15 +385,31 @@ class AdminMixin:
             match_url=match_url, api_token=api_token,
             website_url=website_url, registration_url=registration_url,
             profile_url=profile_url, max_players=max_players)
+        api_fields, api_error = self._api_fields_error({
+            "title_field": title_field,
+            "table_talk_url_field": table_talk_url_field,
+            "participants_field": participants_field,
+            "discord_username_field": discord_username_field,
+        })
+        if (api_error is not None):
+            await interaction.response.send_message(api_error, ephemeral=True)
+            return
         if (error is not None):
             await interaction.response.send_message(error, ephemeral=True)
             return
-        
+        if (not fields and not api_fields):
+            await interaction.response.send_message(
+                "Nothing to update: provide at least one option.", ephemeral=True)
+            return
+
         # Defer to avoid the 3s timeout.
         await interaction.response.defer(ephemeral=True)
 
         guild_id = interaction.guild_id
-        if (not await db_config.update_game(guild_id, command, **fields)):
+        update_kwargs = dict(fields)
+        if (api_fields):
+            update_kwargs["api_fields"] = api_fields
+        if (not await db_config.update_game(guild_id, command, **update_kwargs)):
             await interaction.followup.send(
                 f"`{command}` is not configured for this server.", ephemeral=True)
             return
@@ -399,16 +474,103 @@ class AdminMixin:
             if (option.name):
                 details.append(f"**{option.name}**")
             details.extend(option.settings_summary())
-            # The token itself is a secret and is never displayed; admins
-            # only see whether one is configured.
-            details.append("api token: set" if option.api_token
-                           else "api token: not set")
             if (details):
                 lines.append(f"`{command}` — " + " · ".join(details))
             else:
                 lines.append(f"`{command}`")
         await interaction.response.send_message(
             "\n".join(lines), ephemeral=True)
+
+    def _game_details(self, guild_id: int, command: str,
+                      option: GameOption) -> str:
+        """Everything configured for a game, as one ephemeral text block.
+
+        Secrets (the api token) are only ever indicated, never included.
+        """
+        if (option.name):
+            lines = [f"**{option.name}** — `/{command}`"]
+        else:
+            lines = [f"`/{command}`"]
+        if (option.role):
+            lines.append(f"Role to ping: {option.role}")
+        if (option.forum):
+            forum = f"Forum: {option.forum}"
+            if (option.tag):
+                forum += f" (tag: {option.tag})"
+            lines.append(forum)
+        if (option.visibility):
+            lines.append("Threads: private" if (option.visibility == "0")
+                         else "Threads: public")
+        if (option.message):
+            lines.append(f'Extra message: "{option.message}"')
+        if (option.default_max_guests is not None):
+            lines.append(f"Default max players: {option.default_max_guests + 1}")
+        if (option.registration_api):
+            lines.append(f"Registration API: {option.registration_api}")
+        if (option.match_api):
+            lines.append(f"Match API: {option.match_api}")
+        if (option.match_url):
+            lines.append(f"Match URL: {option.match_url}")
+        payload_fields = dict(self.default_api_fields)
+        payload_fields.update(self.get_game_api_fields(guild_id, command))
+        payload_bits = [f"{label} → `{payload_fields[key]}`"
+                        for label, key in (
+            ("title", constants.API_TITLE_FIELD_KEY),
+            ("thread link", constants.API_TABLE_TALK_URL_FIELD_KEY),
+            ("participants", constants.API_PARTICIPANTS_FIELD_KEY),
+            ("discord name", constants.API_DISCORD_USERNAME_FIELD_KEY),
+        ) if (payload_fields.get(key))]
+        if (payload_bits):
+            lines.append("API payload fields: " + " · ".join(payload_bits))
+        links = [f"{label}: {url}" for label, url in (
+            ("website", option.website_url),
+            ("registration", option.registration_url),
+            ("profile", option.profile_url)) if (url)]
+        if (links):
+            lines.append("Links: " + " · ".join(links))
+        # The token itself is a secret and is never displayed; admins only
+        # see whether one is configured.
+        lines.append("API token: set" if (option.api_token)
+                     else "API token: not set")
+        parameters = self.get_game_parameters(guild_id, command)
+        api_fields = self.get_game_api_fields(guild_id, command)
+        if (parameters):
+            lines.append("Parameters:")
+            for name, definition in parameters.items():
+                display = definition["display_name"]
+                label = f"`{name}`" + (f" ({display})" if (display != name) else "")
+                values = ", ".join(
+                    f"`{value}`" + (f" ({display_name})"
+                                    if (display_name != value) else "")
+                    for value, display_name in definition["values"].items())
+                field = api_fields.get(name)
+                suffix = f" — sent as `{field}`" if (field) else " — Discord-only"
+                lines.append(f"- {label}: {values or 'no values'}{suffix}")
+        else:
+            lines.append("Parameters: none")
+        return "\n".join(lines)
+
+    @games.command(name="show",
+                   description="Show everything configured for a game.")
+    @app_commands.describe(game="The game's slash command name.")
+    async def games_show(self, interaction: discord.Interaction, game: str):
+        # Like /games list, this exposes api_fields and other league settings
+        # that should not be visible to regular members.
+        if (not await self._guard_admin(interaction)):
+            return
+        option = self.get_guild_config(interaction.guild_id).games.get(game)
+        if (option is None):
+            await interaction.response.send_message(
+                f"`{game}` is not configured for this server.", ephemeral=True)
+            return
+        await interaction.response.send_message(
+            self._game_details(interaction.guild_id, game, option),
+            ephemeral=True)
+
+    @games_show.autocomplete("game")
+    async def games_show_game_autocomplete(
+            self, interaction: discord.Interaction, current: str):
+        return await self._games_autocomplete(interaction, current)
 
     # ------------------------------------------------------------------ #
     # /games parameter — edit a game's parameters for this server.

@@ -17,7 +17,7 @@ from db import models
 from db.db import Database
 from db.orm_config import orm_config
 
-from cogs.matchmaking import db_config
+from cogs.matchmaking import constants, db_config
 from cogs.matchmaking.cog import Matchmaking
 from cogs.matchmaking.constants import DEFAULT_GUILD_ID
 
@@ -300,6 +300,44 @@ class TestTokenMigrationBackfill:
                              "api_token": "backfilled-secret"}]
         finally:
             await database.close()
+
+
+class TestGameApiFields:
+    """Reserved api_* payload field overrides via add_game/update_game."""
+
+    async def test_update_game_writes_and_clears_overrides(
+            self, db, games_config, game_parameters_config):
+        await db_config.seed_db_from_config(games_config, game_parameters_config)
+        await db_config.ensure_guild_config(42424)
+        # The fixture's per-game api_* keys are seeded as overrides.
+        await db_config.update_game(42424, "game_a", api_fields={
+            constants.API_TITLE_FIELD_KEY: "renamed_title"})
+        loaded = await db_config.load_config_from_db()
+        fields = loaded.game_api_fields[42424]["game_a"]
+        assert fields[constants.API_TITLE_FIELD_KEY] == "renamed_title"
+        # Untouched overrides keep their value.
+        assert fields[constants.API_PARTICIPANTS_FIELD_KEY] == "players"
+        # Clearing the override makes the game fall back to the default.
+        await db_config.update_game(42424, "game_a", api_fields={
+            constants.API_TITLE_FIELD_KEY: None})
+        loaded = await db_config.load_config_from_db()
+        assert (constants.API_TITLE_FIELD_KEY
+                not in loaded.game_api_fields[42424]["game_a"])
+
+    async def test_add_game_creates_overrides(
+            self, db, games_config, game_parameters_config):
+        await db_config.seed_db_from_config(games_config, game_parameters_config)
+        # The guild row must exist: games reference it (FK).
+        await db_config.ensure_guild_config(42424)
+        created = await db_config.add_game(
+            42424, "new_game", name="New", api_fields={
+                constants.API_DISCORD_USERNAME_FIELD_KEY: "discord_name"})
+        assert created
+        game = await models.Game.get_or_none(guild_id=42424, command="new_game")
+        overrides = {override.key: override.field_name for override in
+                     await models.GameApiFieldOverride.filter(game_id=game.id)}
+        assert overrides == {
+            constants.API_DISCORD_USERNAME_FIELD_KEY: "discord_name"}
 
 
 class TestAdminPersistence:

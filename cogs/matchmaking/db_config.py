@@ -286,21 +286,55 @@ async def ensure_guild_config(guild_id: int) -> None:
                     game=new_game, key=override.key, field_name=override.field_name)
 
 
-async def add_game(guild_id: int, command: str, **fields) -> bool:
-    """Create a game row; whether it was created (False if it already exists)."""
-    _, created = await models.Game.get_or_create(
+async def _write_api_field_overrides(
+        game: models.Game, api_fields: dict[str, str | None]) -> None:
+    """Sync a game's reserved api_* override rows with the given values.
+
+    A None value deletes the override (the game falls back to the default
+    payload field names); anything else upserts the row.
+    """
+    for key, field_name in api_fields.items():
+        if (field_name is None):
+            await models.GameApiFieldOverride.filter(
+                game_id=game.id, key=key).delete()
+        else:
+            await models.GameApiFieldOverride.update_or_create(
+                game=game, key=key, defaults={"field_name": field_name})
+
+
+async def add_game(guild_id: int, command: str, *,
+                   api_fields: dict[str, str] | None = None, **fields) -> bool:
+    """Create a game row (+ reserved api_* overrides); whether it was created.
+
+    ``api_fields`` maps canonical api_* keys (constants.API_*_FIELD_KEY) to
+    the match API field name stored as a per-game override of the default
+    payload field names.
+    """
+    game, created = await models.Game.get_or_create(
         guild_id=guild_id, command=command, defaults=fields)
+    if (created and api_fields):
+        await _write_api_field_overrides(game, api_fields)
     return created
 
 
-async def update_game(guild_id: int, command: str, **fields) -> bool:
-    """Update an existing game row; whether it existed."""
+async def update_game(guild_id: int, command: str, *,
+                      api_fields: dict[str, str | None] | None = None,
+                      **fields) -> bool:
+    """Update an existing game row (+ reserved api_* overrides); whether it existed.
+
+    ``api_fields`` maps canonical api_* keys to the new field name; a None
+    value removes the override so the default applies again.
+    """
     game = await models.Game.get_or_none(guild_id=guild_id, command=command)
     if (game is None):
         return False
-    for key, value in fields.items():
-        setattr(game, key, value)
-    await game.save(update_fields=list(fields.keys()))
+    if (fields):
+        for key, value in fields.items():
+            setattr(game, key, value)
+        await game.save(update_fields=list(fields.keys()))
+    if (api_fields):
+        await _write_api_field_overrides(game, api_fields)
+    return True
     return True
 
 
