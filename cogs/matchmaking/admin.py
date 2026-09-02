@@ -6,6 +6,7 @@ import discord
 from discord import app_commands
 
 from common import constants as common_constants
+from common import utils as common_utils
 
 from . import constants
 from . import db_config
@@ -479,38 +480,54 @@ class AdminMixin:
             else:
                 lines.append(f"`{command}`")
         await interaction.response.send_message(
-            "\n".join(lines), ephemeral=True)
+            common_utils.clip_lines(lines), ephemeral=True)
 
-    def _game_details(self, guild_id: int, command: str,
-                      option: GameOption) -> str:
-        """Everything configured for a game, as one ephemeral text block.
+    def _game_show_output(self, guild_id: int, command: str,
+                          option: GameOption) -> tuple[str, list[discord.Embed]]:
+        """The /games show reply: a text summary plus detail embeds.
 
-        Secrets (the api token) are only ever indicated, never included.
+        The message content carries the game identity and its LFG post
+        settings (role, forum, thread visibility...), kept within Discord's
+        2000-character message limit. The "Match submission" embed holds
+        the league endpoints and payload fields; the parameters get their
+        own embed (chunked: an embed holds at most 25 fields). Secrets
+        (the api token) are only ever indicated, never included.
         """
         if (option.name):
-            lines = [f"**{option.name}** — `/{command}`"]
+            content_lines = [f"**{option.name}** — `/{command}`"]
         else:
-            lines = [f"`/{command}`"]
+            content_lines = [f"`/{command}`"]
+        if (option.icon):
+            content_lines.append(f"Icon: {option.icon}")
+        if (option.color):
+            content_lines.append(f"Color: {option.color}")
         if (option.role):
-            lines.append(f"Role to ping: {option.role}")
+            content_lines.append(f"Role to ping: {option.role}")
         if (option.forum):
             forum = f"Forum: {option.forum}"
             if (option.tag):
                 forum += f" (tag: {option.tag})"
-            lines.append(forum)
+            content_lines.append(forum)
         if (option.visibility):
-            lines.append("Threads: private" if (option.visibility == "0")
-                         else "Threads: public")
+            content_lines.append("Threads: private" if (option.visibility == "0")
+                                 else "Threads: public")
         if (option.message):
-            lines.append(f'Extra message: "{option.message}"')
+            content_lines.append(f'Extra message: "{option.message}"')
         if (option.default_max_guests is not None):
-            lines.append(f"Default max players: {option.default_max_guests + 1}")
-        if (option.registration_api):
-            lines.append(f"Registration API: {option.registration_api}")
-        if (option.match_api):
-            lines.append(f"Match API: {option.match_api}")
-        if (option.match_url):
-            lines.append(f"Match URL: {option.match_url}")
+            content_lines.append(
+                f"Default max players: {option.default_max_guests + 1}")
+
+        submission_embed = discord.Embed(title="Match submission")
+        for label, url in (
+            ("Website URL", option.website_url),
+            ("Profile URL", option.profile_url),
+            ("Registration URL", option.registration_url),
+            ("Match URL", option.match_url),
+            ("Registration API", option.registration_api),
+            ("Match API", option.match_api)):
+            if (url):
+                submission_embed.add_field(
+                    name=label, value=common_utils.shorten(url), inline=False)
         payload_fields = dict(self.default_api_fields)
         payload_fields.update(self.get_game_api_fields(guild_id, command))
         payload_bits = [f"{label} → `{payload_fields[key]}`"
@@ -521,34 +538,41 @@ class AdminMixin:
             ("discord name", constants.API_DISCORD_USERNAME_FIELD_KEY),
         ) if (payload_fields.get(key))]
         if (payload_bits):
-            lines.append("API payload fields: " + " · ".join(payload_bits))
-        links = [f"{label}: {url}" for label, url in (
-            ("website", option.website_url),
-            ("registration", option.registration_url),
-            ("profile", option.profile_url)) if (url)]
-        if (links):
-            lines.append("Links: " + " · ".join(links))
+            submission_embed.add_field(
+                name="Payload fields",
+                value=common_utils.shorten(" · ".join(payload_bits)), inline=False)
         # The token itself is a secret and is never displayed; admins only
         # see whether one is configured.
-        lines.append("API token: set" if (option.api_token)
-                     else "API token: not set")
+        submission_embed.add_field(
+            name="API token",
+            value="set" if (option.api_token) else "not set", inline=False)
         parameters = self.get_game_parameters(guild_id, command)
         api_fields = self.get_game_api_fields(guild_id, command)
-        if (parameters):
-            lines.append("Parameters:")
-            for name, definition in parameters.items():
-                display = definition["display_name"]
-                label = f"`{name}`" + (f" ({display})" if (display != name) else "")
-                values = ", ".join(
-                    f"`{value}`" + (f" ({display_name})"
-                                    if (display_name != value) else "")
-                    for value, display_name in definition["values"].items())
-                field = api_fields.get(name)
-                suffix = f" — sent as `{field}`" if (field) else " — Discord-only"
-                lines.append(f"- {label}: {values or 'no values'}{suffix}")
-        else:
-            lines.append("Parameters: none")
-        return "\n".join(lines)
+        if (not parameters):
+            content_lines.append("Parameters: none")
+            return common_utils.clip_lines(content_lines), [submission_embed]
+        fields = []
+        for name, definition in parameters.items():
+            display = definition["display_name"]
+            field_name = (f"{name} ({display})"
+                          if (display != name) else name)
+            value = utils.format_accepted_values(definition["values"])
+            field = api_fields.get(name)
+            value += f"\nSent as `{field}`" if (field) else "\nDiscord-only"
+            fields.append((common_utils.shorten(field_name, 256),
+                           common_utils.shorten(value)))
+        # Discord caps an embed at 25 fields: chunk large parameter sets
+        # into follow-up embeds.
+        parameter_embeds = []
+        for index, start in enumerate(range(0, len(fields), 25)):
+            embed = discord.Embed(
+                title=f"Parameters — /{command}"
+                      + (" (continued)" if (index) else ""))
+            for field_name, value in fields[start:start + 25]:
+                embed.add_field(name=field_name, value=value, inline=False)
+            parameter_embeds.append(embed)
+        return (common_utils.clip_lines(content_lines),
+                [submission_embed] + parameter_embeds)
 
     @games.command(name="show",
                    description="Show everything configured for a game.")
@@ -563,9 +587,10 @@ class AdminMixin:
             await interaction.response.send_message(
                 f"`{game}` is not configured for this server.", ephemeral=True)
             return
+        content, embeds = self._game_show_output(
+            interaction.guild_id, game, option)
         await interaction.response.send_message(
-            self._game_details(interaction.guild_id, game, option),
-            ephemeral=True)
+            content=content, embeds=embeds, ephemeral=True)
 
     @games_show.autocomplete("game")
     async def games_show_game_autocomplete(

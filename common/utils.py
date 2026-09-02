@@ -96,3 +96,44 @@ def safe_list_get (l, idx, default):
   except IndexError:
     return default
 
+
+def shorten(text: str, limit: int = 1024) -> str:
+    """``text`` truncated to ``limit`` characters with an ellipsis.
+
+    Keeps text within Discord's limits (an embed field value holds at most
+    1024 characters, a field name 256, a plain message 2000); the
+    truncation is marked so readers can tell the value was cut.
+    """
+    if (len(text) <= limit):
+        return text
+    return text[:limit - 1] + "…"
+
+
+def clip_lines(lines: list[str], limit: int = 2000) -> str:
+    """Join lines into a plain message clipped to ``limit`` characters.
+
+    Whole lines are kept (a mid-line cut would look broken); when lines
+    must be dropped the tail says how many were hidden. When a single line
+    alone is too long, it is cut with an ellipsis instead.
+    """
+    if (not lines):
+        return ""
+    message = "\n".join(lines)
+    if (len(message) <= limit):
+        return message
+    kept = []
+    used = 0
+    for line in lines:
+        extra = (1 if kept else 0) + len(line)
+        if (used + extra > limit):
+            break
+        kept.append(line)
+        used += extra
+    while (kept):
+        remaining = len(lines) - len(kept)
+        tail = "" if (not remaining) else f"\n… and {remaining} more not shown"
+        if (len("\n".join(kept)) + len(tail) <= limit):
+            return "\n".join(kept) + tail
+        kept.pop()
+    return shorten(lines[0], limit)
+

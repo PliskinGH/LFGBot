@@ -355,6 +355,27 @@ class TestGamesList:
         assert content == "Only server managers can change the game configuration."
         assert "game_a" not in content
 
+    @pytest.mark.asyncio
+    async def test_many_games_are_clipped_to_the_message_limit(self, monkeypatch):
+        cog = _cog(monkeypatch)
+        games = cog.get_guild_config(42424).games
+        for index in range(60):
+            games[f"game_{index:02d}"] = GameOption(
+                name=f"Game number {index} " + "x" * 60,
+                command=f"game_{index:02d}", role="<@&111>", icon="", color="",
+                forum="<#123>", tag="", visibility="", message="",
+                registration_api="", match_api="", match_url="", api_token="",
+                website_url="", registration_url="", profile_url="",
+                default_max_guests=3)
+        interaction = FakeInteraction(user=_manager(), guild_id=42424)
+        await Matchmaking.games_list.callback(cog, interaction)
+        content = interaction.response.messages[0][0]
+        assert len(content) <= 2000
+        # Whole lines are kept and the tail says how many were cut.
+        assert content.endswith("more not shown")
+        assert "`game_00`" in content
+        assert "`game_59`" not in content
+
 
 class TestGameApiToken:
     @pytest.mark.asyncio
@@ -422,6 +443,18 @@ class TestGameApiToken:
         assert "super-secret" not in message
 
 
+def _embeds_text(embeds) -> str:
+    """All textual content of a list of embeds, for leak assertions."""
+    parts = []
+    for embed in embeds:
+        parts.append(embed.title or "")
+        parts.append(embed.description or "")
+        for field in embed.fields:
+            parts.append(field.name)
+            parts.append(field.value)
+    return "\n".join(parts)
+
+
 class TestGamesShow:
     @pytest.mark.asyncio
     async def test_requires_manage_guild(self, monkeypatch):
@@ -444,8 +477,9 @@ class TestGamesShow:
         cog = _cog(monkeypatch)
         interaction = FakeInteraction(user=_manager(), guild_id=42424)
         cog.guilds[42424].games["game_a"] = GameOption(
-            name="Game A", command="game_a", role="<@&111>", icon="",
-            color="", forum="<#123>", tag="98765", visibility="0",
+            name="Game A", command="game_a", role="<@&111>",
+            icon="https://cdn.example/icon.png", color="16777215",
+            forum="<#123>", tag="98765", visibility="0",
             message="Please check the rules.",
             registration_api="https://reg.example",
             match_api="https://api.example",
@@ -457,24 +491,36 @@ class TestGamesShow:
         cog.game_parameters[DEFAULT_GUILD_ID]["game_a"]["param1"][
             "display_name"] = "Param One"
         await Matchmaking.games_show.callback(cog, interaction, game="game_a")
-        text = interaction.response.messages[0][0]
-        assert "**Game A** — `/game_a`" in text
-        assert "Role to ping: <@&111>" in text
-        assert "Forum: <#123> (tag: 98765)" in text
-        assert "Threads: private" in text
-        assert 'Extra message: "Please check the rules."' in text
-        assert "Default max players: 5" in text
-        assert "Registration API: https://reg.example" in text
-        assert "Match API: https://api.example" in text
-        assert "Match URL: https://match.example" in text
-        assert ("Links: website: https://site.example · "
-                "registration: https://signup.example · "
-                "profile: https://profile.example") in text
-        assert "API token: set" in text
-        # The token value itself is a secret and must never appear.
-        assert "super-secret" not in text
-        assert ("- `param1` (Param One): `alpha` (Alpha One), `beta` (Beta Two)"
-                " — sent as `field_one`") in text
+        content, embeds, ephemeral, _ = interaction.response.messages[0]
+        assert content == (
+            "**Game A** — `/game_a`\n"
+            "Icon: https://cdn.example/icon.png\n"
+            "Color: 16777215\n"
+            "Role to ping: <@&111>\n"
+            "Forum: <#123> (tag: 98765)\n"
+            "Threads: private\n"
+            'Extra message: "Please check the rules."\n'
+            "Default max players: 5")
+        assert ephemeral is True
+        submission_embed, parameters_embed = embeds
+        assert submission_embed.title == "Match submission"
+        fields = {field.name: field.value for field in submission_embed.fields}
+        assert "LFG post" not in fields
+        assert fields["Registration API"] == "https://reg.example"
+        assert fields["Match API"] == "https://api.example"
+        assert fields["Match URL"] == "https://match.example"
+        assert fields["API token"] == "set"
+        assert fields["Website URL"] == "https://site.example"
+        assert fields["Registration URL"] == "https://signup.example"
+        assert fields["Profile URL"] == "https://profile.example"
+        assert parameters_embed.title == "Parameters — /game_a"
+        parameter_fields = {field.name: field.value
+                            for field in parameters_embed.fields}
+        assert parameter_fields["param1 (Param One)"] == (
+            "alpha (Alpha One), beta (Beta Two)\nSent as `field_one`")
+        # The token value itself is a secret and must never appear anywhere.
+        assert "super-secret" not in content
+        assert "super-secret" not in _embeds_text(embeds)
 
     @pytest.mark.asyncio
     async def test_minimal_game_and_discord_only_parameter(self, monkeypatch):
@@ -482,12 +528,18 @@ class TestGamesShow:
         interaction = FakeInteraction(user=_manager(), guild_id=42424)
         cog.game_api_fields[DEFAULT_GUILD_ID]["game_a"].clear()
         await Matchmaking.games_show.callback(cog, interaction, game="game_a")
-        text = interaction.response.messages[0][0]
-        assert "**Game A** — `/game_a`" in text
-        assert "API token: not set" in text
-        assert "Role to ping" not in text
-        assert "- `param1`: `alpha` (Alpha One), `beta` (Beta Two) — Discord-only" in text
-        assert "sent as" not in text
+        content, embeds, _, _ = interaction.response.messages[0]
+        # Only the game header is left: no LFG post settings are configured.
+        assert content == "**Game A** — `/game_a`"
+        submission_embed, parameters_embed = embeds
+        assert submission_embed.title == "Match submission"
+        fields = {field.name: field.value for field in submission_embed.fields}
+        assert "Registration API" not in fields
+        assert fields["API token"] == "not set"
+        field = parameters_embed.fields[0]
+        assert field.name == "param1"
+        assert field.value == "alpha (Alpha One), beta (Beta Two)\nDiscord-only"
+        assert "Sent as" not in _embeds_text(embeds)
 
     @pytest.mark.asyncio
     async def test_show_lists_payload_fields(self, monkeypatch):
@@ -499,9 +551,41 @@ class TestGamesShow:
         cog.game_api_fields[DEFAULT_GUILD_ID]["game_a"][
             constants.API_PARTICIPANTS_FIELD_KEY] = "players"
         await Matchmaking.games_show.callback(cog, interaction, game="game_a")
-        text = interaction.response.messages[0][0]
-        assert ("API payload fields: title → `match_title` · "
-                "participants → `players`") in text
+        _, embeds, _, _ = interaction.response.messages[0]
+        fields = {field.name: field.value for field in embeds[0].fields}
+        assert (fields["Payload fields"]
+                == "title → `match_title` · participants → `players`")
+
+    @pytest.mark.asyncio
+    async def test_show_without_parameters_sends_a_single_embed(self, monkeypatch):
+        cog = _cog(monkeypatch)
+        interaction = FakeInteraction(user=_manager(), guild_id=42424)
+        cog.game_parameters[DEFAULT_GUILD_ID]["game_a"].clear()
+        await Matchmaking.games_show.callback(cog, interaction, game="game_a")
+        content, embeds, _, _ = interaction.response.messages[0]
+        assert len(embeds) == 1
+        assert embeds[0].title == "Match submission"
+        # With no parameters there is no second embed: the content says so.
+        assert content.endswith("Parameters: none")
+
+    @pytest.mark.asyncio
+    async def test_long_values_are_truncated_to_embed_limits(self, monkeypatch):
+        # Very long configured URLs must not break the embed: every value is
+        # cut to Discord's per-field limits (1024 value, 256 name).
+        cog = _cog(monkeypatch)
+        interaction = FakeInteraction(user=_manager(), guild_id=42424)
+        cog.guilds[42424].games["game_a"].registration_api = (
+            "https://reg.example/" + "a" * 3000)
+        cog.game_parameters[DEFAULT_GUILD_ID]["game_a"]["param1"][
+            "display_name"] = "P" * 300
+        await Matchmaking.games_show.callback(cog, interaction, game="game_a")
+        _, embeds, _, _ = interaction.response.messages[0]
+        fields = {field.name: field.value for field in embeds[0].fields}
+        assert len(fields["Registration API"]) == 1024
+        assert fields["Registration API"].endswith("…")
+        parameter_field = embeds[1].fields[0]
+        assert len(parameter_field.name) == 256
+        assert parameter_field.name.startswith("param1 (PPP")
 
 
 class TestGameApiFields:
