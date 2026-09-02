@@ -25,6 +25,10 @@ CUSTOM_EMOJI_RE = re.compile(r"<:[\w]+:[\d]+>")
 # Discord slash-command names: 1-32 characters, lowercase, alphanumeric or
 # underscore (used when registering dynamic per-game commands).
 COMMAND_NAME_RE = re.compile(r"^[a-z0-9_]{1,32}$")
+# Match API field names: JSON object keys in the match registration payload.
+# Letters, digits and underscores (matching the field names used in
+# games_parameters.ini); anything else would produce a malformed payload key.
+API_FIELD_RE = re.compile(r"^[a-zA-Z0-9_]+$")
 # Anchored mention forms, stricter than MENTION_RE (which is also used with
 # fullmatch): role/user mentions for role fields, channel mentions for forum
 # fields. Anything else would not resolve at runtime.

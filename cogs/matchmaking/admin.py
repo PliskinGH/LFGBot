@@ -7,7 +7,9 @@ from discord import app_commands
 
 from common import constants as common_constants
 
+from . import constants
 from . import db_config
+from . import utils
 from .config import ConfigMixin
 
 # Option descriptions shared by /games add and /games update.
@@ -40,12 +42,44 @@ class AdminMixin:
     """
 
     games = app_commands.Group(
-        name="games", description="Manage this server's games.")
+        name="games", description="Manage this server's games.",
+        # Hide the whole /games group (including its subcommands) from
+        # members without the manage_guild permission.
+        default_permissions=discord.Permissions(manage_guild=True))
+
+    # Nested subgroup (/games parameter ...), attached to the games group at
+    # the end of this class so CogMeta registers it as a child, not a
+    # top-level command.
+    games_parameter = app_commands.Group(
+        name="parameter", description="Manage a game's parameters.")
 
     @staticmethod
     def is_valid_command_name(name: str) -> bool:
         """Whether ``name`` can become a Discord slash command."""
         return bool(common_constants.COMMAND_NAME_RE.match(name))
+
+    @staticmethod
+    def _parameter_error(name: str, values: str | None,
+                         api_field: str | None = None,
+                         display_name: str | None = None) -> str | None:
+        """An error message when a parameter name/values/api_field are invalid, else None."""
+        if (not common_constants.COMMAND_NAME_RE.match(name)):
+            return "`name` must be 1-32 lowercase letters, digits or underscores."
+        if (name.startswith(constants.API_FIELD_PREFIX)):
+            return f"`name` cannot start with `{constants.API_FIELD_PREFIX}` (reserved)."
+        if (values is not None and not utils.parse_param_entries(values or "")):
+            return "`values` must contain at least one value."
+        # Blank (empty string) is valid: it resets the API field (db_config
+        # turns "" into NULL); on add it means "no field". The update command
+        # accepts "-" as the reset sentinel, since Discord cannot send "".
+        if (api_field and not common_constants.API_FIELD_RE.match(api_field)):
+            return ("`api_field` must be a non-empty field name (letters, digits,"
+                    " underscores), or `-` to reset it.")
+        if (display_name is not None and display_name != "" and (
+                not display_name.strip() or len(display_name) > 50
+                or "\n" in display_name or "\r" in display_name)):
+            return "`display_name` must be 1-50 characters without newlines."
+        return None
 
     @staticmethod
     def _mention_error(role: str | None, forum: str | None) -> str | None:
@@ -329,8 +363,10 @@ class AdminMixin:
 
     @games.command(name="list", description="List the games configured for this server.")
     async def games_list(self, interaction: discord.Interaction):
-        # Read-only, so unlike the other /games subcommands it is not gated
-        # behind the manage_guild permission.
+        # Gated like the rest of the /games group: it exposes api_fields and
+        # other league settings that should not be visible to regular members.
+        if (not await self._guard_admin(interaction)):
+            return
         games = self.get_guild_config(interaction.guild_id).games
         if (not games):
             await interaction.response.send_message(
@@ -348,4 +384,208 @@ class AdminMixin:
                 lines.append(f"`{command}`")
         await interaction.response.send_message(
             "\n".join(lines), ephemeral=True)
+
+    # ------------------------------------------------------------------ #
+    # /games parameter — edit a game's parameters for this server.
+    # ------------------------------------------------------------------ #
+
+    async def _parameters_autocomplete(
+        self, interaction: discord.Interaction, game_command: str,
+        current: str):
+        parameters = self.get_game_parameters(interaction.guild_id, game_command)
+        return [
+            app_commands.Choice(name=name, value=name)
+            for name in parameters
+            if current.lower() in name.lower()
+        ][:common_constants.AUTOCOMPLETE_LIMIT]
+
+    async def _parameter_name_autocomplete(
+        self, interaction: discord.Interaction, current: str):
+        # The game option is filled in before this option's autocomplete runs.
+        game_command = getattr(getattr(interaction, "namespace", None), "game", None)
+        if (game_command is None):
+            return []
+        return await self._parameters_autocomplete(interaction, game_command, current)
+
+    @games_parameter.command(name="add", description="Add a parameter to a game.")
+    @app_commands.describe(
+        game="The game's slash command name.",
+        name="Parameter name (1-32 lowercase letters, digits or _).",
+        display_name="Optional user-facing label (defaults to the name).",
+        values="Accepted values, comma-separated; use (value, Display) pairs for display names.",
+        api_field="Optional match API field the values are submitted as.",
+    )
+    async def games_parameter_add(
+        self, interaction: discord.Interaction, game: str, name: str,
+        values: str, api_field: Optional[str] = None,
+        display_name: Optional[str] = None,
+    ):
+        if (not await self._guard_admin(interaction)
+                or not await self._guard_database(interaction)):
+            return
+        error = self._parameter_error(name, values, api_field, display_name)
+        if (error is not None):
+            await interaction.response.send_message(error, ephemeral=True)
+            return
+        guild_id = interaction.guild_id
+        if (game not in self.get_guild_config(guild_id).games):
+            await interaction.response.send_message(
+                f"`{game}` is not configured for this server.", ephemeral=True)
+            return
+        await db_config.ensure_guild_config(guild_id)
+        if (not await db_config.add_parameter(
+                guild_id, game, name,
+                utils.parse_param_entries(values), api_field=api_field,
+                display_name=display_name)):
+            await interaction.response.send_message(
+                f"`{game}` already has a parameter named `{name}`.", ephemeral=True)
+            return
+        await self._refresh_config()
+        await self._sync_guild(interaction)
+        await interaction.response.send_message(
+            f"Parameter `{name}` added to `{game}`.", ephemeral=True)
+
+    @games_parameter_add.autocomplete("game")
+    async def games_parameter_add_game_autocomplete(
+        self, interaction: discord.Interaction, current: str):
+        return await self._games_autocomplete(interaction, current)
+    @games_parameter.command(name="update", description="Update a game's parameter.")
+    @app_commands.describe(
+        game="The game's slash command name.",
+        name="The parameter name.",
+        display_name="Optional user-facing label; use `-` to reset it to the name.",
+        values="Accepted values, comma-separated; use (value, Display) pairs for display names.",
+        api_field="Optional match API field; use `-` to clear it.",
+    )
+    async def games_parameter_update(
+        self, interaction: discord.Interaction, game: str, name: str,
+        values: Optional[str] = None, api_field: Optional[str] = None,
+        display_name: Optional[str] = None,
+    ):
+        if (not await self._guard_admin(interaction)
+                or not await self._guard_database(interaction)):
+            return
+        if (values is None and api_field is None and display_name is None):
+            await interaction.response.send_message(
+                "Nothing to update: provide `values`, `api_field` and/or `display_name`.",
+                ephemeral=True)
+            return
+        # Discord cannot send an empty string: leaving an option blank omits
+        # it entirely. "-" is the reset sentinel for api_field/display_name,
+        # turned into "" (which the validation and db_config treat as reset).
+        if (api_field is not None and api_field.strip() == "-"):
+            api_field = ""
+        if (display_name is not None and display_name.strip() == "-"):
+            display_name = ""
+        guild_id = interaction.guild_id
+        if (game not in self.get_guild_config(guild_id).games):
+            await interaction.response.send_message(
+                f"`{game}` is not configured for this server.", ephemeral=True)
+            return
+        error = self._parameter_error(name, values, api_field, display_name)
+        if (error is not None):
+            await interaction.response.send_message(error, ephemeral=True)
+            return
+        value_display = None
+        if (values is not None):
+            value_display = utils.parse_param_entries(values)
+        await db_config.ensure_guild_config(guild_id)
+        update_kwargs = {"values": value_display}
+        if (api_field is not None):
+            update_kwargs["api_field"] = api_field
+        if (display_name is not None):
+            update_kwargs["display_name"] = display_name
+        updated = await db_config.update_parameter(
+            guild_id, game, name, **update_kwargs)
+        if (not updated):
+            await interaction.response.send_message(
+                f"`{game}` has no parameter named `{name}`.", ephemeral=True)
+            return
+        await self._refresh_config()
+        await self._sync_guild(interaction)
+        await interaction.response.send_message(
+            f"Parameter `{name}` updated.", ephemeral=True)
+
+    @games_parameter_update.autocomplete("game")
+    async def games_parameter_update_game_autocomplete(
+        self, interaction: discord.Interaction, current: str):
+        return await self._games_autocomplete(interaction, current)
+
+    @games_parameter_update.autocomplete("name")
+    async def games_parameter_update_name_autocomplete(
+        self, interaction: discord.Interaction, current: str):
+        return await self._parameter_name_autocomplete(interaction, current)
+    @games_parameter.command(name="remove", description="Remove a parameter from a game.")
+    @app_commands.describe(
+        game="The game's slash command name.",
+        name="The parameter name.",
+    )
+    async def games_parameter_remove(
+        self, interaction: discord.Interaction, game: str, name: str):
+        if (not await self._guard_admin(interaction)
+                or not await self._guard_database(interaction)):
+            return
+        guild_id = interaction.guild_id
+        if (game not in self.get_guild_config(guild_id).games):
+            await interaction.response.send_message(
+                f"`{game}` is not configured for this server.", ephemeral=True)
+            return
+        await db_config.ensure_guild_config(guild_id)
+        if (not await db_config.delete_parameter(guild_id, game, name)):
+            await interaction.response.send_message(
+                f"`{game}` has no parameter named `{name}`.", ephemeral=True)
+            return
+        await self._refresh_config()
+        await self._sync_guild(interaction)
+        await interaction.response.send_message(
+            f"Parameter `{name}` removed from `{game}`.", ephemeral=True)
+
+    @games_parameter_remove.autocomplete("game")
+    async def games_parameter_remove_game_autocomplete(
+        self, interaction: discord.Interaction, current: str):
+        return await self._games_autocomplete(interaction, current)
+
+    @games_parameter_remove.autocomplete("name")
+    async def games_parameter_remove_name_autocomplete(
+        self, interaction: discord.Interaction, current: str):
+        return await self._parameter_name_autocomplete(interaction, current)
+
+    @games_parameter.command(name="list", description="List a game's parameters.")
+    @app_commands.describe(game="The game's slash command name.")
+    async def games_parameter_list(self, interaction: discord.Interaction, game: str):
+        # Gated like the rest of the /games group: it exposes api_fields that
+        # should not be visible to regular members.
+        if (not await self._guard_admin(interaction)):
+            return
+        parameters = self.get_game_parameters(interaction.guild_id, game)
+        if (not parameters):
+            await interaction.response.send_message(
+                f"`{game}` has no parameters configured on this server.",
+                ephemeral=True)
+            return
+        api_fields = self.get_game_api_fields(interaction.guild_id, game)
+        lines = []
+        for name, parameter in parameters.items():
+            field = api_fields.get(name)
+            values_summary = utils.format_accepted_values(parameter["values"])
+            display_name = parameter.get("display_name", name)
+            label = (name if display_name == name
+                     else f"{name} ({display_name})")
+            if (field):
+                lines.append(f"`{label}` → `{field}`: {values_summary}")
+            else:
+                lines.append(f"`{label}`: {values_summary}")
+        await interaction.response.send_message(
+            "\n".join(lines), ephemeral=True)
+
+    @games_parameter_list.autocomplete("game")
+    async def games_parameter_list_game_autocomplete(
+        self, interaction: discord.Interaction, current: str):
+        return await self._games_autocomplete(interaction, current)
+
+    # Attach the parameter subgroup to the games group now that its
+    # subcommands exist; CogMeta skips it as a top-level command (parent set).
+    games.add_command(games_parameter)
+
+    # End of AdminMixin.
 

@@ -10,7 +10,9 @@ import pytest
 
 from common import constants
 from cogs.matchmaking.cog import Matchmaking
-from cogs.matchmaking.constants import GAMES_COMMAND, LFG_COMMAND, RENAME_COMMAND
+from cogs.matchmaking.constants import (
+    DEFAULT_GUILD_ID, GAMES_COMMAND, LFG_COMMAND, RENAME_COMMAND,
+)
 from cogs.matchmaking.models import GameOption, LFGContext
 from cogs.matchmaking.views import GameSettingsModal, ThreadRenameModal
 
@@ -231,7 +233,9 @@ class TestMinimalDynamicGame:
 
         assert interaction.channel.sent == []
         content, ephemeral, _, _ = interaction.followup.sent[0]
-        assert content == "The LFG post could not be created."
+        assert content == (
+            "The LFG post could not be created. "
+            "Check that the bot has permission to send messages in this channel.")
         assert ephemeral is True
 
     @pytest.mark.asyncio
@@ -653,22 +657,23 @@ class TestGuildCommandRegistration:
         assert matchmaking.bot.provided_guild_ids == {90401}
 
     def test_generated_command_has_optional_params(self, matchmaking):
-        command = matchmaking._make_game_command("game_a")
-        expected = {"description", "max_players", *matchmaking.game_parameters["game_a"]}
+        command = matchmaking._make_game_command("game_a", DEFAULT_GUILD_ID)
+        expected = {"description", "max_players",
+                    *matchmaking.game_parameters[DEFAULT_GUILD_ID]["game_a"]}
         assert expected <= set(command._params.keys())
         assert all(not param.required for param in command._params.values())
         # Every game parameter needs an autocomplete wired up.
-        for param_name in matchmaking.game_parameters["game_a"]:
+        for param_name in matchmaking.game_parameters[DEFAULT_GUILD_ID]["game_a"]:
             assert command._params[param_name].autocomplete is not None
 
     def test_generated_callback_signature(self, matchmaking):
-        callback = matchmaking._make_game_callback("game_a")
+        callback = matchmaking._make_game_callback("game_a", DEFAULT_GUILD_ID)
         names = list(inspect.signature(callback).parameters)
         # The always-present arguments plus one argument per configured
         # parameter of the game (derived from the fixture config).
         assert set(names) == (
             {"interaction", "description", "max_players"}
-            | set(matchmaking.game_parameters["game_a"])
+            | set(matchmaking.game_parameters[DEFAULT_GUILD_ID]["game_a"])
         )
 
     def test_skips_invalid_command_names(self):
@@ -699,7 +704,8 @@ class TestGuildCommandRegistration:
 class TestParamAutocomplete:
     @pytest.mark.asyncio
     async def test_filters_single_token(self, matchmaking):
-        autocomplete = matchmaking._make_param_autocomplete("game_a", "param1")
+        autocomplete = matchmaking._make_param_autocomplete(
+            DEFAULT_GUILD_ID, "game_a", "param1")
         interaction = FakeInteraction(user=FakeMember(1, "host"), guild_id=1)
 
         choices = await autocomplete(interaction, "al")
@@ -709,7 +715,8 @@ class TestParamAutocomplete:
 
     @pytest.mark.asyncio
     async def test_filters_by_display_name(self, matchmaking):
-        autocomplete = matchmaking._make_param_autocomplete("game_a", "param1")
+        autocomplete = matchmaking._make_param_autocomplete(
+            DEFAULT_GUILD_ID, "game_a", "param1")
         interaction = FakeInteraction(user=FakeMember(1, "host"), guild_id=1)
 
         # Filtering matches the display name too, not just the raw value.
@@ -718,7 +725,8 @@ class TestParamAutocomplete:
 
     @pytest.mark.asyncio
     async def test_composes_choices_with_existing_prefix(self, matchmaking):
-        autocomplete = matchmaking._make_param_autocomplete("game_a", "param1")
+        autocomplete = matchmaking._make_param_autocomplete(
+            DEFAULT_GUILD_ID, "game_a", "param1")
         interaction = FakeInteraction(user=FakeMember(1, "host"), guild_id=1)
 
         # Discord replaces the whole field with the picked choice's name, so
@@ -735,7 +743,8 @@ class TestParamAutocomplete:
 
     @pytest.mark.asyncio
     async def test_prefix_with_trailing_space(self, matchmaking):
-        autocomplete = matchmaking._make_param_autocomplete("game_a", "param1")
+        autocomplete = matchmaking._make_param_autocomplete(
+            DEFAULT_GUILD_ID, "game_a", "param1")
         interaction = FakeInteraction(user=FakeMember(1, "host"), guild_id=1)
 
         choices = await autocomplete(interaction, "alpha, b")
@@ -745,9 +754,11 @@ class TestParamAutocomplete:
     @pytest.mark.asyncio
     async def test_composed_values_over_100_chars_are_skipped(self, matchmaking):
         long_value = "x" * 99
-        matchmaking.game_parameters["game_a"] = {
-            "param1": {long_value: long_value, "ok": "OK", "ok2": "OK2"}}
-        autocomplete = matchmaking._make_param_autocomplete("game_a", "param1")
+        matchmaking.game_parameters[DEFAULT_GUILD_ID]["game_a"] = {
+            "param1": {"display_name": "param1",
+                       "values": {long_value: long_value, "ok": "OK", "ok2": "OK2"}}}
+        autocomplete = matchmaking._make_param_autocomplete(
+            DEFAULT_GUILD_ID, "game_a", "param1")
         interaction = FakeInteraction(user=FakeMember(1, "host"), guild_id=1)
 
         # Without a prefix the 99-char value still fits the 100-char cap.
@@ -1064,7 +1075,7 @@ class TestGetMultiValueFields:
 
 class TestGameApiFields:
     def test_reserved_and_param_fields_parsed(self, matchmaking):
-        fields = matchmaking.game_api_fields["game_a"]
+        fields = matchmaking.game_api_fields[DEFAULT_GUILD_ID]["game_a"]
         # Reserved api_* keys become the fixed payload component field names.
         assert fields["api_title_field"] == "match_title"
         assert fields["api_table_talk_url_field"] == "discussion_url"
@@ -1078,7 +1089,7 @@ class TestGameApiFields:
 
     def test_reserved_keys_are_not_parameters(self, matchmaking):
         # Reserved api_* keys must not become slash command parameters.
-        params = matchmaking.game_parameters["game_a"]
+        params = matchmaking.game_parameters[DEFAULT_GUILD_ID]["game_a"]
         assert set(params) == {"param1", "param2", "param3"}
         assert not any(key.startswith("api_") for key in params)
 
@@ -1104,7 +1115,7 @@ class TestGameApiFields:
         )
         matchmaking = Matchmaking(bot=FakeBot(), config=config, game_parameters=params)
 
-        fields = matchmaking.game_api_fields["bare_game"]
+        fields = matchmaking.game_api_fields[DEFAULT_GUILD_ID]["bare_game"]
         assert fields["api_title_field"] == "title"
         assert fields["api_table_talk_url_field"] == "table_talk_url"
         assert fields["api_participants_field"] == "players"
@@ -1483,8 +1494,8 @@ class TestGameParametersHelp:
         assert "only available as command arguments" in description
         # Every configured parameter is listed with its display names only
         # (derived from the fixture config).
-        for param_name, values in matchmaking.game_parameters["game_a"].items():
-            assert f"- `{param_name}`: {', '.join(values.values())}" in description
+        for param_name, parameter in matchmaking.game_parameters[DEFAULT_GUILD_ID]["game_a"].items():
+            assert f"- `{param_name}`: {', '.join(parameter['values'].values())}" in description
 
     def test_game_without_parameters_has_no_section(self, game_parameters_config):
         matchmaking = self._matchmaking_with_games(game_parameters_config)

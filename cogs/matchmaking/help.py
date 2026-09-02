@@ -81,13 +81,13 @@ class HelpMixin:
     def _games_embed(self, guild_config: GuildGamesConfig) -> discord.Embed:
         return self._embed("Available games", self._lfg_help_games(guild_config))
 
-    def _params_embed(self, game_command: str) -> discord.Embed | None:
-        section = self._game_parameters_help_lines(game_command)
+    def _params_embed(self, guild_id: int, game_command: str) -> discord.Embed | None:
+        section = self._game_parameters_help_lines(guild_id, game_command)
         if (section is None):
             return None
         return self._embed("Game parameters", section)
 
-    def _game_parameters_help_lines(self, game_command: str) -> str | None:
+    def _game_parameters_help_lines(self, guild_id: int, game_command: str) -> str | None:
         """Render the game-parameters section for a per-game command.
 
         Returns None when the game has no configured parameters, otherwise
@@ -95,13 +95,16 @@ class HelpMixin:
         only (the raw values are internal codes). Parameters are
         direct-arguments-only (see _send_game_settings_modal).
         """
-        accepted_params = self.game_parameters.get(game_command)
+        accepted_params = self.get_game_parameters(guild_id, game_command)
         if (not accepted_params):
             return None
-        parameter_lines = [
-            f"- `{param_name}`: {', '.join(values.values())}"
-            for param_name, values in accepted_params.items()
-        ]
+        parameter_lines = []
+        for param_name, parameter in accepted_params.items():
+            display_name = parameter.get("display_name", param_name)
+            label = (param_name if display_name == param_name
+                     else f"{param_name} ({display_name})")
+            parameter_lines.append(
+                f"- `{label}`: {', '.join(parameter['values'].values())}")
         return (
             f"`/{game_command}` also accepts these arguments "
             "(comma-separate for several values). They are only available "
@@ -122,8 +125,7 @@ class HelpMixin:
             content = (
                 f"# Help: /{constants.GAMES_COMMAND}\n\n"
                 "Manage the games configured for this server (only available in database mode).\n"
-                "The `add`, `update` and `remove` subcommands are only available to "
-                "server managers.\n"
+                "Its subcommands are only available to server managers.\n"
                 "Changes are saved immediately and the per-game slash commands "
                 "are re-registered for this server.\n"
                 "## Subcommands\n"
@@ -163,7 +165,7 @@ class HelpMixin:
                 + self._lfg_help_intro()
             )
             embeds.append(self._games_embed(guild_config))
-            params_embed = self._params_embed(topic)
+            params_embed = self._params_embed(interaction.guild_id, topic)
             if (params_embed is not None):
                 embeds.append(params_embed)
         elif (topic == constants.RENAME_COMMAND):

@@ -60,6 +60,11 @@ class GameParameter(models.Model):
     id = fields.IntField(primary_key=True)
     game = fields.ForeignKeyField("models.Game", related_name="parameters")
     name = fields.TextField()
+    # User-facing label (defaults to the name). The name itself stays a valid
+    # slash-command option name (lowercase, no spaces), so the friendlier
+    # label is stored separately; blank means "use the name". The db_default
+    # backfills existing rows when the column is added by a migration.
+    display_name = fields.TextField(default="", db_default="")
     # Match API field the parameter is submitted as; None = Discord-only.
     api_field = fields.TextField(null=True)
 

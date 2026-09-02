@@ -6,6 +6,7 @@ import discord
 
 LFG_COMMAND = "lfg"
 LFG_DESCRIPTION = "Looking for a game."
+
 LFG_JOIN_BUTTON_LABEL = "Join/Leave"
 LFG_NOTIFY_BUTTON_LABEL = "Toggle Notification"
 LFG_CANCEL_BUTTON_LABEL = "Cancel"
@@ -19,6 +20,11 @@ RENAME_COMMAND = "rename"
 RENAME_DESCRIPTION = "Rename a game thread."
 
 GAMES_COMMAND = "games"
+
+# Sentinel guild id storing the [DEFAULT] section's games and parameters
+# (Discord snowflakes are always positive, so 0 never collides).
+# fallback for guilds without their own entry.
+DEFAULT_GUILD_ID = 0
 
 # Path to the games configuration (see games.ini): guild sections and their games.
 GAMES_INI_PATH = 'config/games.ini'

@@ -17,11 +17,7 @@ from db import models
 from . import constants
 from . import utils
 from .config import ConfigMixin
-from .models import GameOption, GuildGamesConfig
-
-# Sentinel guild id storing the [DEFAULT] section's games (Discord snowflakes
-# are always positive, so 0 never collides).
-DEFAULT_GUILD_ID = 0
+from .models import GameOption, GuildGamesConfig, ParameterDefinition
 
 
 class LoadedConfig:
@@ -30,10 +26,11 @@ class LoadedConfig:
     def __init__(self):
         self.guilds: dict[int, GuildGamesConfig] = {} # dict of guild_id -> GuildGamesConfig
         self.default_guild_config = GuildGamesConfig(None)
-        # game_command -> { parameter_name -> { value: display_name } }
-        self.game_parameters: dict[str, dict[str, dict[str, str]]] = {}
-        # game_command -> { parameter_name or reserved api_* key -> match API field name }
-        self.game_api_fields: dict[str, dict[str, str]] = {}
+        # guild_id -> game_command -> { parameter_name -> {"display_name": label,
+        # "values": {value: display_name}} }
+        self.game_parameters: dict[int, dict[str, dict[str, ParameterDefinition]]] = {}
+        # guild_id -> game_command -> { parameter_name or reserved api_* key -> match API field name }
+        self.game_api_fields: dict[int, dict[str, dict[str, str]]] = {}
         # Fixed payload component field names from the [DEFAULT] section of
         # games_parameters.ini; inherited by every game (including games
         # without a section there), overridden by each game's own api_* keys.
@@ -60,8 +57,13 @@ def loaded_config_from_ini(config: configparser.ConfigParser,
         guild_config = GuildGamesConfig(guild_id)
         ConfigMixin._load_guild_config(guild_config, config, guild)
         loaded.guilds[guild_id] = guild_config
-    (loaded.game_parameters, loaded.game_api_fields,
-     loaded.default_api_fields) = utils.parse_game_parameters(game_parameters)
+    (game_parameters, game_api_fields,
+     default_api_fields) = utils.parse_game_parameters(game_parameters)
+    # From the config files, every guild shares the same definitions; the
+    # DEFAULT key holds them (guilds diverge only once edited via /games).
+    loaded.game_parameters = {constants.DEFAULT_GUILD_ID: game_parameters}
+    loaded.game_api_fields = {constants.DEFAULT_GUILD_ID: game_api_fields}
+    loaded.default_api_fields = default_api_fields
     return loaded
 
 # --------------------------------------------------------------------------- #
@@ -83,7 +85,7 @@ async def seed_db(loaded: LoadedConfig) -> None:
     async with in_transaction():
         for key, field_name in loaded.default_api_fields.items():
             await models.DefaultApiField.create(key=key, field_name=field_name)
-        await _create_guild(DEFAULT_GUILD_ID, loaded.default_guild_config, loaded)
+        await _create_guild(constants.DEFAULT_GUILD_ID, loaded.default_guild_config, loaded)
         for guild_id, guild_config in loaded.guilds.items():
             await _create_guild(guild_id, guild_config, loaded)
 
@@ -112,11 +114,22 @@ async def _create_guild(guild_id: int, guild_config: GuildGamesConfig,
             profile_url=option.profile_url,
             default_max_guests=option.default_max_guests,
         )
-        api_fields = loaded.game_api_fields.get(command, {})
-        for param_name, value_display in loaded.game_parameters.get(command, {}).items():
+        # The guild's parameters/overrides: from its own map, falling back to
+        # the DEFAULT definitions (the config files are shared by every guild).
+        api_fields = (loaded.game_api_fields
+                      .get(guild_id,
+                           loaded.game_api_fields.get(constants.DEFAULT_GUILD_ID, {}))
+                      .get(command, {}))
+        for param_name, parameter_def in (
+                loaded.game_parameters
+                .get(guild_id,
+                     loaded.game_parameters.get(constants.DEFAULT_GUILD_ID, {}))
+                .get(command, {}).items()):
             parameter = await models.GameParameter.create(
-                game=game, name=param_name, api_field=api_fields.get(param_name))
-            for value, display in value_display.items():
+                game=game, name=param_name,
+                display_name=parameter_def.get("display_name", param_name),
+                api_field=api_fields.get(param_name))
+            for value, display in parameter_def.get("values", {}).items():
                 await models.ParameterValue.create(
                     parameter=parameter, value=value, display_name=display)
         # Reserved api_* keys: the game's overrides of the fixed match payload
@@ -181,27 +194,33 @@ async def load_config_from_db() -> LoadedConfig:
         overrides_by_game.setdefault(override.game_id, []).append(override)
 
     for guild in guilds:
-        guild_id = None if guild.guild_id == DEFAULT_GUILD_ID else guild.guild_id
+        guild_key = guild.guild_id
+        guild_id = None if guild_key == constants.DEFAULT_GUILD_ID else guild_key
         guild_config = GuildGamesConfig(guild_id)
-        for game in games_by_guild.get(guild.guild_id, []):
+        for game in games_by_guild.get(guild_key, []):
             guild_config.games[game.command] = _build_game_option(game)
             game_parameters = parameters_by_game.get(game.id, [])
             game_overrides = overrides_by_game.get(game.id, [])
             if (game_parameters or game_overrides):
                 # Only games with a games_parameters.ini section get
                 # entries (as in the file parsing).
-                loaded.game_parameters[game.command] = {}
-                loaded.game_api_fields[game.command] = {}
+                params_by_guild = loaded.game_parameters.setdefault(guild_key, {})
+                fields_by_guild = loaded.game_api_fields.setdefault(guild_key, {})
+                params_by_guild[game.command] = {}
+                fields_by_guild[game.command] = {}
             for parameter in game_parameters:
-                loaded.game_parameters[game.command][parameter.name] = {
-                    value.value: value.display_name
-                    for value in values_by_parameter.get(parameter.id, [])
+                params_by_guild[game.command][parameter.name] = {
+                    "display_name": parameter.display_name or parameter.name,
+                    "values": {
+                        value.value: value.display_name
+                        for value in values_by_parameter.get(parameter.id, [])
+                    },
                 }
                 if (parameter.api_field):
-                    loaded.game_api_fields[game.command][parameter.name] = (
+                    fields_by_guild[game.command][parameter.name] = (
                         parameter.api_field)
             for override in game_overrides:
-                loaded.game_api_fields[game.command][override.key] = override.field_name
+                fields_by_guild[game.command][override.key] = override.field_name
         if (guild_id is None):
             loaded.default_guild_config = guild_config
         else:
@@ -242,19 +261,21 @@ async def ensure_guild_config(guild_id: int) -> None:
     admin edit copies those defaults into a per-guild row so the guild gets a
     complete, independent configuration.
     """
-    if (guild_id == DEFAULT_GUILD_ID):
+    if (guild_id == constants.DEFAULT_GUILD_ID):
         return
     if (await models.Guild.get_or_none(guild_id=guild_id) is not None):
         return
     async with in_transaction():
         guild = await models.Guild.create(guild_id=guild_id)
-        for game in await models.Game.filter(guild_id=DEFAULT_GUILD_ID).order_by("id"):
+        for game in await models.Game.filter(guild_id=constants.DEFAULT_GUILD_ID).order_by("id"):
             new_game = await models.Game.create(
                 guild=guild, command=game.command, **_game_fields(game))
             for parameter in await models.GameParameter.filter(
                     game_id=game.id).order_by("id"):
                 new_parameter = await models.GameParameter.create(
-                    game=new_game, name=parameter.name, api_field=parameter.api_field)
+                    game=new_game, name=parameter.name,
+                    display_name=parameter.display_name or parameter.name,
+                    api_field=parameter.api_field)
                 for value in await models.ParameterValue.filter(
                         parameter_id=parameter.id).order_by("id"):
                     await models.ParameterValue.create(
@@ -287,5 +308,74 @@ async def delete_game(guild_id: int, command: str) -> bool:
     """Delete a game row, cascading to its parameters; whether it existed."""
     return (await models.Game.filter(
         guild_id=guild_id, command=command).delete()) > 0
+
+
+async def add_parameter(guild_id: int, command: str, name: str,
+                        values: dict[str, str],
+                        api_field: str | None = None,
+                        display_name: str | None = None) -> bool:
+    """Add a parameter to a game of a guild; whether it was created.
+
+    ``values`` maps raw value -> display name (see ``utils.parse_param_entries``).
+    ``api_field`` is the match API field the values are submitted as;
+    None/blank means Discord-only. ``display_name`` is the user-facing
+    label; None/blank defaults to ``name``.
+    """
+    game = await models.Game.get_or_none(guild_id=guild_id, command=command)
+    if (game is None):
+        return False
+    if (await models.GameParameter.get_or_none(
+            game_id=game.id, name=name) is not None):
+        return False
+    parameter = await models.GameParameter.create(
+        game=game, name=name, display_name=display_name or name,
+        api_field=api_field or None)
+    for value, display in values.items():
+        await models.ParameterValue.create(
+            parameter=parameter, value=value, display_name=display)
+    return True
+
+
+_UNSET = object()
+
+
+async def update_parameter(guild_id: int, command: str, name: str,
+                           values: dict[str, str] | None = None,
+                           api_field: str | None | object = _UNSET,
+                           display_name: str | None | object = _UNSET) -> bool:
+    """Update a game's parameter values and/or API field; whether it existed.
+
+    ``values=None`` keeps the current accepted values; ``api_field=_UNSET``
+    keeps the current field. Passing a value (or ``""`` to clear/reset it)
+    sets it; same for ``display_name`` (blank resets it to the name).
+    """
+    game = await models.Game.get_or_none(guild_id=guild_id, command=command)
+    if (game is None):
+        return False
+    parameter = await models.GameParameter.get_or_none(
+        game_id=game.id, name=name)
+    if (parameter is None):
+        return False
+    if (values is not None):
+        await models.ParameterValue.filter(parameter_id=parameter.id).delete()
+        for value, display in values.items():
+            await models.ParameterValue.create(
+                parameter=parameter, value=value, display_name=display)
+    if (api_field is not _UNSET):
+        parameter.api_field = api_field or None
+        await parameter.save(update_fields=["api_field"])
+    if (display_name is not _UNSET):
+        parameter.display_name = display_name or name
+        await parameter.save(update_fields=["display_name"])
+    return True
+
+
+async def delete_parameter(guild_id: int, command: str, name: str) -> bool:
+    """Delete a game's parameter (cascading to its values); whether it existed."""
+    game = await models.Game.get_or_none(guild_id=guild_id, command=command)
+    if (game is None):
+        return False
+    return (await models.GameParameter.filter(
+        game_id=game.id, name=name).delete()) > 0
 
 

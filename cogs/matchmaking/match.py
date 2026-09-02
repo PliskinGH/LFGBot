@@ -155,6 +155,7 @@ class MatchMixin:
                             game_settings=context.game_settings,
                             game_command=(context.game_option.command
                                           if context.game_option else None),
+                            guild_id=interaction.guild_id,
                             website_url=website_url)
                     except Exception as error:
                         print(f"League match registration request failed: {error}")
@@ -221,7 +222,7 @@ class MatchMixin:
     async def register_match(self, thread, match_api_url, match_url,
                              auth_token, title, website_name, verified_users,
                              game_settings=None, game_command=None,
-                             website_url=None):
+                             guild_id=None, website_url=None):
         headers = {"Content-Type": "application/json"}
         if (auth_token):
             headers["Authorization"] = f"Token {auth_token}"
@@ -229,9 +230,9 @@ class MatchMixin:
         # The match API field names for the fixed payload components come from
         # games_parameters.ini: the [DEFAULT] section's api_* keys apply to
         # every game (default_api_fields), and each game's own section may
-        # override them. A component is only sent when its field is declared.
+        # override them (per guild). A component is only sent when its field is declared.
         api_fields = dict(self.default_api_fields)
-        api_fields.update(self.game_api_fields.get(game_command, {}))
+        api_fields.update(self.get_game_api_fields(guild_id, game_command))
         payload = {}
 
         title_field = api_fields.get(constants.API_TITLE_FIELD_KEY)

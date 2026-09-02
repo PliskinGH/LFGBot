@@ -18,6 +18,7 @@ from db.orm_config import orm_config
 
 from cogs.matchmaking import db_config
 from cogs.matchmaking.cog import Matchmaking
+from cogs.matchmaking.constants import DEFAULT_GUILD_ID
 
 from tests.conftest import FakeBot
 
@@ -94,14 +95,16 @@ class TestLoadedConfigFromIni:
         assert loaded.default_guild_config.guild_id is None
         assert list(loaded.default_guild_config.games.keys()) == ["game_a", "game_b"]
         assert list(loaded.guilds[90401].games.keys()) == ["game_c"]
-        # Only games with a games_parameters.ini section appear here.
-        assert list(loaded.game_parameters.keys()) == ["game_a"]
+        # Only games with a games_parameters.ini section appear here. From
+        # the config files, every guild shares the definitions held under the
+        # DEFAULT sentinel guild id.
+        assert list(loaded.game_parameters[DEFAULT_GUILD_ID].keys()) == ["game_a"]
         assert loaded.default_api_fields == {}
 
     def test_parameter_and_api_field_parsing(self, games_config, game_parameters_config):
         loaded = db_config.loaded_config_from_ini(games_config, game_parameters_config)
-        params = loaded.game_parameters["game_a"]
-        api_fields = loaded.game_api_fields["game_a"]
+        params = loaded.game_parameters[DEFAULT_GUILD_ID]["game_a"]
+        api_fields = loaded.game_api_fields[DEFAULT_GUILD_ID]["game_a"]
         # Reserved api_* keys land in game_api_fields, not in the parameters.
         assert api_fields["api_title_field"] == "match_title"
         assert "api_title_field" not in params
@@ -109,7 +112,8 @@ class TestLoadedConfigFromIni:
         assert api_fields["param1"] == "field_one"
         assert api_fields["param2"] == "field_two"
         assert "param3" not in api_fields
-        assert params["param3"] == {"yes": "yes", "no": "no"}
+        assert params["param3"] == {"display_name": "param3",
+                                     "values": {"yes": "yes", "no": "no"}}
 
 
 class TestCogFromLoadedConfig:
@@ -189,6 +193,8 @@ class TestSeeding:
             "param1", "param2", "param3"]
         param1 = game_a_parameters[0]
         assert param1.api_field == "field_one"
+        # Config-file parameters default their display name to the name.
+        assert param1.display_name == "param1"
         param1_values = [value for value in values if value.parameter_id == param1.id]
         assert [(value.value, value.display_name) for value in param1_values] == [
             ("alpha", "Alpha One"), ("beta", "Beta Two"),
@@ -227,7 +233,7 @@ class TestAdminPersistence:
         # The guild gets its own complete configuration copied from the
         # defaults (the sentinel guild id 0), parameters included.
         assert list(guild.games.keys()) == list(loaded.default_guild_config.games.keys())
-        assert "param1" in loaded.game_parameters["game_a"]
+        assert "param1" in loaded.game_parameters[42424]["game_a"]
 
     async def test_add_game_creates_and_duplicate_rejected(self, db, games_config,
                                                            game_parameters_config):
@@ -258,4 +264,120 @@ class TestAdminPersistence:
         loaded = await db_config.load_config_from_db()
         assert "game_a" not in loaded.guilds[42424].games
         assert await db_config.delete_game(42424, "game_a") is False
+
+    async def test_add_parameter_creates_values_and_api_field(
+            self, db, games_config, game_parameters_config):
+        await db_config.seed_db_from_config(games_config, game_parameters_config)
+        await db_config.ensure_guild_config(42424)
+        assert await db_config.add_parameter(
+            42424, "game_a", "newparam",
+            {"one": "One", "two": "Two"}, api_field="new_field",
+            display_name="New Param") is True
+        loaded = await db_config.load_config_from_db()
+        params = loaded.game_parameters[42424]["game_a"]
+        assert params["newparam"] == {
+            "display_name": "New Param", "values": {"one": "One", "two": "Two"}}
+        assert loaded.game_api_fields[42424]["game_a"]["newparam"] == "new_field"
+
+    async def test_add_parameter_without_api_field(
+            self, db, games_config, game_parameters_config):
+        await db_config.seed_db_from_config(games_config, game_parameters_config)
+        await db_config.ensure_guild_config(42424)
+        assert await db_config.add_parameter(
+            42424, "game_a", "newparam", {"one": "One"}) is True
+        loaded = await db_config.load_config_from_db()
+        # No api_field: the parameter is Discord-only, not in the field map.
+        assert loaded.game_parameters[42424]["game_a"]["newparam"] == {
+            "display_name": "newparam", "values": {"one": "One"}}
+        assert "newparam" not in loaded.game_api_fields[42424]["game_a"]
+
+    async def test_add_parameter_rejects_duplicate_and_missing_game(
+            self, db, games_config, game_parameters_config):
+        await db_config.seed_db_from_config(games_config, game_parameters_config)
+        await db_config.ensure_guild_config(42424)
+        # Duplicate name on an existing game.
+        assert await db_config.add_parameter(
+            42424, "game_a", "param1", {"x": "X"}) is False
+        # The game is not configured for the guild.
+        assert await db_config.add_parameter(
+            42424, "missing", "p", {"a": "A"}) is False
+
+    async def test_update_parameter_replaces_values_and_api_field(
+            self, db, games_config, game_parameters_config):
+        await db_config.seed_db_from_config(games_config, game_parameters_config)
+        await db_config.ensure_guild_config(42424)
+        assert await db_config.update_parameter(
+            42424, "game_a", "param1",
+            values={"zed": "Zed"}, api_field="renamed",
+            display_name="Renamed Param") is True
+        loaded = await db_config.load_config_from_db()
+        params = loaded.game_parameters[42424]["game_a"]
+        assert params["param1"] == {
+            "display_name": "Renamed Param", "values": {"zed": "Zed"}}
+        assert loaded.game_api_fields[42424]["game_a"]["param1"] == "renamed"
+        # Other parameters of the game are untouched.
+        assert "param2" in params
+
+    async def test_update_parameter_keeps_values_when_only_field_changed(
+            self, db, games_config, game_parameters_config):
+        await db_config.seed_db_from_config(games_config, game_parameters_config)
+        await db_config.ensure_guild_config(42424)
+        assert await db_config.update_parameter(
+            42424, "game_a", "param1", api_field="renamed") is True
+        loaded = await db_config.load_config_from_db()
+        params = loaded.game_parameters[42424]["game_a"]
+        assert params["param1"] == {
+            "display_name": "param1",
+            "values": {
+                "alpha": "Alpha One", "beta": "Beta Two",
+                "gamma": "Gamma Three", "delta": "Delta Four"}}
+        assert loaded.game_api_fields[42424]["game_a"]["param1"] == "renamed"
+
+    async def test_update_parameter_clears_api_field(
+            self, db, games_config, game_parameters_config):
+        await db_config.seed_db_from_config(games_config, game_parameters_config)
+        await db_config.ensure_guild_config(42424)
+        assert await db_config.update_parameter(
+            42424, "game_a", "param1", api_field="") is True
+        loaded = await db_config.load_config_from_db()
+        # An empty api_field clears it: param1 becomes Discord-only.
+        assert "param1" not in loaded.game_api_fields[42424]["game_a"]
+
+    async def test_update_parameter_display_name(
+            self, db, games_config, game_parameters_config):
+        await db_config.seed_db_from_config(games_config, game_parameters_config)
+        await db_config.ensure_guild_config(42424)
+        assert await db_config.update_parameter(
+            42424, "game_a", "param1", display_name="Map Pool") is True
+        loaded = await db_config.load_config_from_db()
+        params = loaded.game_parameters[42424]["game_a"]
+        assert params["param1"]["display_name"] == "Map Pool"
+        # Values are untouched.
+        assert params["param1"]["values"] == {
+            "alpha": "Alpha One", "beta": "Beta Two",
+            "gamma": "Gamma Three", "delta": "Delta Four"}
+        # An empty display_name resets it to the parameter name.
+        assert await db_config.update_parameter(
+            42424, "game_a", "param1", display_name="") is True
+        loaded = await db_config.load_config_from_db()
+        assert loaded.game_parameters[42424]["game_a"]["param1"]["display_name"] == "param1"
+
+    async def test_update_parameter_rejects_missing(
+            self, db, games_config, game_parameters_config):
+        await db_config.seed_db_from_config(games_config, game_parameters_config)
+        await db_config.ensure_guild_config(42424)
+        assert await db_config.update_parameter(
+            42424, "game_a", "nope", values={"a": "A"}) is False
+        assert await db_config.update_parameter(
+            42424, "missing", "param1", values={"a": "A"}) is False
+
+    async def test_delete_parameter_cascades_values(
+            self, db, games_config, game_parameters_config):
+        await db_config.seed_db_from_config(games_config, game_parameters_config)
+        await db_config.ensure_guild_config(42424)
+        assert await db_config.delete_parameter(42424, "game_a", "param1") is True
+        loaded = await db_config.load_config_from_db()
+        assert "param1" not in loaded.game_parameters[42424]["game_a"]
+        assert "param1" not in loaded.game_api_fields[42424]["game_a"]
+        assert await db_config.delete_parameter(42424, "game_a", "param1") is False
 

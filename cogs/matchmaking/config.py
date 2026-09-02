@@ -6,7 +6,7 @@ from common.utils import safe_list_get, split_config_list
 
 from . import constants
 from . import utils
-from .models import GameOption, GuildGamesConfig
+from .models import GameOption, GuildGamesConfig, ParameterDefinition
 
 
 class ConfigMixin:
@@ -17,9 +17,44 @@ class ConfigMixin:
 
         See ``utils.parse_game_parameters`` (shared with the database
         seeding path) for the format and the returned maps.
+
+        Parameters are keyed by guild id (``DEFAULT_GUILD_ID`` holds the
+        config-file definitions, shared by every guild; guilds materialize
+        their own copies once edited). ``get_game_parameters`` resolves a
+        specific guild, falling back to the defaults.
         """
-        (self.game_parameters, self.game_api_fields,
-         self.default_api_fields) = utils.parse_game_parameters(parameters_config)
+        (game_parameters, game_api_fields,
+         default_api_fields) = utils.parse_game_parameters(parameters_config)
+        self.game_parameters = {constants.DEFAULT_GUILD_ID: game_parameters}
+        self.game_api_fields = {constants.DEFAULT_GUILD_ID: game_api_fields}
+        self.default_api_fields = default_api_fields
+
+    def get_game_parameters(self, guild_id: int,
+                            game_command) -> dict[str, ParameterDefinition]:
+        """A game's parameter set: ``{param_name: {"display_name": label,
+        "values": {value: display_name}}}``.
+
+        Falls back to the DEFAULT definitions for guilds without their own
+        entry (they inherit the config-file parameters).
+        """
+        return (self.game_parameters
+                .get(guild_id,
+                     self.game_parameters.get(constants.DEFAULT_GUILD_ID, {}))
+                .get(game_command, {}))
+
+    def get_game_parameter_values(self, guild_id: int, game_command,
+                                  param_name: str) -> dict[str, str]:
+        """The ``{value: display_name}`` map of one parameter (empty when unknown)."""
+        return (self.get_game_parameters(guild_id, game_command)
+                .get(param_name, {}).get("values", {}))
+
+    def get_game_api_fields(self, guild_id: int,
+                            game_command) -> dict[str, str]:
+        """The match API field names of a game's parameters/overrides."""
+        return (self.game_api_fields
+                .get(guild_id,
+                     self.game_api_fields.get(constants.DEFAULT_GUILD_ID, {}))
+                .get(game_command, {}))
 
     @staticmethod
     def _load_guild_config(guild_config: GuildGamesConfig,

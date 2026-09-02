@@ -1,5 +1,7 @@
 """Data models for the matchmaking cog: GameOption, GuildGamesConfig, LFGContext."""
 
+from typing import TypedDict
+
 import discord
 
 from common.constants import MENTION_RE
@@ -7,6 +9,19 @@ from common.utils import get_id_from_mention
 
 from . import constants
 from . import utils
+
+
+class ParameterDefinition(TypedDict):
+    """One game parameter: its user-facing label and its ``{value: display_name}`` map.
+
+    The parameter ``name`` is the slash-command option name (lowercase, no
+    spaces), so the friendlier ``display_name`` is stored alongside the
+    accepted values. Config-file parameters default ``display_name`` to the
+    name; ``/games parameter`` lets admins set it explicitly.
+    """
+
+    display_name: str
+    values: dict[str, str]
 
 
 class GameOption(object):
@@ -182,7 +197,14 @@ class LFGContext(object):
         # display names (see InteractionMixin._settings_lines), so normalize
         # them back to raw values using the game's parameter configuration.
         game_command = game_option.command if game_option else None
-        param_mappings = cog.game_parameters.get(game_command, {})
+        param_mappings = cog.get_game_parameters(interaction.guild_id, game_command)
+        # The Settings field shows the parameters' display names (see
+        # InteractionMixin._settings_lines), so resolve them back to the
+        # parameter names before normalizing the values.
+        display_to_param = {
+            parameter.get("display_name", param_name).lower(): param_name
+            for param_name, parameter in param_mappings.items()
+        }
         game_settings = {}
         for field in embed.fields:
             if field.name != "Settings":
@@ -190,10 +212,11 @@ class LFGContext(object):
             for line in field.value.splitlines():
                 if (": " in line):
                     key, rest = line.split(": ", 1)
+                    param_name = display_to_param.get(key.lower(), key)
                     values = [v.strip() for v in rest.split(",") if v.strip()]
                     if (values):
-                        game_settings[key] = utils.normalize_param_values(
-                            values, param_mappings.get(key, {}))
+                        game_settings[param_name] = utils.normalize_param_values(
+                            values, param_mappings.get(param_name, {}).get("values", {}))
             break
 
         context = cls(game_option=game_option,

@@ -28,7 +28,7 @@ class GuildCommandsMixin:
                 # /lfg value but not a legal slash-command name) surfaces here
                 # as ValueError and is skipped instead of crashing the load.
                 try:
-                    command = self._make_game_command(game_command)
+                    command = self._make_game_command(game_command, guild_id)
                 except ValueError as error:
                     print(
                         f"Skipping guild-specific command '{game_command}' for "
@@ -55,18 +55,20 @@ class GuildCommandsMixin:
                 except Exception:
                     pass
 
-    def _make_game_command(self, game_command: str) -> app_commands.Command:
+    def _make_game_command(self, game_command: str, guild_id: int) -> app_commands.Command:
         # extras is never serialized by discord.py; "help_cog" lets the /help
         # command find this command's owning cog without hardcoding cog names.
         return app_commands.Command(
             name=game_command,
             description=constants.LFG_DESCRIPTION,
-            callback=self._make_game_callback(game_command),
+            callback=self._make_game_callback(game_command, guild_id),
             extras={"help_cog": self},
         )
 
-    def _make_game_callback(self, game_command: str):
-        accepted_params = self.game_parameters.get(game_command, {})
+    def _make_game_callback(self, game_command: str, guild_id: int):
+        # Parameters are per guild: the same game command may be configured
+        # differently in each server.
+        accepted_params = self.get_game_parameters(guild_id, game_command)
         parameter_names = list(accepted_params.keys())
 
         async def game_callback(interaction, **command_kwargs):
@@ -107,9 +109,11 @@ class GuildCommandsMixin:
         }
         autocompletes = {}
         for param_name in parameter_names:
-            descriptions[param_name] = f"Optional {param_name} values for this game."
+            display_name = accepted_params[param_name].get(
+                "display_name", param_name)
+            descriptions[param_name] = f"Optional {display_name} values for this game."
             autocompletes[param_name] = self._make_param_autocomplete(
-                game_command, param_name)
+                guild_id, game_command, param_name)
 
         game_callback.__qualname__ = game_callback.__name__
         game_callback.__signature__ = inspect.Signature(signature_parameters)
@@ -117,8 +121,10 @@ class GuildCommandsMixin:
         game_callback.__discord_app_commands_param_autocomplete__ = autocompletes
         return game_callback
 
-    def _make_param_autocomplete(self, game_command: str, param_name: str):
-        accepted_values = self.game_parameters.get(game_command, {}).get(param_name, {})
+    def _make_param_autocomplete(self, guild_id: int, game_command: str,
+                                 param_name: str):
+        accepted_values = self.get_game_parameter_values(
+            guild_id, game_command, param_name)
 
         async def autocomplete(interaction, current):
             # Discord replaces the whole field with the picked choice's name
@@ -198,7 +204,9 @@ class GuildCommandsMixin:
             return
 
         parsed_parameters = {}
-        for param_name, accepted_values in self.game_parameters.get(game_command, {}).items():
+        for param_name, parameter in self.get_game_parameters(
+                interaction.guild_id, game_command).items():
+            accepted_values = parameter["values"]
             raw_value = command_kwargs.get(param_name)
             if (raw_value is None):
                 continue

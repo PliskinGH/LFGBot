@@ -155,11 +155,23 @@ write to the database and take effect immediately:
 | `/games add <command> [options...]` | Add a game (`command` must be 1–32 lowercase letters/digits/`_`). |
 | `/games update <command> [options...]` | Change an existing game's options (only the provided ones). |
 | `/games remove <command>` | Remove a game. |
-| `/games list` | Show the server's configured games (read only). |
+| `/games list` | Show the server's configured games. |
+| `/games parameter add <game> <name> [display_name] [api_field] <values>` | Add a parameter (see below). |
+| `/games parameter update <game> <name> [display_name] [api_field] [values]` | Change a parameter: only the provided options; `-` in `api_field`/`display_name` resets it. |
+| `/games parameter remove <game> <name>` | Remove a parameter. |
+| `/games parameter list <game>` | Show a game's parameters. |
 
 Options mirror the `games.ini` keys (name, role, icon, color, forum,
 tag, visibility, message, `max_players`, and the league API/website URLs).
 `role` and `forum` must be given as Discord mentions.
+
+Parameters manage each game's slash-command options at runtime, like the
+`games_parameters.ini` sections. The parameter `name` becomes the slash
+option, so it cannot contain spaces or upper case;
+the optional `display_name` is the friendlier label shown in
+the option description, help and Settings field, and defaults to the name.
+`values` accepts the same `(value, Display)` syntax as the config file.
+`api_field` (letters/digits/`_`) maps the parameter to a match API field.
 
 Changes re-register and sync the per-game slash commands for that guild
 immediately. If that sync fails, the change is

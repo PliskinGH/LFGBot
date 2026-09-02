@@ -201,6 +201,7 @@ class InteractionMixin:
                 embed.add_field(
                     name="Settings",
                     value="\n".join(self._settings_lines(
+                        interaction.guild_id,
                         context.game_option.command if context.game_option else None,
                         context.game_settings)),
                     inline=False,
@@ -314,16 +315,21 @@ class InteractionMixin:
         except Exception as error:
             print(error)
 
-    def _settings_lines(self, game_command: str | None,
+    def _settings_lines(self, guild_id: int,
+                        game_command: str | None,
                         game_settings: dict[str, list[str]]) -> list[str]:
         """Render a game settings dict as display lines, mapping raw values to
         their display names from the game's parameter configuration. Unknown
         or already-displayed tokens are kept as-is."""
-        param_mappings = self.game_parameters.get(game_command or "", {})
-        return [
-            f"{param_name}: {', '.join(utils.render_param_values(values, param_mappings.get(param_name, {})))}"
-            for param_name, values in game_settings.items()
-        ]
+        param_mappings = self.get_game_parameters(guild_id, game_command or "")
+        lines = []
+        for param_name, values in game_settings.items():
+            parameter = param_mappings.get(param_name, {})
+            display_name = parameter.get("display_name", param_name)
+            value_display = parameter.get("values", {})
+            lines.append(
+                f"{display_name}: {', '.join(utils.render_param_values(values, value_display))}")
+        return lines
 
     async def create_lfg(self, interaction: discord.Interaction,
                          game_option: GameOption,
@@ -347,7 +353,7 @@ class InteractionMixin:
             embed.add_field(name=f"Guests (0/{max_guests})", value="", inline=False)
         
         if (game_settings):
-            embed.add_field(name="Settings", value="\n".join(self._settings_lines(game_option.command, game_settings)), inline=False)
+            embed.add_field(name="Settings", value="\n".join(self._settings_lines(interaction.guild_id, game_option.command, game_settings)), inline=False)
         
         author_avatar = common_constants.DEFAULT_AVATAR_URL
         display_avatar = host.display_avatar
@@ -388,7 +394,8 @@ class InteractionMixin:
                     content="The LFG post was created!", ephemeral=True)
             else:
                 await interaction.followup.send(
-                    content="The LFG post could not be created.",
+                    content="The LFG post could not be created. " \
+                    "Check that the bot has permission to send messages in this channel.",
                     ephemeral=True)
         except Exception as error:
             print(error)

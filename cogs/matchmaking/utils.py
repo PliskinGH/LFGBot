@@ -7,7 +7,7 @@ from . import constants
 
 
 def parse_game_parameters(parameters_config: configparser.ConfigParser | None,
-                          ) -> tuple[dict[str, dict[str, dict[str, str]]],
+                          ) -> tuple[dict[str, dict[str, dict[str, dict[str, str]]]],
                                      dict[str, dict[str, str]],
                                      dict[str, str]]:
     """Parse a game-parameters config into its component maps.
@@ -16,16 +16,18 @@ def parse_game_parameters(parameters_config: configparser.ConfigParser | None,
     value is an optional match API field name followed by a colon, then
     the acceptable values: either a comma-separated list or a list of
     (value, display name) pairs (see ``parse_param_entries``).
-    Parameters are returned as ``{value: display_name}`` maps in
-    ``game_parameters``; the API field name (when present) is returned
-    per parameter in ``game_api_fields``.
+    Parameters are returned as ``{param_name: {"display_name": label,
+    "values": {value: display_name}}}`` maps in ``game_parameters`` (the
+    label defaults to the name: the config files have no display-name
+    syntax); the API field name (when present) is returned per parameter
+    in ``game_api_fields``.
 
     The [DEFAULT] section's api_* keys declare the fixed payload
     component field names (title, thread link, participants) for every
     game — including games without a section here — and are returned in
     ``default_api_fields``.
     """
-    game_parameters: dict[str, dict[str, dict[str, str]]] = {}
+    game_parameters: dict[str, dict[str, dict[str, dict[str, str]]]] = {}
     game_api_fields: dict[str, dict[str, str]] = {}
     default_api_fields: dict[str, str] = {}
     if (parameters_config is None):
@@ -46,7 +48,10 @@ def parse_game_parameters(parameters_config: configparser.ConfigParser | None,
             api_field, value_list = _split_api_field(raw_value)
             value_display = parse_param_entries(value_list)
             if (value_display):
-                game_parameters[game_command][param_name] = value_display
+                game_parameters[game_command][param_name] = {
+                    "display_name": param_name,
+                    "values": value_display,
+                }
                 if (api_field):
                     game_api_fields[game_command][param_name] = api_field
     return game_parameters, game_api_fields, default_api_fields

@@ -34,10 +34,11 @@ class Matchmaking(AdminMixin, ConfigMixin, GuildCommandsMixin, HelpMixin,
                  game_parameters : configparser.ConfigParser = None,
                  loaded_config : LoadedConfig = None):
         self.bot = bot
-        # game_command -> { parameter_name -> { value: display_name } }
-        self.game_parameters: dict[str, dict[str, dict[str, str]]] = {}
-        # game_command -> { parameter_name -> match API field name }
-        self.game_api_fields: dict[str, dict[str, str]] = {}
+        # guild_id -> game_command -> { parameter_name -> {"display_name": label,
+        # "values": {value: display_name}} }
+        self.game_parameters: dict[int, dict[str, dict[str, ParameterDefinition]]] = {}
+        # guild_id -> game_command -> { parameter_name or reserved api_* key -> match API field name }
+        self.game_api_fields: dict[int, dict[str, dict[str, str]]] = {}
         # Fixed payload component field names from the [DEFAULT] section of
         # games_parameters.ini; inherited by every game (including games
         # without a section there), overridden by each game's own api_* keys.
