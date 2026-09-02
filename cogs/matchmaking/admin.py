@@ -266,16 +266,20 @@ class AdminMixin:
         if (error is not None):
             await interaction.response.send_message(error, ephemeral=True)
             return
+        
+        # Defer to avoid the 3s timeout.
+        await interaction.response.defer(ephemeral=True)
+        
         guild_id = interaction.guild_id
         await db_config.ensure_guild_config(guild_id)
         if (not await db_config.add_game(guild_id, command, **fields)):
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"`{command}` is already configured; use `/games update` "
                 "to change it.", ephemeral=True)
             return
         await self._refresh_config()
         await self._sync_guild(interaction)
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"Game `{command}` added.", ephemeral=True)
 
     @games.command(name="update", description="Update an existing game on this server.")
@@ -316,14 +320,18 @@ class AdminMixin:
         if (error is not None):
             await interaction.response.send_message(error, ephemeral=True)
             return
+        
+        # Defer to avoid the 3s timeout.
+        await interaction.response.defer(ephemeral=True)
+
         guild_id = interaction.guild_id
         if (not await db_config.update_game(guild_id, command, **fields)):
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"`{command}` is not configured for this server.", ephemeral=True)
             return
         await self._refresh_config()
         await self._sync_guild(interaction)
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"Game `{command}` updated.", ephemeral=True)
 
     @games_update.autocomplete("command")
@@ -337,14 +345,18 @@ class AdminMixin:
         if (not await self._guard_admin(interaction)
                 or not await self._guard_database(interaction)):
             return
+        
+        # Defer to avoid the 3s timeout.
+        await interaction.response.defer(ephemeral=True)
+
         removed = await db_config.delete_game(interaction.guild_id, command)
         if (not removed):
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"`{command}` is not configured for this server.", ephemeral=True)
             return
         await self._refresh_config()
         await self._sync_guild(interaction)
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"Game `{command}` removed.", ephemeral=True)
 
     @games_remove.autocomplete("command")
@@ -432,17 +444,21 @@ class AdminMixin:
             await interaction.response.send_message(
                 f"`{game}` is not configured for this server.", ephemeral=True)
             return
+        
+        # Defer to avoid the 3s timeout.
+        await interaction.response.defer(ephemeral=True)
+
         await db_config.ensure_guild_config(guild_id)
         if (not await db_config.add_parameter(
                 guild_id, game, name,
                 utils.parse_param_entries(values), api_field=api_field,
                 display_name=display_name)):
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"`{game}` already has a parameter named `{name}`.", ephemeral=True)
             return
         await self._refresh_config()
         await self._sync_guild(interaction)
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"Parameter `{name}` added to `{game}`.", ephemeral=True)
 
     @games_parameter_add.autocomplete("game")
@@ -489,6 +505,10 @@ class AdminMixin:
         value_display = None
         if (values is not None):
             value_display = utils.parse_param_entries(values)
+
+        # Defer to avoid the 3s timeout.
+        await interaction.response.defer(ephemeral=True)
+
         await db_config.ensure_guild_config(guild_id)
         update_kwargs = {"values": value_display}
         if (api_field is not None):
@@ -498,12 +518,12 @@ class AdminMixin:
         updated = await db_config.update_parameter(
             guild_id, game, name, **update_kwargs)
         if (not updated):
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"`{game}` has no parameter named `{name}`.", ephemeral=True)
             return
         await self._refresh_config()
         await self._sync_guild(interaction)
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"Parameter `{name}` updated.", ephemeral=True)
 
     @games_parameter_update.autocomplete("game")
@@ -530,14 +550,18 @@ class AdminMixin:
             await interaction.response.send_message(
                 f"`{game}` is not configured for this server.", ephemeral=True)
             return
+        
+        # Defer to avoid the 3s timeout.
+        await interaction.response.defer(ephemeral=True)
+        
         await db_config.ensure_guild_config(guild_id)
         if (not await db_config.delete_parameter(guild_id, game, name)):
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"`{game}` has no parameter named `{name}`.", ephemeral=True)
             return
         await self._refresh_config()
         await self._sync_guild(interaction)
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"Parameter `{name}` removed from `{game}`.", ephemeral=True)
 
     @games_parameter_remove.autocomplete("game")

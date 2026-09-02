@@ -14,16 +14,34 @@ class CommandsMixin:
     """The /lfg and /rename slash commands."""
 
     async def check_thread_rename_permission(self,
-                                             interaction: discord.Interaction
+                                             interaction: discord.Interaction,
+                                             use_followup: bool = False
                                              ) -> bool | None:
+        """Whether the user may rename this thread; notifies on failure.
+
+        Returns None when the channel is not a bot-created thread, False when
+        the user is not the host, and True otherwise. The reason is sent as an
+        ephemeral response, or as a followup when the interaction was already
+        deferred (``use_followup``).
+        """
         channel = interaction.channel
+
+        async def _notify(message: str) -> None:
+            if (use_followup):
+                await interaction.followup.send(message, ephemeral=True)
+            else:
+                await interaction.response.send_message(message, ephemeral=True)
+
         if (channel is None or channel.type not in constants.THREAD_TYPES):
+            await _notify(
+                "This command can only be used inside a bot-created game thread."
+            )
             return None
 
         if (channel.owner_id != self.bot.user.id):
-            await interaction.response.send_message(
-                "This thread cannot be renamed because it was not created by this bot.",
-                ephemeral=True,
+            await _notify(
+                "This thread cannot be renamed because it was not created by"
+                " this bot.",
             )
             return False
 
@@ -40,9 +58,7 @@ class CommandsMixin:
                     break
 
         if (host_id != interaction.user.id):
-            await interaction.response.send_message(
-                "Only the host can rename this thread.", ephemeral=True
-            )
+            await _notify("Only the host can rename this thread.")
             return False
 
         return True
@@ -52,19 +68,25 @@ class CommandsMixin:
         channel = interaction.channel
         new_name = utils.clean_thread_title(title)
         if (not new_name):
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "Thread title cannot be empty.", ephemeral=True
             )
             return
 
         await channel.edit(name=new_name)
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"Thread renamed to **{new_name}**.", ephemeral=True
         )
 
     async def rename_thread_modal(self, interaction: discord.Interaction,
                                   title: str):
-        if (not await self.check_thread_rename_permission(interaction)):
+        # Defer ephemerally: the starter-message fetch and the channel edit
+        # are REST calls that can outlast Discord's 3-second response window;
+        # the followup webhook then stays usable for 15 minutes.
+        await interaction.response.defer(ephemeral=True)
+
+        if (not await self.check_thread_rename_permission(
+                interaction, use_followup=True)):
             return
 
         await self.rename_thread(interaction, title)
@@ -75,17 +97,20 @@ class CommandsMixin:
     @app_commands.describe(title="The new title for the thread.")
     async def rename(self, interaction: discord.Interaction,
                      title: str | None = None):
-        can_rename = await self.check_thread_rename_permission(interaction)
-        if (can_rename is None):
-            await interaction.response.send_message(
-                "This command can only be used inside a bot-created game thread.",
-                ephemeral=True,
-            )
-            return
+        guided = (title is None or not title.strip())
+        if (not guided):
+            # Direct mode: defer to avoid 3s timeout.
+            # Guided mode cannot defer: the modal
+            # must be the initial response.
+            await interaction.response.defer(ephemeral=True)
+
+        can_rename = await self.check_thread_rename_permission(
+            interaction, use_followup=not guided)
         if (not can_rename):
+            # Already notified (response or followup, per the mode).
             return
 
-        if (title is None or not title.strip()):
+        if (guided):
             await interaction.response.send_modal(
                 ThreadRenameModal(self.rename_thread_modal)
             )

@@ -118,8 +118,9 @@ class TestGamesAdd:
         assert fields["role"] == "<@&954741722846490624>"
         assert fields["forum"] == "<#1068560342671700088>"
         # The guild's commands are synced so the new game works right away.
+        assert interaction.response.deferred is True
         assert cog.bot.tree.sync_calls == [42424]
-        assert interaction.response.messages[0][0] == "Game `root` added."
+        assert interaction.followup.sent[0][0] == "Game `root` added."
 
     @pytest.mark.asyncio
     async def test_forum_mention_is_stored_unchanged(self, monkeypatch):
@@ -179,7 +180,7 @@ class TestGamesAdd:
         monkeypatch.setattr(db_config, "ensure_guild_config", fake_ensure)
         monkeypatch.setattr(db_config, "add_game", fake_add)
         await Matchmaking.games_add.callback(cog, interaction, command="root")
-        assert "already configured" in interaction.response.messages[0][0]
+        assert "already configured" in interaction.followup.sent[0][0]
 
     @pytest.mark.asyncio
     async def test_rejects_invalid_command_name(self, monkeypatch):
@@ -239,8 +240,9 @@ class TestGamesUpdate:
         guild_id, command, fields = written["update"]
         assert (guild_id, command) == (42424, "game_a")
         assert fields == {"name": "New Name", "default_max_guests": 3}
+        assert interaction.response.deferred is True
         assert cog.bot.tree.sync_calls == [42424]
-        assert interaction.response.messages[0][0] == "Game `game_a` updated."
+        assert interaction.followup.sent[0][0] == "Game `game_a` updated."
 
     @pytest.mark.asyncio
     async def test_rejects_non_mention_role(self, monkeypatch):
@@ -277,7 +279,7 @@ class TestGamesUpdate:
         monkeypatch.setattr(db_config, "update_game", fake_update)
         await Matchmaking.games_update.callback(
             cog, interaction, command="game_a", name="X")
-        assert "not configured" in interaction.response.messages[0][0]
+        assert "not configured" in interaction.followup.sent[0][0]
 
     @pytest.mark.asyncio
     async def test_nothing_to_update(self, monkeypatch):
@@ -308,8 +310,9 @@ class TestGamesRemove:
 
         monkeypatch.setattr(db_config, "delete_game", fake_delete)
         await Matchmaking.games_remove.callback(cog, interaction, command="game_a")
+        assert interaction.response.deferred is True
         assert cog.bot.tree.sync_calls == [42424]
-        assert interaction.response.messages[0][0] == "Game `game_a` removed."
+        assert interaction.followup.sent[0][0] == "Game `game_a` removed."
 
     @pytest.mark.asyncio
     async def test_missing_game(self, monkeypatch):
@@ -321,7 +324,7 @@ class TestGamesRemove:
 
         monkeypatch.setattr(db_config, "delete_game", fake_delete)
         await Matchmaking.games_remove.callback(cog, interaction, command="game_a")
-        assert "not configured" in interaction.response.messages[0][0]
+        assert "not configured" in interaction.followup.sent[0][0]
 
     @pytest.mark.asyncio
     async def test_autocomplete_lists_games(self, monkeypatch):
@@ -437,8 +440,9 @@ class TestGamesParameterAdd:
         assert written["add"] == (
             42424, "game_a", "newparam", {"a": "Alpha", "b": "b"},
             "new_field", "New Param")
+        assert interaction.response.deferred is True
         assert cog.bot.tree.sync_calls == [42424]
-        assert (interaction.response.messages[0][0]
+        assert (interaction.followup.sent[0][0]
                 == "Parameter `newparam` added to `game_a`.")
 
     @pytest.mark.asyncio
@@ -468,7 +472,7 @@ class TestGamesParameterAdd:
         monkeypatch.setattr(db_config, "add_parameter", fake_add)
         await Matchmaking.games_parameter_add.callback(
             cog, interaction, game="game_a", name="param1", values="x, y")
-        assert "already has a parameter" in interaction.response.messages[0][0]
+        assert "already has a parameter" in interaction.followup.sent[0][0]
 
     @pytest.mark.asyncio
     async def test_invalid_api_field_rejected(self, monkeypatch):
@@ -525,8 +529,9 @@ class TestGamesParameterUpdate:
             42424, "game_a", "param1",
             {"values": {"zed": "zed", "y": "y"}, "api_field": "renamed",
              "display_name": "Renamed Param"})
+        assert interaction.response.deferred is True
         assert cog.bot.tree.sync_calls == [42424]
-        assert interaction.response.messages[0][0] == "Parameter `param1` updated."
+        assert interaction.followup.sent[0][0] == "Parameter `param1` updated."
 
     @pytest.mark.asyncio
     async def test_values_only_update_omits_api_field(self, monkeypatch):
@@ -587,7 +592,7 @@ class TestGamesParameterUpdate:
         await Matchmaking.games_parameter_update.callback(
             cog, interaction, game="game_a", name="param1", api_field="")
         assert written["update"] == {"values": None, "api_field": ""}
-        assert interaction.response.messages[0][0] == "Parameter `param1` updated."
+        assert interaction.followup.sent[0][0] == "Parameter `param1` updated."
 
     @pytest.mark.asyncio
     async def test_dash_resets_api_field(self, monkeypatch):
@@ -609,7 +614,7 @@ class TestGamesParameterUpdate:
         await Matchmaking.games_parameter_update.callback(
             cog, interaction, game="game_a", name="param1", api_field="-")
         assert written["update"] == {"values": None, "api_field": ""}
-        assert interaction.response.messages[0][0] == "Parameter `param1` updated."
+        assert interaction.followup.sent[0][0] == "Parameter `param1` updated."
 
     @pytest.mark.asyncio
     async def test_dash_resets_display_name(self, monkeypatch):
@@ -701,7 +706,7 @@ class TestGamesParameterUpdate:
         monkeypatch.setattr(db_config, "update_parameter", fake_update)
         await Matchmaking.games_parameter_update.callback(
             cog, interaction, game="game_a", name="nope", values="a")
-        assert "has no parameter named" in interaction.response.messages[0][0]
+        assert "has no parameter named" in interaction.followup.sent[0][0]
 
     @pytest.mark.asyncio
     async def test_missing_game(self, monkeypatch):
@@ -740,8 +745,9 @@ class TestGamesParameterRemove:
         monkeypatch.setattr(db_config, "delete_parameter", fake_delete)
         await Matchmaking.games_parameter_remove.callback(
             cog, interaction, game="game_a", name="param1")
+        assert interaction.response.deferred is True
         assert cog.bot.tree.sync_calls == [42424]
-        assert (interaction.response.messages[0][0]
+        assert (interaction.followup.sent[0][0]
                 == "Parameter `param1` removed from `game_a`.")
 
     @pytest.mark.asyncio
@@ -759,7 +765,7 @@ class TestGamesParameterRemove:
         monkeypatch.setattr(db_config, "delete_parameter", fake_delete)
         await Matchmaking.games_parameter_remove.callback(
             cog, interaction, game="game_a", name="param1")
-        assert "has no parameter named" in interaction.response.messages[0][0]
+        assert "has no parameter named" in interaction.followup.sent[0][0]
 
     @pytest.mark.asyncio
     async def test_missing_game(self, monkeypatch):

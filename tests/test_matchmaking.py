@@ -325,8 +325,10 @@ class TestRenameCommand:
         host = FakeMember(100, "Hosty")
         interaction = FakeInteraction(user=host)
         _run(Matchmaking.rename.callback(matchmaking, interaction, title="New Room"))
+        # Direct mode defers first: the starter-message fetch is a REST call.
+        assert interaction.response.deferred is True
         assert (
-            interaction.response.messages[0][0]
+            interaction.followup.sent[0][0]
             == "This command can only be used inside a bot-created game thread."
         )
 
@@ -336,8 +338,9 @@ class TestRenameCommand:
             matchmaking, user=host, host=host, owner_id=999
         )
         _run(Matchmaking.rename.callback(matchmaking, interaction, title="New Room"))
+        assert interaction.response.deferred is True
         assert (
-            interaction.response.messages[0][0]
+            interaction.followup.sent[0][0]
             == "This thread cannot be renamed because it was not created by this bot."
         )
 
@@ -346,9 +349,10 @@ class TestRenameCommand:
         other = FakeMember(101, "Rando")
         interaction = self._thread_interaction(matchmaking, user=other, host=host)
         _run(Matchmaking.rename.callback(matchmaking, interaction, title="New Room"))
+        assert interaction.response.deferred is True
         assert interaction.channel.edited_kwargs is None
         assert (
-            interaction.response.messages[0][0]
+            interaction.followup.sent[0][0]
             == "Only the host can rename this thread."
         )
 
@@ -359,8 +363,9 @@ class TestRenameCommand:
 
         await Matchmaking.rename.callback(matchmaking, interaction, title="New Room")
 
+        assert interaction.response.deferred is True
         assert interaction.channel.edited_kwargs["name"] == "New Room"
-        assert interaction.response.messages[0][0] == "Thread renamed to **New Room**."
+        assert interaction.followup.sent[0][0] == "Thread renamed to **New Room**."
 
     @pytest.mark.asyncio
     async def test_empty_title_opens_modal(self, matchmaking):
@@ -380,8 +385,9 @@ class TestRenameCommand:
 
         await matchmaking.rename_thread_modal(interaction, "New Room")
 
+        assert interaction.response.deferred is True
         assert interaction.channel.edited_kwargs["name"] == "New Room"
-        assert interaction.response.messages[0][0] == "Thread renamed to **New Room**."
+        assert interaction.followup.sent[0][0] == "Thread renamed to **New Room**."
 
     @pytest.mark.asyncio
     async def test_modal_callback_rejects_non_host(self, matchmaking):
@@ -391,9 +397,10 @@ class TestRenameCommand:
 
         await matchmaking.rename_thread_modal(interaction, "New Room")
 
+        assert interaction.response.deferred is True
         assert interaction.channel.edited_kwargs is None
         assert (
-            interaction.response.messages[0][0]
+            interaction.followup.sent[0][0]
             == "Only the host can rename this thread."
         )
 
