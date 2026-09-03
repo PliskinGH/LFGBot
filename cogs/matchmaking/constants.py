@@ -82,6 +82,15 @@ THREAD_TYPES = [discord.ChannelType.public_thread,
 
 GUESTS_OVER_LIMIT = " and others..."
 
+# Embed field labels.
+# Use to rebuild the LFG context, so display and parsing must
+# share these definitions.
+LFG_FIELD_TARGET = "Target"
+LFG_FIELD_HOST = "Host"
+LFG_FIELD_GUESTS = "Guests"
+LFG_FIELD_SUBSCRIBED = "Subscribed"
+LFG_FIELD_SETTINGS = "Settings"
+
 # Reserved keys in games_parameters.ini sections mapping the fixed match
 # payload components (title, thread link, participants) to their API field
 # names. Keys starting with API_FIELD_PREFIX are never treated as parameters.
@@ -94,4 +103,6 @@ API_DISCORD_USERNAME_FIELD_KEY = API_FIELD_PREFIX + "discord_username_field"
 # Compiled once at import time and reused everywhere: naming the pattern
 # is self-documenting and avoids re-parsing it on each invocation.
 LFG_TITLE_RE = re.compile(r"Looking for (?:an? )?(.+?) game$")
-GUESTS_FIELD_RE = re.compile(r"Guests \((\d+)(?:/(\d+))?\)")
+GUESTS_FIELD_RE = re.compile(
+    re.escape(LFG_FIELD_GUESTS) + r" \((\d+)(?:/(\d+))?\)"
+)

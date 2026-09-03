@@ -182,24 +182,27 @@ class InteractionMixin:
             # Update the embed with the new guest list
             embed.clear_fields()
             if (context.target_role):
-                embed.add_field(name="Target", value=context.target_role.mention, inline=True)
+                embed.add_field(name=constants.LFG_FIELD_TARGET,
+                                value=context.target_role.mention, inline=True)
             if (context.host):
-                embed.add_field(name="Host", value=context.host.mention, inline=True)
+                embed.add_field(name=constants.LFG_FIELD_HOST,
+                                value=context.host.mention, inline=True)
             nb_guests = len(context.guests)
             if (nb_guests or context.max_guests is not None):
-                field_name = f"Guests ({nb_guests}"
-                if (context.max_guests is not None):
-                    field_name += f"/{context.max_guests}"
-                field_name += ")"
-                embed.add_field(name=field_name, value=guests_string, inline=False)
+                embed.add_field(
+                    name=utils.guests_field_name(
+                        nb_guests, context.max_guests),
+                    value=guests_string, inline=False,
+                )
             if (context.users_to_notify):
                 sub_mentions = ",".join(
                     u.mention for u in sorted(list(context.users_to_notify), key=lambda x: x.id)
                 )
-                embed.add_field(name="Subscribed", value=sub_mentions, inline=False)
+                embed.add_field(name=constants.LFG_FIELD_SUBSCRIBED,
+                                value=sub_mentions, inline=False)
             if (context.game_settings):
                 embed.add_field(
-                    name="Settings",
+                    name=constants.LFG_FIELD_SETTINGS,
                     value="\n".join(self._settings_lines(
                         interaction.guild_id,
                         context.game_option.command if context.game_option else None,
@@ -248,7 +251,7 @@ class InteractionMixin:
         embed = message.embeds[0]
         subscribed_field_index = next(
             (index for index, field in enumerate(embed.fields)
-             if field.name == "Subscribed"),
+             if field.name == constants.LFG_FIELD_SUBSCRIBED),
             None,
         )
         if (subscribed_field_index is not None):
@@ -257,7 +260,8 @@ class InteractionMixin:
             sub_mentions = ",".join(
                 u.mention for u in sorted(list(context.users_to_notify), key=lambda x: x.id)
             )
-            embed.add_field(name="Subscribed", value=sub_mentions, inline=False)
+            embed.add_field(name=constants.LFG_FIELD_SUBSCRIBED,
+                            value=sub_mentions, inline=False)
         try:
             await message.edit(embed=embed)
         except Exception as error:
@@ -361,17 +365,21 @@ class InteractionMixin:
         embed.set_footer(text=constants.LFG_FOOTER_HELP)
         
         if (len(game_option.role)):
-            embed.add_field(name="Target", value=game_option.role, inline=True)
+            embed.add_field(name=constants.LFG_FIELD_TARGET,
+                            value=game_option.role, inline=True)
         
         host = interaction.user
         field_text = host.mention
-        embed.add_field(name="Host", value=field_text, inline=True)
+        embed.add_field(name=constants.LFG_FIELD_HOST,
+                        value=field_text, inline=True)
 
         if (max_guests is not None):
-            embed.add_field(name=f"Guests (0/{max_guests})", value="", inline=False)
+            embed.add_field(name=utils.guests_field_name(0, max_guests),
+                            value="", inline=False)
         
         if (game_settings):
-            embed.add_field(name="Settings", value="\n".join(self._settings_lines(interaction.guild_id, game_option.command, game_settings)), inline=False)
+            embed.add_field(name=constants.LFG_FIELD_SETTINGS,
+                            value="\n".join(self._settings_lines(interaction.guild_id, game_option.command, game_settings)), inline=False)
         
         author_avatar = common_constants.DEFAULT_AVATAR_URL
         display_avatar = host.display_avatar

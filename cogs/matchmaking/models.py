@@ -129,7 +129,7 @@ class LFGContext(object):
         # Recover Host
         host = None
         for field in embed.fields:
-            if field.name == "Host":
+            if field.name == constants.LFG_FIELD_HOST:
                 h_id = get_id_from_mention(field.value)
                 if h_id:
                     host = guild.get_member(h_id)
@@ -142,7 +142,7 @@ class LFGContext(object):
         # Recover Target
         target_role = None
         for field in embed.fields:
-            if field.name == "Target":
+            if field.name == constants.LFG_FIELD_TARGET:
                 t_id = get_id_from_mention(field.value)
                 if t_id:
                     target_role = (guild.get_role(t_id) or 
@@ -158,7 +158,7 @@ class LFGContext(object):
         guests = set()
         max_guests = None
         for field in embed.fields:
-            if field.name.startswith("Guests"):
+            if field.name.startswith(constants.LFG_FIELD_GUESTS):
                 m = constants.GUESTS_FIELD_RE.search(field.name)
                 if m:
                     if m.group(2):
@@ -179,7 +179,7 @@ class LFGContext(object):
         # Recover Users to Notify from the Subscribed field
         users_to_notify = set()
         for field in embed.fields:
-            if field.name != "Subscribed":
+            if field.name != constants.LFG_FIELD_SUBSCRIBED:
                 continue
             ids = MENTION_RE.findall(field.value)
             for i in ids:
@@ -207,7 +207,7 @@ class LFGContext(object):
         }
         game_settings = {}
         for field in embed.fields:
-            if field.name != "Settings":
+            if field.name != constants.LFG_FIELD_SETTINGS:
                 continue
             for line in field.value.splitlines():
                 if (": " in line):

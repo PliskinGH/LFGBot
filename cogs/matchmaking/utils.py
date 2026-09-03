@@ -171,6 +171,13 @@ def format_accepted_values(value_display: dict[str, str]) -> str:
     )
 
 
+def guests_field_name(count: int, limit: int | None = None) -> str:
+    """The "Guests (count[/limit])" embed field label."""
+    if (limit is None):
+        return f"{constants.LFG_FIELD_GUESTS} ({count})"
+    return f"{constants.LFG_FIELD_GUESTS} ({count}/{limit})"
+
+
 def host_id_from_message(message: discord.Message | None) -> int | None:
     """The LFG host's user id recorded in ``message``'s embed, if any.
 
@@ -179,7 +186,7 @@ def host_id_from_message(message: discord.Message | None) -> int | None:
     if (message is None or not message.embeds):
         return None
     for field in message.embeds[0].fields:
-        if (field.name == "Host"):
+        if (field.name == constants.LFG_FIELD_HOST):
             return get_id_from_mention(field.value)
     return None
 
