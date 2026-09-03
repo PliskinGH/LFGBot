@@ -368,6 +368,29 @@ class TestRenameCommand:
         assert interaction.followup.sent[0][0] == "Thread renamed to **New Room**."
 
     @pytest.mark.asyncio
+    async def test_host_renames_using_cached_starter_message(self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        embed = discord.Embed(title="Looking for a Game A game")
+        embed.add_field(name="Host", value=host.mention, inline=True)
+
+        channel = FakeChannel(id=123, name="game-a")
+        channel.type = discord.ChannelType.public_thread
+        channel.owner_id = matchmaking.bot.user.id
+        # Only the cache holds the LFG embed: fetching by ID and the thread
+        # history are both empty, so success proves the cached starter was
+        # looked at first.
+        channel.starter_message = FakeMessage([embed])
+        channel.message = None
+        channel.messages = []
+
+        interaction = FakeInteraction(user=host, channel=channel)
+
+        await Matchmaking.rename.callback(matchmaking, interaction, title="New Room")
+
+        assert interaction.channel.edited_kwargs["name"] == "New Room"
+        assert interaction.followup.sent[0][0] == "Thread renamed to **New Room**."
+
+    @pytest.mark.asyncio
     async def test_empty_title_opens_modal(self, matchmaking):
         host = FakeMember(100, "Hosty")
         interaction = self._thread_interaction(matchmaking, user=host, host=host)
@@ -402,6 +425,126 @@ class TestRenameCommand:
         assert (
             interaction.followup.sent[0][0]
             == "Only the host can rename this thread."
+        )
+
+    def _non_forum_thread_interaction(self, matchmaking, user, host,
+                                      channel_type):
+        """A bot-created thread whose LFG embed is not in the thread itself.
+
+        A thread created under a message shares that message's ID, but the
+        message stays in the parent channel: fetching it through the thread
+        fails, and it must be fetched through ``thread.parent``. A private
+        thread created from a channel has no parent message at all — the bot
+        posts the LFG embed into the thread instead, so it is only reachable
+        through the thread history.
+        """
+        embed = discord.Embed(title="Looking for a Game A game")
+        embed.add_field(name="Host", value=host.mention, inline=True)
+
+        parent = FakeChannel(id=999, name="lfg-channel")
+        parent.type = discord.ChannelType.text
+
+        channel = FakeChannel(id=123, name="game-a")
+        channel.type = channel_type
+        channel.owner_id = matchmaking.bot.user.id
+        channel.parent = parent
+        channel.message = None  # fetch_message on the thread itself: nothing
+        if (channel_type == discord.ChannelType.private_thread):
+            # No parent message: the LFG embed was posted into the thread.
+            parent.message = None
+            channel.messages = [FakeMessage([embed])]
+        else:
+            # The LFG message lives in the parent channel, keyed by thread.id.
+            parent.message = FakeMessage([embed])
+
+        return FakeInteraction(user=user, channel=channel)
+
+    @pytest.mark.asyncio
+    async def test_host_renames_thread_created_outside_forum(self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        for channel_type in (discord.ChannelType.public_thread,
+                             discord.ChannelType.private_thread):
+            interaction = self._non_forum_thread_interaction(
+                matchmaking, user=host, host=host, channel_type=channel_type)
+
+            await Matchmaking.rename.callback(
+                matchmaking, interaction, title="New Room")
+
+            assert interaction.response.deferred is True
+            assert interaction.channel.edited_kwargs["name"] == "New Room"
+            assert (
+                interaction.followup.sent[0][0]
+                == "Thread renamed to **New Room**."
+            )
+
+    @pytest.mark.asyncio
+    async def test_non_host_cannot_rename_thread_created_outside_forum(
+            self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        other = FakeMember(101, "Rando")
+        interaction = self._non_forum_thread_interaction(
+            matchmaking, user=other, host=host,
+            channel_type=discord.ChannelType.public_thread)
+
+        await Matchmaking.rename.callback(
+            matchmaking, interaction, title="New Room")
+
+        assert interaction.response.deferred is True
+        assert interaction.channel.edited_kwargs is None
+        assert (
+            interaction.followup.sent[0][0]
+            == "Only the host can rename this thread."
+        )
+
+    def _host_not_found_interaction(self, matchmaking, user, channel_type=None):
+        """A bot-created thread whose host can no longer be identified.
+
+        The LFG message is unreachable (fetch_message returns nothing and the
+        thread history holds no embed with a Host field), e.g. because the
+        LFG message was deleted.
+        """
+        channel = FakeChannel(id=123, name="game-a")
+        channel.type = channel_type or discord.ChannelType.public_thread
+        channel.owner_id = matchmaking.bot.user.id
+        channel.message = None
+        channel.messages = []
+
+        return FakeInteraction(user=user, channel=channel)
+
+    @pytest.mark.asyncio
+    async def test_host_is_not_misled_when_host_cannot_be_found(
+            self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        for channel_type in (discord.ChannelType.public_thread,
+                             discord.ChannelType.private_thread):
+            interaction = self._host_not_found_interaction(
+                matchmaking, user=host, channel_type=channel_type)
+
+            await Matchmaking.rename.callback(
+                matchmaking, interaction, title="New Room")
+
+            assert interaction.response.deferred is True
+            assert interaction.channel.edited_kwargs is None
+            assert interaction.followup.sent[0][0] == (
+                "This thread cannot be renamed because the host could not be"
+                " found."
+            )
+
+    @pytest.mark.asyncio
+    async def test_modal_host_is_not_misled_when_host_cannot_be_found(
+            self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        interaction = self._host_not_found_interaction(
+            matchmaking, user=host,
+            channel_type=discord.ChannelType.public_thread)
+
+        await matchmaking.rename_thread_modal(interaction, "New Room")
+
+        assert interaction.response.deferred is True
+        assert interaction.channel.edited_kwargs is None
+        assert interaction.followup.sent[0][0] == (
+            "This thread cannot be renamed because the host could not be"
+            " found."
         )
 
 

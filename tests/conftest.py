@@ -75,8 +75,11 @@ class FakeChannel:
         self.type = type_ or discord.ChannelType.text
         self.mention = f"<#{self.id}>"
         self.owner_id = None
+        self.parent = None  # parent channel when this channel is a thread
         self.created_kwargs = None
         self.message = None  # FakeMessage returned by fetch_message
+        self.starter_message = None  # cached thread starter (discord.Thread)
+        self.messages = []  # FakeMessage list iterated by history()
         self.edited_kwargs = None
         self.sent = []  # (content, embed, view) tuples recorded by send
 
@@ -91,6 +94,13 @@ class FakeChannel:
 
     async def fetch_message(self, message_id):
         return self.message
+
+    async def history(self, *, limit=100, oldest_first=None, **kwargs):
+        messages = list(self.messages)
+        if (not oldest_first):
+            messages.reverse()
+        for message in messages[:limit]:
+            yield message
 
     async def edit(self, **kwargs):
         self.edited_kwargs = kwargs

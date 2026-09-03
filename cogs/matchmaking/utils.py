@@ -1,7 +1,12 @@
-"""Helpers for the matchmaking cog: games_parameters.ini parsing and
-parameter value/display handling."""
+"""Helpers for the matchmaking cog: games_parameters.ini parsing, parameter
+value/display handling, and LFG embed/thread helpers.
+"""
 
 import configparser
+
+import discord
+
+from common.utils import get_id_from_mention
 
 from . import constants
 
@@ -164,4 +169,71 @@ def format_accepted_values(value_display: dict[str, str]) -> str:
         display if display == value else f"{value} ({display})"
         for value, display in value_display.items()
     )
+
+
+def host_id_from_message(message: discord.Message | None) -> int | None:
+    """The LFG host's user id recorded in ``message``'s embed, if any.
+
+    Returns None when the message has no embed or no "Host" field.
+    """
+    if (message is None or not message.embeds):
+        return None
+    for field in message.embeds[0].fields:
+        if (field.name == "Host"):
+            return get_id_from_mention(field.value)
+    return None
+
+
+async def fetch_host_id(thread: discord.Thread) -> int | None:
+    """The LFG host's user id recorded in ``thread``'s LFG message.
+
+    Where the LFG embed lives depends on how the thread was created:
+
+    * Forum posts keep it as the thread's own starter message, whose ID is
+      the thread's ID, so it is fetched from the thread.
+    * A thread created under a message shares that message's ID, but the
+      message remains in the parent channel: it can only be fetched through
+      ``thread.parent``, not through the thread channel itself.
+    * A private thread created from a channel has no parent message; the bot
+      posts the LFG embed as the first message of the thread, which is found
+      through the thread history.
+
+    Returns None when no LFG message (or no "Host" field) could be found.
+    """
+    # The starter message may already be cached: forum posts and message
+    # threads both reuse the thread ID for the starter message.
+    message = getattr(thread, "starter_message", None)
+    if (message is not None):
+        host_id = host_id_from_message(message)
+        if (host_id is not None):
+            return host_id
+
+    parent = getattr(thread, "parent", None)
+    if (parent is None or parent.type == discord.ChannelType.forum):
+        # Forum post: the LFG embed is the thread's own starter message.
+        channel = thread
+    else:
+        # Message thread: the LFG message sits in the parent channel and its
+        # ID is the thread's ID.
+        channel = parent
+
+    try:
+        message = await channel.fetch_message(thread.id)
+    except (discord.HTTPException, AttributeError):
+        message = None
+    if (message is not None):
+        host_id = host_id_from_message(message)
+        if (host_id is not None):
+            return host_id
+
+    # Last resort (private threads started from a channel): scan the thread
+    # history for the LFG embed the bot posted on creation.
+    try:
+        async for message in thread.history(limit=1, oldest_first=True):
+            host_id = host_id_from_message(message)
+            if (host_id is not None):
+                return host_id
+    except discord.HTTPException:
+        pass
+    return None
 

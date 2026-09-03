@@ -7,6 +7,7 @@ from common import constants as common_constants, utils
 from common.ui import DynamicSelectView
 
 from . import constants
+from .utils import fetch_host_id
 from .views import ThreadRenameModal
 
 
@@ -45,17 +46,14 @@ class CommandsMixin:
             )
             return False
 
-        try:
-            starter_message = await channel.fetch_message(channel.id)
-        except discord.HTTPException:
-            starter_message = None
+        host_id = await fetch_host_id(channel)
 
-        host_id = None
-        if (starter_message is not None and starter_message.embeds):
-            for field in starter_message.embeds[0].fields:
-                if (field.name == "Host"):
-                    host_id = utils.get_id_from_mention(field.value)
-                    break
+        if (host_id is None):
+            await _notify(
+                "This thread cannot be renamed because the host could not be"
+                " found."
+            )
+            return False
 
         if (host_id != interaction.user.id):
             await _notify("Only the host can rename this thread.")
