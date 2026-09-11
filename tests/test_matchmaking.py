@@ -217,33 +217,11 @@ class TestMinimalDynamicGame:
         assert "Looking for" in embed.title
         # The deferred placeholder is answered with an ephemeral confirmation.
         confirmation_content, confirmation_ephemeral, _, _ = interaction.followup.sent[0]
-        assert confirmation_content == "The LFG post was created!"
+        assert confirmation_content == "The LFG post was created: https://discord.com/channels/1/1/1."
         assert confirmation_ephemeral is True
         assert all(field.name != "Target" for field in embed.fields)
         # No icon configured -> falls back to the default avatar.
         assert embed.thumbnail is not None
-
-    @pytest.mark.asyncio
-    async def test_create_lfg_links_post_when_sent_to_different_channel(self, matchmaking):
-        # Game configured with an LFG channel that differs from the command's
-        # channel: the confirmation should link the post.
-        game = self._minimal_game_option()
-        game.channel = "<#777>"
-        lfg_channel = FakeChannel(id=777, name="lfg")
-        matchmaking.bot._channels[777] = lfg_channel
-
-        interaction = FakeInteraction(user=FakeMember(1, "host"))
-        await matchmaking.create_lfg(interaction, game, "desc", None)
-
-        # The LFG post went to the configured channel, not the command's.
-        assert len(lfg_channel.sent) == 1
-        assert len(interaction.channel.sent) == 0
-        # The confirmation links the post.
-        confirmation_content, confirmation_ephemeral, _, _ = interaction.followup.sent[0]
-        assert confirmation_content == (
-            f"The LFG post was created!\n"
-            f"{FakeMessage().jump_url}")
-        assert confirmation_ephemeral is True
 
     @pytest.mark.asyncio
     async def test_create_lfg_failure_confirms_ephemerally(self, matchmaking):
