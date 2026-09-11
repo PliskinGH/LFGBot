@@ -20,12 +20,11 @@ class Database:
 
     def __init__(self, url: str):
         self._url = url
-        # Set by initialize(): True when the database should be seeded.
+        # Set by initialize(): True when the database held no guild rows.
         self.fresh: bool = False
 
     async def initialize(self) -> bool:
-        """Connect and report whether the database is empty (a first
-        initialization that should be seeded from the config files)."""
+        """Connect and report whether the database held no guild rows."""
         await Tortoise.init(config=orm_config(self._url))
         self.fresh = (await models.Guild.all().count() == 0)
         return self.fresh

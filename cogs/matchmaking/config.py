@@ -10,7 +10,7 @@ from . import utils
 from .models import GameOption, GuildGamesConfig, ParameterDefinition
 
 
-class ConfigMixin:
+class LFGConfigMixin:
     """Configuration parsing helpers and guild config lookup."""
 
     def _load_game_parameters(self, parameters_config: configparser.ConfigParser):
@@ -89,7 +89,7 @@ class ConfigMixin:
                 website_url=safe_list_get(configdict[constants.CONFIG_GAMES_WEBSITE_URL], index, None),
                 registration_url=safe_list_get(configdict[constants.CONFIG_GAMES_REGISTRATION_URL], index, None),
                 profile_url=safe_list_get(configdict[constants.CONFIG_GAMES_PROFILE_URL], index, None),
-                default_max_guests=ConfigMixin.parse_default_max_guests(
+                default_max_guests=LFGConfigMixin.parse_default_max_guests(
                     safe_list_get(configdict[constants.CONFIG_GAMES_MAX_PLAYERS], index, None)
                 )
             )

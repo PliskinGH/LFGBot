@@ -2,7 +2,7 @@
 
 With ``DATABASE_URL`` set, the database is the source of truth: seeded from
 the config files on first initialization, loaded from it afterwards.
-``LoadedConfig`` mirrors the structures ``ConfigMixin`` builds from the
+``LoadedLFGConfig`` mirrors the structures ``LFGConfigMixin`` builds from the
 files, so the cog consumes both sources identically; seeding preserves the
 config files' ordering (slash-command option order, help, autocomplete).
 """
@@ -16,11 +16,11 @@ from db import models
 
 from . import constants
 from . import utils
-from .config import ConfigMixin
+from .config import LFGConfigMixin
 from .models import GameOption, GuildGamesConfig, ParameterDefinition
 
 
-class LoadedConfig:
+class LoadedLFGConfig:
     """The in-memory configuration structures ``Matchmaking`` consumes."""
 
     def __init__(self):
@@ -46,16 +46,16 @@ def _get_guild_id(config: configparser.ConfigParser, section: str) -> int | None
 
 
 def loaded_config_from_ini(config: configparser.ConfigParser,
-                           game_parameters: configparser.ConfigParser) -> LoadedConfig:
-    """Parse the games config files into a LoadedConfig (file-based mode)."""
-    loaded = LoadedConfig()
-    ConfigMixin._load_guild_config(loaded.default_guild_config, config, common_constants.CONFIG_DEFAULT)
+                           game_parameters: configparser.ConfigParser) -> LoadedLFGConfig:
+    """Parse the games config files into a LoadedLFGConfig (file-based mode)."""
+    loaded = LoadedLFGConfig()
+    LFGConfigMixin._load_guild_config(loaded.default_guild_config, config, common_constants.CONFIG_DEFAULT)
     for guild in config.sections():
         guild_id = _get_guild_id(config, guild)
         if (guild_id is None):
             continue
         guild_config = GuildGamesConfig(guild_id)
-        ConfigMixin._load_guild_config(guild_config, config, guild)
+        LFGConfigMixin._load_guild_config(guild_config, config, guild)
         loaded.guilds[guild_id] = guild_config
     (game_parameters, game_api_fields,
      default_api_fields) = utils.parse_game_parameters(game_parameters)
@@ -66,8 +66,13 @@ def loaded_config_from_ini(config: configparser.ConfigParser,
     loaded.default_api_fields = default_api_fields
     return loaded
 
+async def is_empty() -> bool:
+    """Whether the games table holds no configuration yet."""
+    return (await models.Game.all().count() == 0)
+
+
 # --------------------------------------------------------------------------- #
-# Seeding (LoadedConfig -> rows)
+# Seeding (LoadedLFGConfig -> rows)
 # --------------------------------------------------------------------------- #
 
 async def seed_db_from_config(config: configparser.ConfigParser,
@@ -80,8 +85,8 @@ async def seed_db_from_config(config: configparser.ConfigParser,
     await seed_db(loaded_config_from_ini(config, game_parameters))
 
 
-async def seed_db(loaded: LoadedConfig) -> None:
-    """Persist a LoadedConfig as the database's whole configuration content."""
+async def seed_db(loaded: LoadedLFGConfig) -> None:
+    """Persist a LoadedLFGConfig as the database's whole configuration content."""
     async with in_transaction():
         for key, field_name in loaded.default_api_fields.items():
             await models.DefaultApiField.create(key=key, field_name=field_name)
@@ -91,8 +96,9 @@ async def seed_db(loaded: LoadedConfig) -> None:
 
 
 async def _create_guild(guild_id: int, guild_config: GuildGamesConfig,
-                        loaded: LoadedConfig) -> None:
-    guild = await models.Guild.create(guild_id=guild_id)
+                        loaded: LoadedLFGConfig) -> None:
+    # get_or_create: guild rows are shared with the rolls cog's config.
+    guild, _ = await models.Guild.get_or_create(guild_id=guild_id)
     for command, option in guild_config.games.items():
         game = await models.Game.create(
             guild=guild,
@@ -142,7 +148,7 @@ async def _create_guild(guild_id: int, guild_config: GuildGamesConfig,
 
 
 # --------------------------------------------------------------------------- #
-# Loading (rows -> LoadedConfig)
+# Loading (rows -> LoadedLFGConfig)
 # --------------------------------------------------------------------------- #
 
 def _build_game_option(game: models.Game) -> GameOption:
@@ -168,13 +174,13 @@ def _build_game_option(game: models.Game) -> GameOption:
     )
 
 
-async def load_config_from_db() -> LoadedConfig:
-    """Load the whole configuration from the database into a LoadedConfig.
+async def load_config_from_db() -> LoadedLFGConfig:
+    """Load the whole configuration from the database into a LoadedLFGConfig.
 
     Each table is loaded ordered by insertion id, preserving the config
     files' ordering (slash-command option order, help, autocomplete).
     """
-    loaded = LoadedConfig()
+    loaded = LoadedLFGConfig()
     guilds = await models.Guild.all().order_by("guild_id")
     games = await models.Game.all().order_by("id")
     parameters = await models.GameParameter.all().order_by("id")

@@ -198,12 +198,12 @@ class LFGContext(object):
             break
 
         # Recover Game Settings from the Settings field. The field shows
-        # display names (see InteractionMixin._settings_lines), so normalize
+        # display names (see LFGInteractionMixin._settings_lines), so normalize
         # them back to raw values using the game's parameter configuration.
         game_command = game_option.command if game_option else None
         param_mappings = cog.get_game_parameters(interaction.guild_id, game_command)
         # The Settings field shows the parameters' display names (see
-        # InteractionMixin._settings_lines), so resolve them back to the
+        # LFGInteractionMixin._settings_lines), so resolve them back to the
         # parameter names before normalizing the values.
         display_to_param = {
             parameter.get("display_name", param_name).lower(): param_name

@@ -1,4 +1,4 @@
-"""Tests for the admin configuration commands (AdminMixin)."""
+"""Tests for the admin configuration commands (LFGAdminMixin)."""
 import configparser
 from types import SimpleNamespace
 
@@ -13,9 +13,9 @@ from cogs.matchmaking.models import GameOption, GuildGamesConfig
 from tests.conftest import FakeBot, FakeInteraction, FakeMember
 
 
-async def _loaded_config() -> db_config.LoadedConfig:
+async def _loaded_config() -> db_config.LoadedLFGConfig:
     """A minimal database-loaded config for refresh stubs."""
-    loaded = db_config.LoadedConfig()
+    loaded = db_config.LoadedLFGConfig()
     guild = GuildGamesConfig(42424)
     guild.games["game_a"] = GameOption(
         name="Game A", command="game_a", role="", icon="", color="",

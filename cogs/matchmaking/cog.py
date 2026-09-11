@@ -6,23 +6,23 @@ from discord.ext import commands
 
 from common import constants
 
-from .admin import AdminMixin
-from .commands import CommandsMixin
-from .config import ConfigMixin
-from .db_config import LoadedConfig
-from .guild_commands import GuildCommandsMixin
-from .help import HelpMixin
-from .interaction import InteractionMixin
+from .admin import LFGAdminMixin
+from .commands import LFGCommandsMixin
+from .config import LFGConfigMixin
+from .db_config import LoadedLFGConfig
+from .guild_commands import LFGGuildCommandsMixin
+from .help import LFGHelpMixin
+from .interaction import LFGInteractionMixin
 from .match import MatchMixin
 from .models import GuildGamesConfig
 
 
-class Matchmaking(AdminMixin, ConfigMixin, GuildCommandsMixin, HelpMixin,
-                  InteractionMixin, MatchMixin, CommandsMixin,
-                  commands.Cog):
+class Matchmaking(LFGAdminMixin, LFGConfigMixin, LFGGuildCommandsMixin,
+                  LFGHelpMixin, LFGInteractionMixin, MatchMixin,
+                  LFGCommandsMixin, commands.Cog):
     """LFG and game-thread management cog.
 
-    ConfigMixin provides the config-parsing helpers; the other mixins add the
+    LFGConfigMixin provides the config-parsing helpers; the other mixins add the
     slash commands, dynamic per-game commands, help, LFG interaction flow, and
     match/thread handling. discord.py's CogMeta collects the decorated commands
     from the whole MRO. Construction lives here, in the concrete cog class, so
@@ -32,7 +32,7 @@ class Matchmaking(AdminMixin, ConfigMixin, GuildCommandsMixin, HelpMixin,
     def __init__(self, bot: commands.Bot,
                  config : configparser.ConfigParser = None,
                  game_parameters : configparser.ConfigParser = None,
-                 loaded_config : LoadedConfig = None):
+                 loaded_config : LoadedLFGConfig = None):
         self.bot = bot
         # guild_id -> game_command -> { parameter_name -> {"display_name": label,
         # "values": {value: display_name}} }

@@ -11,7 +11,7 @@ from common import utils as common_utils
 from . import constants
 from . import db_config
 from . import utils
-from .config import ConfigMixin
+from .config import LFGConfigMixin
 from .models import GameOption
 
 # Option descriptions shared by /games add and /games update.
@@ -50,7 +50,7 @@ _API_FIELD_ARGUMENTS = {
 }
 
 
-class AdminMixin:
+class LFGAdminMixin:
     """Permission-gated commands to edit the server's games.
 
     These write to the database (the runtime source of truth) and refresh the
@@ -176,12 +176,12 @@ class AdminMixin:
         ``api_token`` is the token VALUE (a secret, never displayed): config
         files resolve their env var at load time, admins set it via /games.
         """
-        mention_error = AdminMixin._mention_error(role, channel, forum)
+        mention_error = LFGAdminMixin._mention_error(role, channel, forum)
         if (mention_error is not None):
             return None, mention_error
         default_max_guests = None
         if (max_players is not None):
-            default_max_guests = ConfigMixin.parse_default_max_guests(str(max_players))
+            default_max_guests = LFGConfigMixin.parse_default_max_guests(str(max_players))
             if (default_max_guests is None):
                 return None, "`max_players` must be between 2 and 100."
         fields = {
@@ -220,7 +220,7 @@ class AdminMixin:
         ``api_token`` accepts ``-`` as the reset sentinel (Discord cannot send
         an empty string), which clears the token.
         """
-        mention_error = AdminMixin._mention_error(role, channel, forum)
+        mention_error = LFGAdminMixin._mention_error(role, channel, forum)
         if (mention_error is not None):
             return None, mention_error
         fields = {}
@@ -237,7 +237,7 @@ class AdminMixin:
             if (value is not None):
                 fields[field_name] = value
         if (max_players is not None):
-            default_max_guests = ConfigMixin.parse_default_max_guests(str(max_players))
+            default_max_guests = LFGConfigMixin.parse_default_max_guests(str(max_players))
             if (default_max_guests is None):
                 return None, "`max_players` must be between 2 and 100."
             fields["default_max_guests"] = default_max_guests
@@ -823,5 +823,5 @@ class AdminMixin:
     # subcommands exist; CogMeta skips it as a top-level command (parent set).
     games.add_command(games_parameter)
 
-    # End of AdminMixin.
+    # End of LFGAdminMixin.
 

@@ -13,7 +13,7 @@ from .models import GameOption, LFGContext
 from .views import GameSettingsModal, LFGView
 
 
-class InteractionMixin:
+class LFGInteractionMixin:
     """LFG interaction flow: channel guards, game resolution, modals, join/notify/cancel/start."""
 
     async def _guard_lfg_channel(self, interaction, command_name):

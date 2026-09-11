@@ -3,19 +3,24 @@
 The tables mirror ``config/games.ini`` (guilds and their games) and
 ``config/games_parameters.ini`` (per-game parameters and fixed match payload
 field names); ``cogs/matchmaking/db_config.py`` maps rows <-> config objects.
-Rows are seeded in config-file order and loaded back ordered by their
-insertion ``id``, preserving the ordering the cog relies on.
+The ``Roll*`` tables mirror ``config/rolls.ini`` (guilds, their roll
+categories and items) and ``config/rolls_descriptions.json`` (one embed per
+item); ``cogs/matchrolls/db_config.py`` maps
+those rows <-> config objects. Rows are seeded in config-file order and
+loaded back ordered by their insertion ``id``, preserving the ordering the
+cogs rely on.
 """
 
 from tortoise import fields, models
 
 
 class Guild(models.Model):
-    """A guild and its games; sentinel guild id 0 = the [DEFAULT] config."""
+    """A Discord guild's configuration rows; sentinel guild id 0 = the [DEFAULT] config."""
 
     guild_id = fields.BigIntField(primary_key=True)
 
     games: fields.ReverseRelation["Game"]
+    roll_categories: fields.ReverseRelation["RollCategory"]
 
     class Meta:
         table = "guilds"
@@ -112,3 +117,48 @@ class DefaultApiField(models.Model):
     class Meta:
         table = "default_api_fields"
 
+
+class RollCategory(models.Model):
+    """One roll category of a guild: a row per rolls.ini key."""
+
+    id = fields.IntField(primary_key=True)
+    guild = fields.ForeignKeyField("models.Guild", related_name="roll_categories")
+    name = fields.TextField()
+    items = fields.TextField()
+
+    class Meta:
+        table = "roll_categories"
+        unique_together = (("guild", "name"),)
+
+
+class RollItem(models.Model):
+    """One rollable item of a category: a row per name in a rolls.ini set."""
+
+    id = fields.IntField(primary_key=True)
+    category = fields.ForeignKeyField(
+        "models.RollCategory", related_name="roll_items")
+    name = fields.TextField()
+
+    descriptions: fields.ReverseRelation["RollDescription"]
+
+    class Meta:
+        table = "roll_items"
+
+
+class RollDescription(models.Model):
+    """One roll description embed of an item, from rolls_descriptions.json.
+
+    ``description`` may be blank and the image/thumbnail URLs unset, as in
+    the JSON; a null ``color`` rolls a random colour at runtime.
+    """
+
+    id = fields.IntField(primary_key=True)
+    item = fields.ForeignKeyField(
+        "models.RollItem", related_name="descriptions")
+    description = fields.TextField(default="", db_default="")
+    color = fields.IntField(null=True)
+    image_url = fields.TextField(null=True)
+    thumbnail_url = fields.TextField(null=True)
+
+    class Meta:
+        table = "roll_descriptions"

@@ -8,7 +8,7 @@ from . import constants
 from .models import GuildGamesConfig
 
 
-class HelpMixin:
+class LFGHelpMixin:
     """Help text generation and the send_help entry point."""
 
     def _lfg_help_intro(self) -> str:

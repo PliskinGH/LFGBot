@@ -1,8 +1,8 @@
-"""Tests for the ``cogs/matchrolls.py`` cog."""
+"""Tests for the ``cogs/matchrolls`` cog package."""
 import pytest
 
-from cogs import matchrolls as matchrolls_mod
 from cogs.matchrolls import RANDOM_COMMAND, MatchRolls
+from cogs.matchrolls import commands as matchrolls_commands
 
 from tests.conftest import FakeInteraction, FakeMember
 
@@ -24,7 +24,8 @@ class TestCategoryAutocomplete:
     async def test_uses_guild_specific_section(self, matchrolls):
         interaction = FakeInteraction(user=FakeMember(1, "host"), guild_id=42424)
         choices = await matchrolls.category_autocomplete(interaction, "")
-        # GuildB section exposes its own options (including the config 'id' key).
+        # GuildB's own categories, with the [DEFAULT] ones inherited (the
+        # section's ID key is not a category and is not exposed).
         assert "map" in [choice.value for choice in choices]
 
     @pytest.mark.asyncio
@@ -58,9 +59,9 @@ class TestRandomCommand:
         return FakeInteraction(user=FakeMember(1, "host"), guild_id=1)
 
     def _patch_random(self, monkeypatch):
-        monkeypatch.setattr(matchrolls_mod.random, "choice",
+        monkeypatch.setattr(matchrolls_commands.random, "choice",
                             lambda seq: seq[0])
-        monkeypatch.setattr(matchrolls_mod.random, "randrange",
+        monkeypatch.setattr(matchrolls_commands.random, "randrange",
                             lambda *args, **kwargs: 0)
 
     async def _call_random(self, matchrolls, *args, **kwargs):

@@ -8,6 +8,7 @@ followup``, ``channels``, ``members``, etc. without touching the network.
 from __future__ import annotations
 
 import configparser
+import os
 import sys
 from pathlib import Path
 
@@ -23,6 +24,11 @@ if str(ROOT) not in sys.path:
 from cogs.matchmaking.cog import Matchmaking
 from cogs.matchmaking.models import LFGContext
 from cogs.matchrolls import MatchRolls
+from tortoise import connections
+from tortoise.migrations.api.migrate import migrate as apply_migrations
+
+from db.db import Database
+from db.orm_config import orm_config
 
 
 class FakeMentionable:
@@ -328,3 +334,54 @@ def descriptions():
 @pytest.fixture
 def matchrolls(fake_bot, rolls_config, descriptions) -> MatchRolls:
     return MatchRolls(bot=fake_bot, config=rolls_config, descriptions=descriptions)
+
+
+# --------------------------------------------------------------------------- #
+# Database
+# --------------------------------------------------------------------------- #
+
+
+def _test_database_url() -> str | None:
+    """The URL of the test database, or None when unconfigured."""
+    return os.getenv("TEST_DATABASE_URL")
+
+
+def _safe_url(url: str) -> str:
+    """A URL with the password masked, for error messages."""
+    scheme, _, rest = url.partition("://")
+    return f"{scheme}://***@{rest.partition('@')[2]}"
+
+
+async def _drop_all_tables():
+    """Drop the bot's tables and the migration history, for a clean test run."""
+    await connections.get("default").execute_script(
+        "DROP TABLE IF EXISTS tortoise_migrations, roll_descriptions, "
+        "roll_items, roll_categories, game_parameter_values, "
+        "game_parameters, game_api_field_overrides, default_api_fields, "
+        "games, guilds CASCADE")
+
+
+@pytest.fixture
+async def db():
+    """A Database on the test database, from a clean migrated schema.
+
+    The test database is provisioned by the environment (CI service or local
+    Postgres). Like the deploy step, the schema is built from the committed
+    migrations; each test drops it and re-applies them for isolation.
+    """
+    url = _test_database_url()
+    if (not url):
+        pytest.skip("No TEST_DATABASE_URL configured; skipping database tests.")
+    database = Database(url)
+    try:
+        # Schema is built from the committed migrations (the deploy step);
+        # each test drops it and re-applies them for isolation.
+        await apply_migrations(config=orm_config(url))
+        await _drop_all_tables()
+        await apply_migrations(config=orm_config(url))
+        await database.initialize()
+    except Exception as error:
+        await database.close()
+        pytest.skip(f"Database at {_safe_url(url)} is unreachable: {error}")
+    yield database
+    await database.close()

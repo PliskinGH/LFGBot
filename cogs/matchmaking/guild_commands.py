@@ -12,7 +12,7 @@ from . import constants
 from . import utils
 
 
-class GuildCommandsMixin:
+class LFGGuildCommandsMixin:
     """Dynamic per-game slash command registration and their parameter handling."""
 
     def register_guild_commands(self) -> None:

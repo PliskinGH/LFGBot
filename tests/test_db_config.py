@@ -2,14 +2,14 @@
 
 Database tests run against TEST_DATABASE_URL — the production DATABASE_URL is
 never used for tests. The test database must be provisioned beforehand
-(CI's Postgres service does it); its schema is emptied per test. Tests skip
-when TEST_DATABASE_URL is unset or the server is unreachable. The pure
-parsing/mapping tests run everywhere.
+(CI's Postgres service does it); its schema is emptied per test (see the
+shared ``db`` fixture and ``_drop_all_tables`` helper in tests/conftest.py).
+Tests skip when TEST_DATABASE_URL is unset or the server is unreachable. The
+pure parsing/mapping tests run everywhere.
 """
 import configparser
 import os
 
-import pytest
 from tortoise import connections
 from tortoise.migrations.api.migrate import migrate as apply_migrations
 
@@ -20,54 +20,9 @@ from db.orm_config import orm_config
 from cogs.matchmaking import constants, db_config
 from cogs.matchmaking.cog import Matchmaking
 from cogs.matchmaking.constants import DEFAULT_GUILD_ID
+from cogs.matchrolls import db_config as rolls_db_config
 
-from tests.conftest import FakeBot
-
-
-def _test_database_url() -> str | None:
-    """The URL of the test database, or None when unconfigured."""
-    return os.getenv("TEST_DATABASE_URL")
-
-
-def _safe_url(url: str) -> str:
-    """A URL with the password masked, for error messages."""
-    scheme, _, rest = url.partition("://")
-    return f"{scheme}://***@{rest.partition('@')[2]}"
-
-
-async def _drop_all_tables():
-    """Drop the bot's tables and the migration history, for a clean test run."""
-    await connections.get("default").execute_script(
-        "DROP TABLE IF EXISTS tortoise_migrations, game_parameter_values, "
-        "game_parameters, game_api_field_overrides, default_api_fields, "
-        "games, guilds CASCADE")
-
-
-@pytest.fixture
-async def db():
-    """A Database on the test database, from a clean migrated schema.
-
-    The test database is provisioned by the environment (CI service or local
-    Postgres). Like the deploy step, the schema is built from the committed
-    migrations; each test drops it and re-applies them for isolation.
-    """
-    url = _test_database_url()
-    if (not url):
-        pytest.skip("No TEST_DATABASE_URL configured; skipping database tests.")
-    database = Database(url)
-    try:
-        # Schema is built from the committed migrations (the deploy step);
-        # each test drops it and re-applies them for isolation.
-        await apply_migrations(config=orm_config(url))
-        await _drop_all_tables()
-        await apply_migrations(config=orm_config(url))
-        await database.initialize()
-    except Exception as error:
-        await database.close()
-        pytest.skip(f"Database at {_safe_url(url)} is unreachable: {error}")
-    yield database
-    await database.close()
-
+from tests.conftest import FakeBot, _drop_all_tables, _test_database_url
 
 
 def _assert_same_guild_config(expected, actual):
@@ -118,7 +73,7 @@ class TestLoadedConfigFromIni:
 
 
 class TestCogFromLoadedConfig:
-    """A cog built from a LoadedConfig matches the file-parsing cog."""
+    """A cog built from a LoadedLFGConfig matches the file-parsing cog."""
 
     def test_attributes_match_file_parsing(self, games_config, game_parameters_config):
         from_files = Matchmaking(bot=FakeBot(), config=games_config,
@@ -156,6 +111,18 @@ class TestInitialize:
             assert await second.initialize() is False
         finally:
             await second.close()
+
+
+class TestSeedingCondition:
+    """Each cog seeds when its own content table is empty."""
+
+    async def test_games_table_empty(self, db):
+        assert await db_config.is_empty() is True
+
+    async def test_games_table_seeded(self, db, games_config,
+                                      game_parameters_config):
+        await db_config.seed_db_from_config(games_config, game_parameters_config)
+        assert await db_config.is_empty() is False
 
 
 class TestSeeding:
@@ -234,6 +201,18 @@ class TestSeeding:
         assert cog.get_guild_config(999999) is cog.default_guild_config
         assert cog.get_guild_config(90401) is cog.guilds[90401]
         assert "game_c" in cog.get_guild_config(90401).games
+
+    async def test_guild_rows_are_shared_with_the_rolls_cog(
+            self, db, games_config, game_parameters_config,
+            rolls_config, descriptions):
+        # The rolls cog seeds first; the games seeding must reuse its guild
+        # rows instead of creating conflicting ones.
+        await rolls_db_config.seed_db_from_config(rolls_config, descriptions)
+        await db_config.seed_db_from_config(games_config, game_parameters_config)
+        guilds = await models.Guild.all().order_by("guild_id")
+        assert [guild.guild_id for guild in guilds] == [0, 42424, 90401]
+        assert await models.Game.filter(guild_id=90401).count() == 1
+        assert await models.RollCategory.filter(guild_id=42424).count() == 2
 
 
 class TestTokenConfigParsing:

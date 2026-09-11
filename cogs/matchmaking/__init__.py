@@ -31,7 +31,7 @@ async def setup(bot: commands.Bot):
     if (db is not None):
         # Database mode: seeded from the config files on first initialization,
         # then the source of truth.
-        if (db.fresh):
+        if (await db_config.is_empty()):
             await db_config.seed_db_from_config(config, game_parameters)
         loaded = await db_config.load_config_from_db()
     cog = Matchmaking(bot=bot, config=config,

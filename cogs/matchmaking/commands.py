@@ -11,7 +11,7 @@ from .utils import fetch_host_id
 from .views import ThreadRenameModal
 
 
-class CommandsMixin:
+class LFGCommandsMixin:
     """The /lfg and /rename slash commands."""
 
     async def check_thread_rename_permission(self,
