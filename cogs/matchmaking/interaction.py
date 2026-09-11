@@ -405,19 +405,29 @@ class InteractionMixin:
         # View for the buttons
         view = LFGView(cog=self)
 
-        posted = False
+        # The LFG post goes to the game's configured LFG channel when there is
+        # one (GamesChannels); otherwise it stays in the channel the command
+        # was used in.
+        target_channel = interaction.channel
+        channel_id = utils.get_id_from_mention(game_option.channel)
+        if (channel_id is not None):
+            lfg_channel = self.bot.get_channel(channel_id)
+            if (lfg_channel is not None):
+                target_channel = lfg_channel
+
+        posted_message = None
         try:
             # Post as a regular channel message rather than an interaction
             # followup: followups are webhook-executed messages, and mention
             # notifications from them seem unreliable.
-            await interaction.channel.send(content=game_option.role, embed=embed, view=view)
-            posted = True
+            posted_message = await target_channel.send(content=game_option.role, embed=embed, view=view)
         except Exception as error:
             print(error)
         try:
-            if (posted):
+            if (posted_message is not None):
+                confirmation = f"The LFG post was created: {posted_message.jump_url}."
                 await interaction.followup.send(
-                    content="The LFG post was created!", ephemeral=True)
+                    content=confirmation, ephemeral=True)
             else:
                 await interaction.followup.send(
                     content="The LFG post could not be created. " \

@@ -166,6 +166,21 @@ class TestSeeding:
         actual = await db_config.load_config_from_db()
         _assert_same_config(expected, actual)
 
+    async def test_channel_round_trips_from_config(self, db, games_config,
+                                                   game_parameters_config):
+        await db_config.seed_db_from_config(games_config, game_parameters_config)
+        loaded = await db_config.load_config_from_db()
+        # game_a (DEFAULT) -> GamesChannels <#777>; game_b -> blank entry.
+        assert loaded.default_guild_config.games["game_a"].channel == "<#777>"
+        assert loaded.default_guild_config.games["game_b"].channel == ""
+        # GuildA overrides game_c -> GamesChannels <#888>.
+        assert loaded.guilds[90401].games["game_c"].channel == "<#888>"
+        # Defaults are copied when a guild materializes its own config.
+        await db_config.ensure_guild_config(42424)
+        loaded = await db_config.load_config_from_db()
+        assert loaded.guilds[42424].games["game_a"].channel == "<#777>"
+        assert loaded.guilds[42424].games["game_b"].channel == ""
+
     async def test_rows_preserve_order_and_values(self, db, games_config,
                                                   game_parameters_config):
         await db_config.seed_db_from_config(games_config, game_parameters_config)

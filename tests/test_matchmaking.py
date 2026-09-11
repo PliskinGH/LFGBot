@@ -60,6 +60,7 @@ class TestConfigLoading:
         assert game_a.role == "<@&111>"
         assert game_a.icon == ""  # missing icon falls back to default at render time
         assert game_a.default_max_guests == 4
+        assert game_a.channel == "<#777>"  # GamesChannels index 0
         assert game_a.message == ""  # empty per config; index 1 holds the message
 
         game_b = games["game_b"]
@@ -67,6 +68,7 @@ class TestConfigLoading:
         assert game_b.icon == "https://example.com/icon.png"
         # Game B inherits GamesMaxPlayers=2 from DEFAULT -> default max guests = 1.
         assert game_b.default_max_guests == 1
+        assert game_b.channel == ""  # blank GamesChannels entry
         assert game_b.message == "Please check the rules."
 
     def test_guild_specific_section_overrides_default(self, matchmaking):
@@ -76,6 +78,7 @@ class TestConfigLoading:
         assert game_c.name == "Game C"
         assert game_c.role == "<@&333>"
         assert game_c.default_max_guests == 3
+        assert game_c.channel == "<#888>"
 
     def test_section_without_id_is_ignored(self, matchmaking):
         # games.ini contains a [NoID] section with no ID value; it must be skipped.
@@ -176,7 +179,7 @@ class TestMinimalDynamicGame:
     def _minimal_game_option(self):
         return GameOption(
             name=None, command="minimal", role=None, icon=None, color=None,
-            forum=None, tag=None, visibility=None, message=None,
+            forum=None, channel=None, tag=None, visibility=None, message=None,
             registration_api=None, match_api=None, match_url=None,
             api_token=None, website_url=None, registration_url=None,
             profile_url=None, default_max_guests=None)
@@ -219,6 +222,28 @@ class TestMinimalDynamicGame:
         assert all(field.name != "Target" for field in embed.fields)
         # No icon configured -> falls back to the default avatar.
         assert embed.thumbnail is not None
+
+    @pytest.mark.asyncio
+    async def test_create_lfg_links_post_when_sent_to_different_channel(self, matchmaking):
+        # Game configured with an LFG channel that differs from the command's
+        # channel: the confirmation should link the post.
+        game = self._minimal_game_option()
+        game.channel = "<#777>"
+        lfg_channel = FakeChannel(id=777, name="lfg")
+        matchmaking.bot._channels[777] = lfg_channel
+
+        interaction = FakeInteraction(user=FakeMember(1, "host"))
+        await matchmaking.create_lfg(interaction, game, "desc", None)
+
+        # The LFG post went to the configured channel, not the command's.
+        assert len(lfg_channel.sent) == 1
+        assert len(interaction.channel.sent) == 0
+        # The confirmation links the post.
+        confirmation_content, confirmation_ephemeral, _, _ = interaction.followup.sent[0]
+        assert confirmation_content == (
+            f"The LFG post was created!\n"
+            f"{FakeMessage().jump_url}")
+        assert confirmation_ephemeral is True
 
     @pytest.mark.asyncio
     async def test_create_lfg_failure_confirms_ephemerally(self, matchmaking):
@@ -1766,3 +1791,58 @@ class TestCreateLfgSettings:
         # Raw values in the settings dict are rendered with their display names.
         assert "param1: Alpha One, Delta Four" in settings_value
         assert "param2: First Choice" in settings_value
+class TestCreateLfgChannel:
+    """GamesChannels: the LFG post goes to the game's configured channel.
+
+    Without a configured channel the post stays in the channel the command
+    was used in; with one it goes to the resolved channel (falling back to
+    the command's channel when the target cannot be found).
+    """
+
+    @pytest.mark.asyncio
+    async def test_posts_to_configured_channel(self, matchmaking):
+        host = FakeMember(100, "Host")
+        guild = FakeGuild(id=1, members={100: host})
+        interaction = FakeInteraction(user=host, guild=guild)
+        lfg_channel = FakeChannel(id=777, name="lfg")
+        matchmaking.bot._channels[777] = lfg_channel
+        # Fixture game_a has GamesChannels = <#777>.
+        game_option = matchmaking.default_guild_config.games["game_a"]
+
+        await matchmaking.create_lfg(interaction, game_option, "desc", None)
+
+        # The post went to the configured LFG channel, not the command's.
+        assert interaction.channel.sent == []
+        assert lfg_channel.sent
+        content, embed, view = lfg_channel.sent[0]
+        assert content == game_option.role
+        assert "Looking for" in embed.title
+        assert view is not None
+
+    @pytest.mark.asyncio
+    async def test_unknown_channel_falls_back_to_command_channel(self, matchmaking):
+        host = FakeMember(100, "Host")
+        guild = FakeGuild(id=1, members={100: host})
+        interaction = FakeInteraction(user=host, guild=guild)
+        # Fixture game_a points at <#777>, which is not registered on the bot.
+        game_option = matchmaking.default_guild_config.games["game_a"]
+
+        await matchmaking.create_lfg(interaction, game_option, "desc", None)
+
+        # The un-resolvable target silently falls back to the command channel.
+        assert interaction.channel.sent
+
+    @pytest.mark.asyncio
+    async def test_without_channel_uses_command_channel(self, matchmaking):
+        host = FakeMember(100, "Host")
+        guild = FakeGuild(id=1, members={100: host})
+        interaction = FakeInteraction(user=host, guild=guild)
+        # Fixture game_b has a blank GamesChannels entry. Its string color
+        # would trip discord.Embed.colour (a pre-existing limitation
+        # unrelated to channels), so clear it for this test.
+        game_option = matchmaking.default_guild_config.games["game_b"]
+        game_option.color = ""
+
+        await matchmaking.create_lfg(interaction, game_option, "desc", None)
+
+        assert interaction.channel.sent

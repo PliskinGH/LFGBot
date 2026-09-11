@@ -106,6 +106,7 @@ to every other server. Per game:
 | --- | --- |
 | `GamesCommands` / `GamesFullNames` | Short command name and display name of each game. |
 | `GamesRoles` / `GamesIcons` / `GamesColors` | Role to ping, embed icon, embed colour. |
+| `GamesChannels` | Where the game's LFG posts are created (channel mention); empty keeps them in the channel the command is used in. |
 | `GamesForums` / `GamesTags` / `GamesVisibility` | Where game threads are created: forum channel (as a mention, like roles), forum tag, `0` for private threads. |
 | `GamesMaxPlayers` | Default maximum players (2–100, including the host); the game auto-starts when full. |
 | `GamesMessages` | Extra message added to the game-start ping. |
@@ -162,9 +163,10 @@ write to the database and take effect immediately:
 | `/games parameter remove <game> <name>` | Remove a parameter. |
 | `/games parameter list <game>` | Show a game's parameters. |
 
-Options mirror the `games.ini` keys (name, role, icon, color, forum,
-tag, visibility, message, `max_players`, and the league API/website URLs).
-`role` and `forum` must be given as Discord mentions.
+Options mirror the `games.ini` keys (name, role, icon, color, channel,
+forum, tag, visibility, message, `max_players`, and the league API/website
+URLs).
+`role`, `channel` and `forum` must be given as Discord mentions.
 The reserved match-payload field names can also be overridden per game with
 `title_field`, `table_talk_url_field`, `participants_field` and
 `discord_username_field` (`-` resets them to the default).

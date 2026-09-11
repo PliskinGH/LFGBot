@@ -85,7 +85,7 @@ class FakeChannel:
 
     async def send(self, content=None, embed=None, view=None, **kwargs):
         self.sent.append((content, embed, view))
-        return None
+        return FakeMessage()
 
     async def create_thread(self, **kwargs):
         self.created_kwargs = kwargs

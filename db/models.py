@@ -33,6 +33,7 @@ class Game(models.Model):
     color = fields.TextField(default="")
     # Discord references and website endpoints, verbatim from the config files.
     forum = fields.TextField(null=True)
+    channel = fields.TextField(null=True)
     tag = fields.TextField(null=True)
     visibility = fields.TextField(null=True)
     message = fields.TextField(null=True)

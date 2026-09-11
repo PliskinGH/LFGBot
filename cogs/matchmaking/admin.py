@@ -20,6 +20,7 @@ _GAME_OPTION_DESCRIPTIONS = {
     "role": "Role or user mention to ping.",
     "icon": "Icon URL shown in embeds.",
     "color": "Embed color.",
+    "channel": "LFG channel mention where the game's LFG posts go; blank keeps them in the command's channel.",
     "forum": "Forum channel mention for game threads.",
     "tag": "Forum tag id.",
     "visibility": "0 for private threads.",
@@ -99,14 +100,18 @@ class AdminMixin:
         return None
 
     @staticmethod
-    def _mention_error(role: str | None, forum: str | None) -> str | None:
-        """An error message when role/forum are not Discord mentions, else None.
+    def _mention_error(role: str | None, channel: str | None,
+                       forum: str | None = None) -> str | None:
+        """An error message when role/channel/forum are not Discord mentions, else None.
 
-        The values must be valid mentions (roles: role/user mentions; forums:
-        channel mentions); anything else would not resolve at game start.
+        The values must be valid mentions (roles: role/user mentions;
+        LFG channels and forums: channel mentions); anything else would not
+        resolve at runtime.
         """
         if (role and not common_constants.ROLE_MENTION_RE.match(role)):
             return "`role` must be a role or user mention."
+        if (channel and not common_constants.CHANNEL_MENTION_RE.match(channel)):
+            return "`channel` must be a channel mention."
         if (forum and not common_constants.CHANNEL_MENTION_RE.match(forum)):
             return "`forum` must be a channel mention."
         return None
@@ -160,7 +165,7 @@ class AdminMixin:
     @staticmethod
     def _game_fields(
         name="", role="", icon="", color="",
-        forum=None, tag=None, visibility=None, message=None,
+        channel=None, forum=None, tag=None, visibility=None, message=None,
         registration_api=None, match_api=None, match_url=None,
         api_token="",
         website_url=None, registration_url=None, profile_url=None,
@@ -171,7 +176,7 @@ class AdminMixin:
         ``api_token`` is the token VALUE (a secret, never displayed): config
         files resolve their env var at load time, admins set it via /games.
         """
-        mention_error = AdminMixin._mention_error(role, forum)
+        mention_error = AdminMixin._mention_error(role, channel, forum)
         if (mention_error is not None):
             return None, mention_error
         default_max_guests = None
@@ -184,6 +189,7 @@ class AdminMixin:
             "role": role,
             "icon": icon,
             "color": color,
+            "channel": channel,
             "forum": forum,
             "tag": tag,
             "visibility": visibility,
@@ -202,7 +208,7 @@ class AdminMixin:
     @staticmethod
     def _updated_fields(
         name=None, role=None, icon=None, color=None,
-        forum=None, tag=None, visibility=None, message=None,
+        channel=None, forum=None, tag=None, visibility=None, message=None,
         registration_api=None, match_api=None, match_url=None,
         api_token=None,
         website_url=None, registration_url=None, profile_url=None,
@@ -214,14 +220,14 @@ class AdminMixin:
         ``api_token`` accepts ``-`` as the reset sentinel (Discord cannot send
         an empty string), which clears the token.
         """
-        mention_error = AdminMixin._mention_error(role, forum)
+        mention_error = AdminMixin._mention_error(role, channel, forum)
         if (mention_error is not None):
             return None, mention_error
         fields = {}
         for field_name, value in (
             ("name", name), ("role", role), ("icon", icon), ("color", color),
-            ("forum", forum), ("tag", tag), ("visibility", visibility),
-            ("message", message),
+            ("channel", channel), ("forum", forum), ("tag", tag),
+            ("visibility", visibility), ("message", message),
             ("registration_api", registration_api), ("match_api", match_api),
             ("match_url", match_url),
             ("api_token", "" if (api_token == "-") else api_token),
@@ -282,6 +288,7 @@ class AdminMixin:
         role: str = "",
         icon: str = "",
         color: str = "",
+        channel: Optional[str] = None,
         forum: Optional[str] = None,
         tag: Optional[str] = None,
         visibility: Optional[str] = None,
@@ -310,7 +317,8 @@ class AdminMixin:
             return
         fields, error = self._game_fields(
             name=name, role=role, icon=icon, color=color,
-            forum=forum, tag=tag, visibility=visibility, message=message,
+            channel=channel, forum=forum, tag=tag, visibility=visibility,
+            message=message,
             registration_api=registration_api, match_api=match_api,
             match_url=match_url, api_token=api_token or "",
             website_url=website_url, registration_url=registration_url,
@@ -359,6 +367,7 @@ class AdminMixin:
         role: Optional[str] = None,
         icon: Optional[str] = None,
         color: Optional[str] = None,
+        channel: Optional[str] = None,
         forum: Optional[str] = None,
         tag: Optional[str] = None,
         visibility: Optional[str] = None,
@@ -381,7 +390,8 @@ class AdminMixin:
             return
         fields, error = self._updated_fields(
             name=name, role=role, icon=icon, color=color,
-            forum=forum, tag=tag, visibility=visibility, message=message,
+            channel=channel, forum=forum, tag=tag, visibility=visibility,
+            message=message,
             registration_api=registration_api, match_api=match_api,
             match_url=match_url, api_token=api_token,
             website_url=website_url, registration_url=registration_url,
@@ -503,6 +513,8 @@ class AdminMixin:
             content_lines.append(f"Color: {option.color}")
         if (option.role):
             content_lines.append(f"Role to ping: {option.role}")
+        if (option.channel):
+            content_lines.append(f"LFG channel: {option.channel}")
         if (option.forum):
             forum = f"Forum: {option.forum}"
             if (option.tag):

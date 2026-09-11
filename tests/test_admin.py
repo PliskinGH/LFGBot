@@ -19,7 +19,7 @@ async def _loaded_config() -> db_config.LoadedConfig:
     guild = GuildGamesConfig(42424)
     guild.games["game_a"] = GameOption(
         name="Game A", command="game_a", role="", icon="", color="",
-        forum=None, tag=None, visibility=None, message=None,
+        forum=None, channel=None, tag=None, visibility=None, message=None,
         registration_api=None, match_api=None, match_url=None,
         api_token=None, website_url=None, registration_url=None,
         profile_url=None, default_max_guests=None)
@@ -141,6 +141,38 @@ class TestGamesAdd:
             cog, interaction, command="root", forum="<#123>")
         guild_id, command, fields = written["add"]
         assert fields["forum"] == "<#123>"
+
+    @pytest.mark.asyncio
+    async def test_channel_mention_is_stored_unchanged(self, monkeypatch):
+        cog = _cog(monkeypatch)
+        interaction = FakeInteraction(user=_manager(), guild_id=42424)
+        written = {}
+
+        async def fake_ensure(guild_id):
+            return None
+
+        async def fake_add(guild_id, command, **fields):
+            written["add"] = (guild_id, command, fields)
+            return True
+
+        monkeypatch.setattr(db_config, "ensure_guild_config", fake_ensure)
+        monkeypatch.setattr(db_config, "add_game", fake_add)
+        await Matchmaking.games_add.callback(
+            cog, interaction, command="root", channel="<#123>")
+        guild_id, command, fields = written["add"]
+        assert fields["channel"] == "<#123>"
+
+    @pytest.mark.asyncio
+    async def test_rejects_non_mention_channel(self, monkeypatch):
+        cog = _cog(monkeypatch)
+        interaction = FakeInteraction(user=_manager(), guild_id=42424)
+        calls = []
+        monkeypatch.setattr(db_config, "add_game", lambda *a, **k: calls.append(1))
+        await Matchmaking.games_add.callback(
+            cog, interaction, command="root", channel="1068560342671700088")
+        assert calls == []
+        assert "channel" in interaction.response.messages[0][0]
+        assert "mention" in interaction.response.messages[0][0]
 
     @pytest.mark.asyncio
     async def test_rejects_non_mention_role(self, monkeypatch):
@@ -269,6 +301,34 @@ class TestGamesUpdate:
         assert "mention" in interaction.response.messages[0][0]
 
     @pytest.mark.asyncio
+    async def test_updates_channel_mention(self, monkeypatch):
+        cog = _cog(monkeypatch)
+        interaction = FakeInteraction(user=_manager(), guild_id=42424)
+        written = {}
+
+        async def fake_update(guild_id, command, **fields):
+            written["update"] = (guild_id, command, fields)
+            return True
+
+        monkeypatch.setattr(db_config, "update_game", fake_update)
+        await Matchmaking.games_update.callback(
+            cog, interaction, command="game_a", channel="<#456>")
+        _, _, fields = written["update"]
+        assert fields == {"channel": "<#456>"}
+
+    @pytest.mark.asyncio
+    async def test_rejects_non_mention_channel(self, monkeypatch):
+        cog = _cog(monkeypatch)
+        interaction = FakeInteraction(user=_manager(), guild_id=42424)
+        calls = []
+        monkeypatch.setattr(db_config, "update_game", lambda *a, **k: calls.append(1))
+        await Matchmaking.games_update.callback(
+            cog, interaction, command="game_a", channel="456")
+        assert calls == []
+        assert "channel" in interaction.response.messages[0][0]
+        assert "mention" in interaction.response.messages[0][0]
+
+    @pytest.mark.asyncio
     async def test_missing_game(self, monkeypatch):
         cog = _cog(monkeypatch)
         interaction = FakeInteraction(user=_manager(), guild_id=42424)
@@ -363,7 +423,8 @@ class TestGamesList:
             games[f"game_{index:02d}"] = GameOption(
                 name=f"Game number {index} " + "x" * 60,
                 command=f"game_{index:02d}", role="<@&111>", icon="", color="",
-                forum="<#123>", tag="", visibility="", message="",
+                forum="<#123>", channel="<#124>", tag="", visibility="",
+                message="",
                 registration_api="", match_api="", match_url="", api_token="",
                 website_url="", registration_url="", profile_url="",
                 default_max_guests=3)
@@ -479,7 +540,7 @@ class TestGamesShow:
         cog.guilds[42424].games["game_a"] = GameOption(
             name="Game A", command="game_a", role="<@&111>",
             icon="https://cdn.example/icon.png", color="16777215",
-            forum="<#123>", tag="98765", visibility="0",
+            forum="<#123>", channel="<#124>", tag="98765", visibility="0",
             message="Please check the rules.",
             registration_api="https://reg.example",
             match_api="https://api.example",
@@ -497,6 +558,7 @@ class TestGamesShow:
             "Icon: https://cdn.example/icon.png\n"
             "Color: 16777215\n"
             "Role to ping: <@&111>\n"
+            "LFG channel: <#124>\n"
             "Forum: <#123> (tag: 98765)\n"
             "Threads: private\n"
             'Extra message: "Please check the rules."\n'

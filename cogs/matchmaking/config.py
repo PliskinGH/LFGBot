@@ -77,6 +77,7 @@ class ConfigMixin:
                 role=safe_list_get(configdict[constants.CONFIG_GAMES_ROLES], index, ""),
                 icon=safe_list_get(configdict[constants.CONFIG_GAMES_ICONS], index, ""),
                 color=safe_list_get(configdict[constants.CONFIG_GAMES_COLORS], index, ""),
+                channel=safe_list_get(configdict[constants.CONFIG_GAMES_CHANNELS], index, None),
                 forum=safe_list_get(configdict[constants.CONFIG_GAMES_FORUMS], index, None),
                 tag=safe_list_get(configdict[constants.CONFIG_GAMES_TAGS], index, None),
                 visibility=safe_list_get(configdict[constants.CONFIG_GAMES_VISIBILITY], index, None),

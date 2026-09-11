@@ -26,7 +26,8 @@ class ParameterDefinition(TypedDict):
 
 class GameOption(object):
 
-    def __init__(self, name, command, role, icon, color, forum,
+    def __init__(self, name, command, role, icon, color, channel,
+                 forum,
                  tag, visibility, message,
                  registration_api, match_api,
                  match_url,
@@ -42,6 +43,7 @@ class GameOption(object):
         self.role = role or ""
         self.icon = icon or ""
         self.color = color or ""
+        self.channel = channel or ""
         self.forum = forum or ""
         self.tag = tag or ""
         self.visibility = visibility or ""
@@ -64,6 +66,8 @@ class GameOption(object):
         settings = []
         if (self.role):
             settings.append(f"role to ping: {self.role}")
+        if (self.channel):
+            settings.append(f"LFG channel: {self.channel}")
         if (self.forum):
             settings.append(f"target forum: {self.forum}")
         if (self.default_max_guests is not None):
