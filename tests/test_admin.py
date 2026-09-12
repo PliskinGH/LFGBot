@@ -9,6 +9,7 @@ from cogs.matchmaking import constants, db_config
 from cogs.matchmaking.cog import Matchmaking
 from cogs.matchmaking.constants import DEFAULT_GUILD_ID
 from cogs.matchmaking.models import GameOption, GuildGamesConfig
+from common import constants as common_constants
 
 from tests.conftest import FakeBot, FakeInteraction, FakeMember
 
@@ -488,7 +489,7 @@ class TestGameApiToken:
 
         monkeypatch.setattr(db_config, "update_game", fake_update)
         await Matchmaking.games_update.callback(
-            cog, interaction, command="game_a", api_token="-")
+            cog, interaction, command="game_a", api_token=common_constants.RESET_SENTINEL)
         assert written["update"] == {"api_token": ""}
 
     @pytest.mark.asyncio
@@ -708,7 +709,7 @@ class TestGameApiFields:
 
         monkeypatch.setattr(db_config, "update_game", fake_update)
         await Matchmaking.games_update.callback(
-            cog, interaction, command="game_a", table_talk_url_field="-")
+            cog, interaction, command="game_a", table_talk_url_field=common_constants.RESET_SENTINEL)
         assert written["update"] == {
             "api_fields": {constants.API_TABLE_TALK_URL_FIELD_KEY: None}}
 
@@ -997,7 +998,7 @@ class TestGamesParameterUpdate:
         monkeypatch.setattr(db_config, "ensure_guild_config", fake_ensure)
         monkeypatch.setattr(db_config, "update_parameter", fake_update)
         await Matchmaking.games_parameter_update.callback(
-            cog, interaction, game="game_a", name="param1", api_field="-")
+            cog, interaction, game="game_a", name="param1", api_field=common_constants.RESET_SENTINEL)
         assert written["update"] == {"values": None, "api_field": ""}
         assert interaction.followup.sent[0][0] == "Parameter `param1` updated."
 
@@ -1019,7 +1020,7 @@ class TestGamesParameterUpdate:
         monkeypatch.setattr(db_config, "ensure_guild_config", fake_ensure)
         monkeypatch.setattr(db_config, "update_parameter", fake_update)
         await Matchmaking.games_parameter_update.callback(
-            cog, interaction, game="game_a", name="param1", display_name="-")
+            cog, interaction, game="game_a", name="param1", display_name=common_constants.RESET_SENTINEL)
         assert written["update"] == {"values": None, "display_name": ""}
 
     @pytest.mark.asyncio

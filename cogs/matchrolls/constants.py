@@ -2,6 +2,8 @@
 
 RANDOM_COMMAND = "random"
 
+ROLLSETS_COMMAND = "rollsets"
+
 # Sentinel guild id storing the [DEFAULT] section's roll categories
 # (Discord snowflakes are always positive, so 0 never collides).
 DEFAULT_GUILD_ID = 0

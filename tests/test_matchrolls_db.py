@@ -15,7 +15,8 @@ def _assert_same_config(expected, actual):
     assert set(actual.guilds.keys()) == set(expected.guilds.keys())
     for guild_id, categories in expected.guilds.items():
         assert actual.guilds[guild_id] == categories
-    assert actual.descriptions == expected.descriptions
+    assert actual.default_descriptions == expected.default_descriptions
+    assert actual.guild_descriptions == expected.guild_descriptions
 
 
 class TestLoadedRollsConfigFromIni:
@@ -29,7 +30,8 @@ class TestLoadedRollsConfigFromIni:
         assert list(loaded.guilds[42424].items()) == [
             ("map", "Zeta, Eta"), ("landmark", "Delta, Epsilon")]
         assert "id" not in loaded.guilds[42424]
-        assert loaded.descriptions == descriptions
+        assert loaded.default_descriptions == descriptions
+        assert loaded.guild_descriptions == {}
 
 
 class TestCogFromLoadedRollsConfig:
@@ -42,7 +44,8 @@ class TestCogFromLoadedRollsConfig:
         from_loaded = MatchRolls(bot=FakeBot(), loaded_config=loaded)
         assert from_loaded.default_categories == from_files.default_categories
         assert from_loaded.guilds == from_files.guilds
-        assert from_loaded.descriptions == from_files.descriptions
+        assert from_loaded.default_descriptions == from_files.default_descriptions
+        assert from_loaded.guild_descriptions == from_files.guild_descriptions
 
     def test_get_roll_sets_falls_back_to_default(self, rolls_config, descriptions):
         loaded = db_config.loaded_config_from_ini(rolls_config, descriptions)
@@ -116,19 +119,22 @@ class TestRollsSeeding:
         description_rows = (await models.RollDescription.all().order_by("id")
                             .select_related("item", "item__category"))
         # [DEFAULT] under the sentinel guild id 0, then GuildB's categories.
-        assert [(category.guild_id, category.name, category.items)
+        assert [(category.guild_id, category.name)
                 for category in categories] == [
-            (DEFAULT_GUILD_ID, "map", "Alpha, Beta, Gamma"),
-            (DEFAULT_GUILD_ID, "landmark", "Delta, Epsilon"),
-            (42424, "map", "Zeta, Eta"),
-            (42424, "landmark", "Delta, Epsilon")]
-        # One item per category set name, FK to its category row: [DEFAULT]
-        # map and landmark, then GuildB's map override and inherited landmark.
-        assert [(item.category.name, item.name) for item in items] == [
-            ("map", "Alpha"), ("map", "Beta"), ("map", "Gamma"),
-            ("landmark", "Delta"), ("landmark", "Epsilon"),
-            ("map", "Zeta"), ("map", "Eta"),
-            ("landmark", "Delta"), ("landmark", "Epsilon")]
+            (DEFAULT_GUILD_ID, "map"),
+            (DEFAULT_GUILD_ID, "landmark"),
+            (42424, "map"),
+            (42424, "landmark")]
+        # One active item per category set name, FK to its category row:
+        # [DEFAULT] map and landmark, then GuildB's map override and its
+        # inherited landmark.
+        assert [(item.category.name, item.name, item.active)
+                for item in items] == [
+            ("map", "Alpha", True), ("map", "Beta", True),
+            ("map", "Gamma", True),
+            ("landmark", "Delta", True), ("landmark", "Epsilon", True),
+            ("map", "Zeta", True), ("map", "Eta", True),
+            ("landmark", "Delta", True), ("landmark", "Epsilon", True)]
         # Descriptions FK their item; blank/unset parts stay blank/unset.
         assert [(row.item.name, row.description, row.color,
                  row.image_url, row.thumbnail_url)
@@ -182,4 +188,19 @@ class TestRollsSeeding:
         from_db = MatchRolls(bot=FakeBot(), loaded_config=loaded)
         assert from_db.get_roll_sets(1) == from_files.get_roll_sets(1)
         assert from_db.get_roll_sets(42424) == from_files.get_roll_sets(42424)
-        assert from_db.descriptions == from_files.descriptions
+        assert from_db.get_descriptions(1) == from_files.get_descriptions(1)
+        assert from_db.get_descriptions(42424) == from_files.get_descriptions(42424)
+
+    async def test_non_materialized_guild_inherits_default_descriptions(
+            self, db, rolls_config, descriptions):
+        # Only the [DEFAULT] section is seeded: guild 1 has no own rows.
+        await db_config.seed_db_from_config(rolls_config, descriptions)
+        loaded = await db_config.load_config_from_db()
+        # Guild 1 is not materialized → it has no own descriptions.
+        assert 1 not in loaded.guild_descriptions
+        assert 1 not in loaded.guilds
+        # After materialization, the guild owns its own copies of the descriptions.
+        await db_config.ensure_guild_categories(1)
+        loaded = await db_config.load_config_from_db()
+        assert 1 in loaded.guilds
+        assert len(loaded.guild_descriptions[1]) == len(descriptions)

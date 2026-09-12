@@ -3,6 +3,11 @@ import re
 CONFIG_DEFAULT = "DEFAULT"
 CONFIG_ID = "ID"
 
+# Discord cannot send an empty string in a slash-command option:
+# leaving a field blank omits it entirely.
+# "-" is the sentinel meaning "clear/reset this field".
+RESET_SENTINEL = "-"
+
 HELP_COMMAND = "help"
 
 DEFAULT_AVATAR_URL = "https://i.imgur.com/xClQZ1Q.png"

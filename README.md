@@ -17,6 +17,7 @@ code changes.
 | `/random category:<category> [subset:<subset>] [display:<true\|false>]` | Random item from a configured set; subsets accept indices/ranges (e.g. `2,5-9`). |
 | `/help [topic]` | Help for a command. |
 | `/games add \| update \| remove \| list` | Server managers: edit the server's games dynamically (database mode only). |
+| `/rollsets add \| update \| remove \| show \| list \| description` | Server managers: edit the server's roll sets dynamically (database mode only). |
 
 ### LFG posts
 
@@ -143,13 +144,16 @@ Files: `config/rolls.ini` and `config/rolls_descriptions.json`
 
 `rolls.ini` maps categories to comma-separated item sets (`[DEFAULT]` applies
 everywhere; server sections can override). `rolls_descriptions.json` optionally
-provides a Discord embed per item.
+provides one or more Discord embeds per item (variants), one of which `/random`
+picks at random when the item is rolled.
 
 ### Dynamic configuration (database mode)
 
 With `DATABASE_URL` set, server managers (`manage_guild` permission) can edit
-their server's games at runtime (no code or restart needed). The commands
-write to the database and take effect immediately:
+their server's games and roll sets at runtime (no code or restart needed). The
+commands write to the database and take effect immediately.
+
+#### Games
 
 | Command | Description |
 | --- | --- |
@@ -182,6 +186,37 @@ the option description, help and Settings field, and defaults to the name.
 Changes re-register and sync the per-game slash commands for that guild
 immediately. If that sync fails, the change is
 still saved and synced after the next restart of the bot.
+
+#### Roll sets
+
+The `/rollsets` commands mirror `rolls.ini` (the categories and their item
+sets) and `rolls_descriptions.json` (the embed of each item). A category is a
+set of items; each item can have any number of description variants (flavour
+texts), one of which `/random` picks at random when the item is rolled.
+
+| Command | Description |
+| --- | --- |
+| `/rollsets list` | Show the server's roll categories and their items. |
+| `/rollsets show <category>` | Show a category's items, numbered the way `/random`'s `subset` expects. |
+| `/rollsets add <category> <items>` | Add a category (`items` is comma-separated). |
+| `/rollsets update <category> [items] [new_name]` | Replace a category's items and/or rename it. |
+| `/rollsets remove <category>` | Delete a category (permanently). |
+| `/rollsets description list [category]` | Show each item its variant count. |
+| `/rollsets description show <item> [variant]` | Show an item's variants, or a single one. |
+| `/rollsets description add <item> <text> [color] [image] [thumbnail]` | Add a description variant to an item. |
+| `/rollsets description update <item> <variant> [text] [color] [image] [thumbnail]` | Change a variant: only the provided options; `-` in `text`/`color`/`image`/`thumbnail` clears it. |
+| `/rollsets description remove <item> <variant>` | Remove one description variant. |
+
+`items` takes the same comma-separated form as the `rolls.ini` values.
+`variant` is an index (starting at 1), as reported by `/rollsets description list` and
+`description show`. `color` is a Discord colour integer (0–16777215);
+`image` and `thumbnail` must be URLs.
+
+Dropping an item from a category's set keeps
+its description variants: the item stops being listed and rolled, and adding
+the name back restores it (with its variants).
+Deleting a whole category is permanent instead: after the confirmation, the
+category, its items and all their variants are removed from the database for the corresponding Discord server.
 
 ## League website integration
 

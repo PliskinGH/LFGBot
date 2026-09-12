@@ -4,7 +4,7 @@ import discord
 from discord import app_commands
 
 from common import constants as common_constants, utils
-from common.ui import DynamicSelectView
+from common.views import DynamicSelectView
 
 from . import constants
 from .utils import fetch_host_id

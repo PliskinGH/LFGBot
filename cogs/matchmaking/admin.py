@@ -132,7 +132,7 @@ class LFGAdminMixin:
             value = values.get(argument)
             if (value is None):
                 continue
-            if (value == "-"):
+            if (value == common_constants.RESET_SENTINEL):
                 api_fields[key] = None
             elif (not common_constants.API_FIELD_RE.match(value)):
                 return {}, (f"`{argument}` must be a non-empty field name "
@@ -230,7 +230,7 @@ class LFGAdminMixin:
             ("visibility", visibility), ("message", message),
             ("registration_api", registration_api), ("match_api", match_api),
             ("match_url", match_url),
-            ("api_token", "" if (api_token == "-") else api_token),
+            ("api_token", "" if (api_token == common_constants.RESET_SENTINEL) else api_token),
             ("website_url", website_url), ("registration_url", registration_url),
             ("profile_url", profile_url),
         ):
@@ -701,9 +701,9 @@ class LFGAdminMixin:
         # Discord cannot send an empty string: leaving an option blank omits
         # it entirely. "-" is the reset sentinel for api_field/display_name,
         # turned into "" (which the validation and db_config treat as reset).
-        if (api_field is not None and api_field.strip() == "-"):
+        if (api_field is not None and api_field.strip() == common_constants.RESET_SENTINEL):
             api_field = ""
-        if (display_name is not None and display_name.strip() == "-"):
+        if (display_name is not None and display_name.strip() == common_constants.RESET_SENTINEL):
             display_name = ""
         guild_id = interaction.guild_id
         if (game not in self.get_guild_config(guild_id).games):

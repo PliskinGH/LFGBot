@@ -98,7 +98,7 @@ class LFGBot(commands.Bot):
             return
         try:
             self.db = Database(DATABASE_URL)
-            fresh = await self.db.initialize()
+            await self.db.initialize()
         except Exception as error:
             print(f"Database initialization failed ({error}); "
                   "falling back to the config files.")
@@ -109,11 +109,8 @@ class LFGBot(commands.Bot):
                     pass
             self.db = None
             return
-        if (fresh):
-            print("Database initialized: empty database, "
-                  "cogs will seed it from the config files.")
-        else:
-            print("Database initialized: loading guild configuration from the database.")
+        print("Database initialized: cog setup will seed from the config files "
+              "when a table is empty, else load from the database.")
 
     async def on_ready(self):
         print(f"Logged in as {self.user} (ID: {self.user.id})")

@@ -20,6 +20,10 @@ class RollsConfigMixin:
     default_categories: dict[str, str]
     # guild_id -> {category: verbatim set}
     guilds: dict[int, dict[str, str]]
+    # The [DEFAULT] guild's description embeds, inherited by every guild.
+    default_descriptions: list[dict]
+    # guild_id -> its own description embeds
+    guild_descriptions: dict[int, list[dict]]
 
     @staticmethod
     def _load_config(config: configparser.ConfigParser,
@@ -51,3 +55,12 @@ class RollsConfigMixin:
         if (guild_id is None):
             return self.default_categories
         return self.guilds.get(guild_id, self.default_categories)
+
+    def get_descriptions(self, guild_id: int | None) -> list[dict]:
+        """A guild's description embeds: its own when materialized, else the
+        [DEFAULT] ones."""
+        if (guild_id is None):
+            return list(self.default_descriptions)
+        if (guild_id in self.guilds):
+            return list(self.guild_descriptions.get(guild_id, []))
+        return list(self.default_descriptions)

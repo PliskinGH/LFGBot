@@ -9,6 +9,41 @@ class RollsHelpMixin:
     """``send_help`` for the /help command dispatch."""
 
     async def send_help(self, interaction: discord.Interaction, topic: str):
+        if (topic == constants.ROLLSETS_COMMAND):
+            message = (
+                f"# Help: /{constants.ROLLSETS_COMMAND}\n"
+                "Manage this server's roll sets: the categories of `/random`, "
+                "their items, and each item's description variants.\n"
+                "Only available to server managers, in database mode.\n"
+                "## Categories\n"
+                f"`/{constants.ROLLSETS_COMMAND} list` — the categories "
+                "and their item counts.\n"
+                f"`/{constants.ROLLSETS_COMMAND} show category:<category>` — "
+                "the items of a category (removing an item from its set "
+                "keeps its descriptions; re-adding restores them).\n"
+                f"`/{constants.ROLLSETS_COMMAND} add "
+                "category:<category> items:<list>`\n"
+                f"`/{constants.ROLLSETS_COMMAND} update "
+                "category:<category> [items:<list>] [new_name:<name>]`\n"
+                f"`/{constants.ROLLSETS_COMMAND} remove category:<category>` "
+                "— asks for confirmation before deleting.\n"
+                "## Descriptions\n"
+                f"`/{constants.ROLLSETS_COMMAND} description list "
+                "[category:<category>]` — each item and its variant count.\n"
+                f"`/{constants.ROLLSETS_COMMAND} description show "
+                "item:<item> [variant:<n>]` — an item's descriptions.\n"
+                f"`/{constants.ROLLSETS_COMMAND} description add "
+                "item:<item> text:<text> [color:<n>] "
+                "[image:<url>] [thumbnail:<url>]`\n"
+                f"`/{constants.ROLLSETS_COMMAND} description update "
+                "item:<item> variant:<n> [text:<text>] [color:<n|->] "
+                "[image:<url|->] [thumbnail:<url|->]`\n"
+                f"`/{constants.ROLLSETS_COMMAND} description remove "
+                "item:<item> variant:<n>`\n"
+            )
+            await interaction.response.send_message(message, ephemeral=True)
+            return
+
         if (topic != constants.RANDOM_COMMAND):
             message = (
                 f"# Help: /{topic}\n"

@@ -7,7 +7,7 @@ from discord.ext import commands
 
 from . import constants, db_config
 from .cog import MatchRolls
-from .constants import RANDOM_COMMAND
+from .constants import RANDOM_COMMAND, ROLLSETS_COMMAND
 
 
 async def setup(bot: commands.Bot):
@@ -18,15 +18,24 @@ async def setup(bot: commands.Bot):
     db = getattr(bot, "db", None)
     loaded = None
     if (db is not None):
-        # Database mode: each stage is seeded when its table is empty
-        # (descriptions after the items they reference), then loaded from
-        # the database.
+        seeded = False
         if (await db_config.categories_empty()):
+            print("Matchrolls: seeding roll categories from the config file...")
             await db_config.seed_categories_from_config(config)
+            print("Matchrolls: roll categories seeded.")
+            seeded = True
         if (await db_config.items_empty()):
+            print("Matchrolls: seeding roll items from the config file...")
             await db_config.seed_items_from_config(config)
+            print("Matchrolls: roll items seeded.")
+            seeded = True
         if (await db_config.descriptions_empty()):
+            print("Matchrolls: seeding roll descriptions from the config file...")
             await db_config.seed_descriptions_from_config(descriptions)
+            print("Matchrolls: roll descriptions seeded.")
+            seeded = True
+        if (not seeded):
+            print("Matchrolls: loading roll configuration from the database.")
         loaded = await db_config.load_config_from_db()
     cog = MatchRolls(bot=bot, config=config, descriptions=descriptions,
                      loaded_config=loaded)

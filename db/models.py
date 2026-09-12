@@ -119,12 +119,14 @@ class DefaultApiField(models.Model):
 
 
 class RollCategory(models.Model):
-    """One roll category of a guild: a row per rolls.ini key."""
+    """One roll category of a guild; its set is given by its active items."""
 
     id = fields.IntField(primary_key=True)
-    guild = fields.ForeignKeyField("models.Guild", related_name="roll_categories")
+    guild = fields.ForeignKeyField(
+        "models.Guild", related_name="roll_categories")
     name = fields.TextField()
-    items = fields.TextField()
+
+    roll_items: fields.ReverseRelation["RollItem"]
 
     class Meta:
         table = "roll_categories"
@@ -132,12 +134,18 @@ class RollCategory(models.Model):
 
 
 class RollItem(models.Model):
-    """One rollable item of a category: a row per name in a rolls.ini set."""
+    """One rollable item of a category: a row per name ever configured.
+
+    ``active`` is set (or reactivated) when the name is part of the
+    category's set; inactive rows keep their name and description variants,
+    so re-adding the name restores its flavors.
+    """
 
     id = fields.IntField(primary_key=True)
     category = fields.ForeignKeyField(
         "models.RollCategory", related_name="roll_items")
     name = fields.TextField()
+    active = fields.BooleanField(default=True, db_default=True)
 
     descriptions: fields.ReverseRelation["RollDescription"]
 

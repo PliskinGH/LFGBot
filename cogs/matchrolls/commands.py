@@ -50,7 +50,7 @@ class RollsCommandsMixin:
 
         nb_descriptions = 0
         if (len(choice)):
-            dicts = [ _dict for _dict in self.descriptions
+            dicts = [ _dict for _dict in self.get_descriptions(interaction.guild_id)
                       if ("title" in _dict and _dict["title"] == choice) ]
             nb_descriptions = len(dicts)
         description = {}
