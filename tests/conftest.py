@@ -174,15 +174,29 @@ class FakeResponse:
 
 
 class FakeFollowUp:
-    """Stands in for ``discord.Interaction.FollowUp``."""
+    """Stands in for ``discord.Interaction.FollowUp``.
 
-    def __init__(self):
+    Post-defer responses are sent here; they are *also* appended to the
+    interaction's ``response.messages`` so that assertions written against
+    the pre-defer ``response`` keep working.
+    """
+
+    def __init__(self, response=None):
         self.sent = []
         self.deleted = False
+        self._response = response
 
     async def send(self, content=None, embed=None, ephemeral=False,
                    view=None, **kwargs):
         self.sent.append((content, ephemeral, embed, view))
+        if (self._response is not None):
+            embeds = kwargs.get("embeds")
+            if (embeds is None):
+                embeds = [embed] if (embed is not None) else None
+            elif (embed is not None):
+                embeds = [embed] + list(embeds)
+            self._response.messages.append(
+                (content, embeds, ephemeral, view))
         return None
 
     async def delete_original_response(self, **kwargs):
@@ -199,7 +213,14 @@ class FakeInteraction:
         self.channel = channel or FakeChannel()
         self.guild_id = guild_id if guild_id is not None else self.guild.id
         self.response = FakeResponse()
-        self.followup = FakeFollowUp()
+        # The followup mirrors into the response so tests can assert on
+        # either surface after a command has deferred.
+        self.followup = FakeFollowUp(response=self.response)
+
+    async def edit_original_response(self, **kwargs):
+        # ``ConfirmView`` swaps the prompt for its outcome text this way.
+        self.response.edited = kwargs
+        return None
 
 
 class FakeCommand:

@@ -132,7 +132,7 @@ class RollsAdminMixin:
         guild_id = await self._expect_guild(interaction)
         if (guild_id is None):
             return
-        await db_config.ensure_guild_categories(guild_id)
+        await interaction.response.defer(ephemeral=True)
         lines = [
             f"- `{name}` — {roll_set}"
             for name, roll_set in (await db_config.effective_category_sets(
@@ -141,7 +141,7 @@ class RollsAdminMixin:
         message = "# Roll sets\n" + common_utils.clip_lines(lines)
         if (not lines):
             message = "# Roll sets\nNo roll categories are configured."
-        await interaction.response.send_message(message, ephemeral=True)
+        await interaction.followup.send(message, ephemeral=True)
 
     @rollsets.command(name="show", description="Show all the items of a category.")
     @app_commands.describe(category="The category to show.")
@@ -155,10 +155,10 @@ class RollsAdminMixin:
         guild_id = await self._expect_guild(interaction)
         if (guild_id is None):
             return
-        await db_config.ensure_guild_categories(guild_id)
+        await interaction.response.defer(ephemeral=True)
         active, inactive = await db_config.list_category_items(guild_id, category)
         if (not active and not inactive):
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"There is no roll category `{category}`.", ephemeral=True)
             return
         lines = [f"{index}. {name}" for index, name in enumerate(active, 1)]
@@ -167,7 +167,7 @@ class RollsAdminMixin:
             lines.append("Removed from the set (re-adding a name restores "
                          "its descriptions and its items here): "
                          + ", ".join(inactive) + ".")
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"# Category: `{category}`\n" + common_utils.clip_lines(lines),
             ephemeral=True)
 
@@ -190,13 +190,14 @@ class RollsAdminMixin:
             await interaction.response.send_message(error, ephemeral=True)
             return
         category = category.strip()
+        await interaction.response.defer(ephemeral=True)
         if (not await db_config.add_category(guild_id, category, item_names)):
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"A roll category `{category}` already exists here.",
                 ephemeral=True)
             return
         await self._reload()
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"Roll category `{category}` added "
             f"({len(item_names)} items).",
             ephemeral=True)
@@ -230,17 +231,18 @@ class RollsAdminMixin:
                 await interaction.response.send_message(error, ephemeral=True)
                 return
         category = category.strip()
+        await interaction.response.defer(ephemeral=True)
         if (new_name is not None):
             new_name = new_name.strip()
             sets = await db_config.effective_category_sets(guild_id)
             if (new_name in sets and new_name != category):
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     f"`{new_name}` is already a roll category here.",
                     ephemeral=True)
                 return
         if (not await db_config.update_category(
                 guild_id, category, item_names, new_name)):
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"There is no roll category `{category}` in this server.",
                 ephemeral=True)
             return
@@ -251,7 +253,7 @@ class RollsAdminMixin:
             message = f"Roll category `{category}` updated "
             if (item_names is not None):
                 message += f"({len(item_names)} items)."
-        await interaction.response.send_message(message, ephemeral=True)
+        await interaction.followup.send(message, ephemeral=True)
 
     @rollsets.command(name="remove", description="Delete a roll category (asks for confirmation).")
     @app_commands.describe(category="The category to delete.")
@@ -265,10 +267,10 @@ class RollsAdminMixin:
         guild_id = await self._expect_guild(interaction)
         if (guild_id is None):
             return
-        await db_config.ensure_guild_categories(guild_id)
+        await interaction.response.defer(ephemeral=True)
         active, inactive = await db_config.list_category_items(guild_id, category)
         if (not active and not inactive):
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"There is no roll category `{category}`.", ephemeral=True)
             return
         variants = sum(count for _, count, _ in
@@ -286,7 +288,7 @@ class RollsAdminMixin:
 
         view = ConfirmView(interaction.user.id, "Delete category",
                            confirm, cancel)
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"# Delete roll category `{category}`\n"
             f"This will permanently delete the category and its "
             f"**{item_count} item(s)** and **{variants} description "
@@ -316,14 +318,15 @@ class RollsAdminMixin:
                 await interaction.response.send_message(error, ephemeral=True)
                 return
             category = category.strip()
+        await interaction.response.defer(ephemeral=True)
         rows = await db_config.item_variant_counts(guild_id, category)
         lines = [f"- `{name}` — {count} variant(s)."
                  for name, count, active in rows]
         if (not lines):
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "There are no items here yet.", ephemeral=True)
             return
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "# Description variants\n" + common_utils.clip_lines(lines),
             ephemeral=True)
 
@@ -340,18 +343,19 @@ class RollsAdminMixin:
         guild_id = await self._expect_guild(interaction)
         if (guild_id is None):
             return
+        await interaction.response.defer(ephemeral=True)
         embeds = await db_config.description_variant_embeds(guild_id, item)
         if (variant is not None):
             if (variant < 1 or variant > len(embeds)):
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     f"`{item}` has no variant #{variant}.", ephemeral=True)
                 return
             embeds = [embeds[variant - 1]]
         if (not embeds):
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"`{item}` has no description variants.", ephemeral=True)
             return
-        await interaction.response.send_message(
+        await interaction.followup.send(
             embeds=[discord.Embed.from_dict(embed) for embed in embeds],
             ephemeral=True)
 
@@ -397,13 +401,14 @@ class RollsAdminMixin:
             fields["image_url"] = image_url
         if (thumbnail_url is not None):
             fields["thumbnail_url"] = thumbnail_url
+        await interaction.response.defer(ephemeral=True)
         if (not await db_config.add_description(guild_id, item, fields)):
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"There is no active item `{item}` in this server.",
                 ephemeral=True)
             return
         await self._reload()
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"Added a description variant to `{item}`.", ephemeral=True)
 
     @rollsets_description.command(
@@ -455,13 +460,14 @@ class RollsAdminMixin:
                 await interaction.response.send_message(error, ephemeral=True)
                 return
             fields["thumbnail_url"] = thumbnail_url
+        await interaction.response.defer(ephemeral=True)
         if (not await db_config.update_description(
                 guild_id, item, variant, fields)):
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"`{item}` has no variant #{variant}.", ephemeral=True)
             return
         await self._reload()
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"Updated variant #{variant} of `{item}`.", ephemeral=True)
 
     @rollsets_description.command(
@@ -481,12 +487,13 @@ class RollsAdminMixin:
             await interaction.response.send_message(
                 "`variant` must be a positive index.", ephemeral=True)
             return
+        await interaction.response.defer(ephemeral=True)
         if (not await db_config.delete_description(guild_id, item, variant)):
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"`{item}` has no variant #{variant}.", ephemeral=True)
             return
         await self._reload()
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"Removed variant #{variant} from `{item}`.", ephemeral=True)
 
     # Attach the description subgroup to the rollsets group now that its

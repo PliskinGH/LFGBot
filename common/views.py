@@ -121,10 +121,9 @@ class ConfirmView(discord.ui.View):
                 "Only the requesting user can answer this prompt.",
                 ephemeral=True)
             return
-        for child in self.children:
-            child.disabled = True
-        await interaction.response.edit_message(
-            content=await callback(), view=self)
+        await interaction.response.defer()
+        text = await callback()
+        await interaction.edit_original_response(content=text, view=None)
 
     async def _confirm_callback(self, interaction: discord.Interaction):
         await self._finish(interaction, self._on_confirm)

@@ -242,12 +242,12 @@ class TestRollsetsRemove:
         assert ephemeral is True
         assert isinstance(view, ConfirmView)
 
-        # Confirming deletes and reports; the buttons stop working.
+        # Confirming deletes and reports; the view is removed.
         click = _interaction()
         await view._confirm_callback(click)
         assert deletes == [(42424, "map")]
         assert click.response.edited["content"] == "Deleted roll category `map`."
-        assert all(child.disabled for child in view.children)
+        assert click.response.edited["view"] is None
 
     @pytest.mark.asyncio
     async def test_cancel_keeps_the_category(self, rollset_cog, monkeypatch):
@@ -486,3 +486,51 @@ class TestHelp:
         assert "# Help: /rollsets" in content
         assert "/rollsets description update" in content
         assert "server managers" in content
+
+
+class TestDeferredResponses:
+    """Defer/respond contract, mirroring the matchmaking /games commands.
+
+    Every /rollsets command defers (ephemerally) before it touches the
+    database and then answers through the followup webhook. Validation
+    errors stay on the initial response: they are raised pre-defer.
+    """
+
+    @pytest.mark.asyncio
+    async def test_writes_defer_and_report_via_followup(
+            self, rollset_cog, monkeypatch):
+        monkeypatch.setattr(db_config, "add_category", _noop_return(True))
+        interaction = _interaction()
+        await MatchRolls.rollsets_add.callback(
+            rollset_cog, interaction, "deck", "Standard")
+        assert interaction.response.deferred is True
+        assert interaction.followup.sent[0] == (
+            "Roll category `deck` added (1 items).", True, None, None)
+
+    @pytest.mark.asyncio
+    async def test_reads_defer_and_report_via_followup(self, rollset_cog):
+        interaction = _interaction()
+        await MatchRolls.rollsets_list.callback(rollset_cog, interaction)
+        assert interaction.response.deferred is True
+        assert "# Roll sets" in interaction.followup.sent[0][0]
+
+    @pytest.mark.asyncio
+    async def test_validation_errors_precede_the_defer(self, rollset_cog):
+        interaction = _interaction()
+        await MatchRolls.rollsets_add.callback(
+            rollset_cog, interaction, " ", "X")
+        assert interaction.response.deferred is None
+        assert "`category` must be" in interaction.response.messages[0][0]
+        assert interaction.followup.sent == []
+
+    @pytest.mark.asyncio
+    async def test_remove_sends_its_confirm_view_via_followup(
+            self, rollset_cog, monkeypatch):
+        monkeypatch.setattr(db_config, "list_category_items", _noop_return(
+            (["Zeta"], [])))
+        monkeypatch.setattr(db_config, "item_variant_counts", _noop_return([]))
+        interaction = _interaction()
+        await MatchRolls.rollsets_remove.callback(rollset_cog, interaction, "map")
+        assert interaction.response.deferred is True
+        _, _, _, view = interaction.followup.sent[0]
+        assert isinstance(view, ConfirmView)
