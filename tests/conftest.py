@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from cogs.matchmaking import constants as lfg_constants
 from cogs.matchmaking.cog import Matchmaking
 from cogs.matchmaking.models import LFGContext
 from cogs.matchrolls import MatchRolls
@@ -113,14 +114,41 @@ class FakeChannel:
         return None
 
 
+class FakeButton:
+    """A fake Discord component (button/select) with just a custom id."""
+
+    def __init__(self, custom_id):
+        self.custom_id = custom_id
+
+
+class FakeActionRow:
+    """A fake action row holding fake components."""
+
+    def __init__(self, *custom_ids):
+        self.children = [FakeButton(custom_id) for custom_id in custom_ids]
+
+
+def lfg_view_components():
+    """Component rows mimicking a posted LFG message's still-active view."""
+    return [FakeActionRow(*lfg_constants.LFG_VIEW_CUSTOM_IDS)]
+
+
 class FakeMessage:
-    def __init__(self, embeds=None):
+    def __init__(self, embeds=None, id=1, components=None):
+        self.id = id
         self.embeds = embeds or []
+        # ``None`` means "unknown": utils.has_lfg_view then assumes the LFG
+        # view is still there. Pass a list to simulate a specific state.
+        self.components = components
         self.edited = None
         self.jump_url = "https://discord.com/channels/1/1/1"
 
     async def edit(self, **kwargs):
         self.edited = kwargs
+        # Mirror Discord: editing with view=None removes the message's
+        # components, so a later check sees the game as closed.
+        if ("view" in kwargs and kwargs["view"] is None):
+            self.components = []
         return None
 
 

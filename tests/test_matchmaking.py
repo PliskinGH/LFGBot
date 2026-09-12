@@ -14,6 +14,7 @@ from cogs.matchmaking.constants import (
     DEFAULT_GUILD_ID, EMOJI_START, GAMES_COMMAND, LFG_COMMAND, RENAME_COMMAND,
 )
 from cogs.matchmaking.models import GameOption, LFGContext
+from cogs.matchmaking.utils import has_lfg_view
 from cogs.matchmaking.views import GameSettingsModal, ThreadRenameModal
 
 from tests.conftest import (
@@ -24,6 +25,7 @@ from tests.conftest import (
     FakeMember,
     FakeMessage,
     FakeMentionable,
+    lfg_view_components,
 )
 
 
@@ -789,6 +791,151 @@ class TestSettingsPersistence:
         )
         assert "param1: Alpha One, Delta Four" in settings_field.value
         assert "param2: First Choice" in settings_field.value
+
+
+class TestLfgConcurrency:
+    """A concurrent press must never start the game twice."""
+
+    def _interaction(self, message, channel, guild, user):
+        return FakeInteraction(user=user, guild=guild, message=message,
+                              channel=channel)
+
+    def _lfg_message(self, host, limit):
+        embed = discord.Embed(title="Looking for a Game A game")
+        embed.add_field(name="Host", value=host.mention, inline=True)
+        embed.add_field(name=f"Guests (0/{limit})", value="", inline=False)
+        return FakeMessage([embed])
+
+    def _yielding_message(self, message):
+        """Make the message's edit yield like a real REST call, so a second
+        handler can reach and wait on the lock while the first holds it."""
+        original_edit = message.edit
+
+        async def yielding_edit(**kwargs):
+            await asyncio.sleep(0)
+            return await original_edit(**kwargs)
+
+        message.edit = yielding_edit
+        return message
+
+    def _spy_on_thread_creation(self, matchmaking):
+        started = []
+        original = matchmaking.create_game_thread
+
+        async def spy(*args, **kwargs):
+            started.append(1)
+            return await original(*args, **kwargs)
+
+        matchmaking.create_game_thread = spy
+        return started
+
+    def _followup_messages(self, *interactions):
+        return [sent[0] for interaction in interactions
+                for sent in interaction.followup.sent]
+
+    @pytest.mark.asyncio
+    async def test_concurrent_joins_start_a_single_thread(self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        guest_a = FakeMember(101, "A")
+        guest_b = FakeMember(102, "B")
+        guild = FakeGuild(
+            id=1, members={m.id: m for m in (host, guest_a, guest_b)})
+        # One seat left: both presses would fill the game and auto-start it.
+        message = self._yielding_message(self._lfg_message(host, limit=1))
+        channel = FakeChannel()
+        started = self._spy_on_thread_creation(matchmaking)
+
+        interaction_a = self._interaction(message, channel, guild, guest_a)
+        interaction_b = self._interaction(message, channel, guild, guest_b)
+        game_option = matchmaking.default_guild_config.games["game_a"]
+        context_a = LFGContext(host=host, max_guests=1, users_to_notify=set(),
+                               game_option=game_option)
+        context_b = LFGContext(host=host, max_guests=1, users_to_notify=set(),
+                               game_option=game_option)
+
+        await asyncio.gather(
+            matchmaking.process_join(interaction_a, context_a),
+            matchmaking.process_join(interaction_b, context_b),
+        )
+
+        assert len(started) == 1
+        messages = self._followup_messages(interaction_a, interaction_b)
+        assert messages.count("The game has started!") == 1
+        assert messages.count("This game is already closed.") == 1
+        assert matchmaking._lfg_locks == {}
+
+    @pytest.mark.asyncio
+    async def test_start_racing_auto_start_creates_a_single_thread(
+            self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        guest = FakeMember(101, "A")
+        guild = FakeGuild(id=1, members={m.id: m for m in (host, guest)})
+        message = self._yielding_message(self._lfg_message(host, limit=1))
+        channel = FakeChannel()
+        started = self._spy_on_thread_creation(matchmaking)
+
+        interaction_start = self._interaction(message, channel, guild, host)
+        interaction_join = self._interaction(message, channel, guild, guest)
+        game_option = matchmaking.default_guild_config.games["game_a"]
+        context_start = LFGContext(host=host, users_to_notify=set(),
+                                   game_option=game_option)
+        context_join = LFGContext(host=host, max_guests=1, users_to_notify=set(),
+                                  game_option=game_option)
+
+        await asyncio.gather(
+            matchmaking.process_start(interaction_start, context_start),
+            matchmaking.process_join(interaction_join, context_join),
+        )
+
+        assert len(started) == 1
+        messages = self._followup_messages(interaction_start, interaction_join)
+        assert messages.count("The game has started!") == 1
+
+    @pytest.mark.asyncio
+    async def test_press_on_a_closed_game_is_rejected(self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        guest = FakeMember(101, "A")
+        guild = FakeGuild(id=1, members={m.id: m for m in (host, guest)})
+        # An empty component list means the view was already removed.
+        message = self._lfg_message(host, limit=4)
+        message.components = []
+        channel = FakeChannel()
+        started = self._spy_on_thread_creation(matchmaking)
+
+        interaction = self._interaction(message, channel, guild, guest)
+        context = LFGContext(host=host, max_guests=4, users_to_notify=set())
+
+        await matchmaking.process_join(interaction, context)
+
+        assert interaction.response.deferred is True
+        assert interaction.followup.sent[0][0] == "This game is already closed."
+        assert started == []
+        assert matchmaking._lfg_locks == {}
+
+    @pytest.mark.asyncio
+    async def test_lock_is_dropped_when_the_game_is_cancelled(self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        guild = FakeGuild(id=1, members={100: host})
+        message = self._lfg_message(host, limit=4)
+        channel = FakeChannel()
+        interaction = self._interaction(message, channel, guild, host)
+        context = LFGContext(host=host, users_to_notify=set())
+
+        await matchmaking.process_cancel(interaction, context)
+
+        assert message.edited is not None
+        assert matchmaking._lfg_locks == {}
+
+
+class TestHasLfgView:
+    def test_open_view_is_detected(self):
+        assert has_lfg_view(FakeMessage(components=lfg_view_components()))
+
+    def test_empty_components_means_closed(self):
+        assert not has_lfg_view(FakeMessage(components=[]))
+
+    def test_unknown_components_are_assumed_open(self):
+        assert has_lfg_view(FakeMessage())
 
 
 class TestProcessCancel:

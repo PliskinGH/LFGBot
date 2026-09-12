@@ -178,6 +178,24 @@ def guests_field_name(count: int, limit: int | None = None) -> str:
     return f"{constants.LFG_FIELD_GUESTS} ({count}/{limit})"
 
 
+def has_lfg_view(message) -> bool:
+    """Whether ``message`` still carries the LFG buttons.
+
+    A missing ``components`` attribute is treated as "unknown -> assume open"
+    so partial messages and test doubles do not read as closed. An empty (or
+    button-less) component list means the view was removed, i.e. the game has
+    already started or been cancelled.
+    """
+    components = getattr(message, "components", None)
+    if (components is None):
+        return True
+    for row in components:
+        for child in getattr(row, "children", []):
+            if (getattr(child, "custom_id", None) in constants.LFG_VIEW_CUSTOM_IDS):
+                return True
+    return False
+
+
 def host_id_from_message(message: discord.Message | None) -> int | None:
     """The LFG host's user id recorded in ``message``'s embed, if any.
 

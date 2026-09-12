@@ -15,6 +15,8 @@ LFG_JOIN_CUSTOM_ID = "lfg_view:join"
 LFG_NOTIFY_CUSTOM_ID = "lfg_view:notify"
 LFG_CANCEL_CUSTOM_ID = "lfg_view:cancel"
 LFG_START_CUSTOM_ID = "lfg_view:start"
+LFG_VIEW_CUSTOM_IDS = (LFG_JOIN_CUSTOM_ID, LFG_NOTIFY_CUSTOM_ID,
+                       LFG_CANCEL_CUSTOM_ID, LFG_START_CUSTOM_ID)
 
 RENAME_COMMAND = "rename"
 RENAME_DESCRIPTION = "Rename a game thread."

@@ -17,8 +17,12 @@ MULTI_VALUE_FIELD_TYPES = ("multiple choice", "multiple_choice", "list")
 class MatchMixin:
     """Match lifecycle after the LFG succeeds: thread creation and match API registration."""
 
-    async def create_game_thread(self, interaction: discord.Interaction, context: LFGContext):
-        message = interaction.message
+    async def create_game_thread(self, interaction: discord.Interaction, context: LFGContext,
+                                 message: discord.Message = None):
+        if (message is None):
+            message = interaction.message
+        if (message is None):
+            return
         channel = interaction.channel
         host = context.host
         guests = context.guests
@@ -29,6 +33,8 @@ class MatchMixin:
         # 3 cases: a) Do nothing if this message already has a thread
         #          b) Create thread in a (forum) channel if available
         #          c) Create thread under this message otherwise
+        if (getattr(message, "thread", None) is not None):
+            return
          
         thread_channel = channel
         parent_message = message

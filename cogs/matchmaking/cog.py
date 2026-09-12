@@ -1,5 +1,6 @@
 """The concrete Matchmaking cog, composing the feature mixins."""
 
+import asyncio
 import configparser
 
 from discord.ext import commands
@@ -34,6 +35,9 @@ class Matchmaking(LFGAdminMixin, LFGConfigMixin, LFGGuildCommandsMixin,
                  game_parameters : configparser.ConfigParser = None,
                  loaded_config : LoadedLFGConfig = None):
         self.bot = bot
+        # Per-LFG-message locks:
+        # the actions on each message are serialized to avoid race conditions.
+        self._lfg_locks: dict[int, asyncio.Lock] = {}
         # guild_id -> game_command -> { parameter_name -> {"display_name": label,
         # "values": {value: display_name}} }
         self.game_parameters: dict[int, dict[str, dict[str, ParameterDefinition]]] = {}

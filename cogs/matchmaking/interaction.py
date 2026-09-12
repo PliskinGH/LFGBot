@@ -1,5 +1,6 @@
 """LFG interaction flow: channel guards, game resolution, modals, join/notify/cancel/start."""
 
+import asyncio
 from typing import Optional
 
 import discord
@@ -142,29 +143,100 @@ class LFGInteractionMixin:
         await interaction.response.send_modal(
             GameSettingsModal(parent_select=None, on_confirm=on_confirm))
 
-    async def process_join(self, interaction: discord.Interaction, context: LFGContext):
-        if (context.host == interaction.user):
-            await interaction.response.send_message(
-                f"You are the host of this game.", ephemeral=True
-            )
+    def _lfg_lock(self, message_id: int) -> asyncio.Lock:
+        """The lock serializing button actions on one LFG post.
+
+        Created lazily; the get-or-create has no ``await`` in between, so on
+        the single-threaded event loop two concurrent presses cannot end up
+        with different locks for the same message.
+        """
+        lock = self._lfg_locks.get(message_id)
+        if (lock is None):
+            lock = asyncio.Lock()
+            self._lfg_locks[message_id] = lock
+        return lock
+
+    def _drop_lfg_lock(self, message_id: int) -> None:
+        """Forget an LFG post's lock once its game is closed.
+
+        Entries are only kept while a game is open, so the registry does not
+        grow with every game ever played.
+        """
+        self._lfg_locks.pop(message_id, None)
+
+    async def _live_lfg_message(self, interaction, snapshot):
+        """The current state of the LFG message.
+
+        ``interaction.message`` is a click-time snapshot, so a racing press
+        that already closed the game is not visible in it. Re-fetching gives
+        the live components (the view is removed when the game closes); the
+        snapshot is used as a fallback when the fetch fails.
+        """
+        channel = interaction.channel
+        if (channel is None):
+            return snapshot
+        try:
+            return await channel.fetch_message(snapshot.id) or snapshot
+        except Exception as error:
+            print(error)
+            return snapshot
+
+    async def _run_locked_lfg_action(self, interaction, action) -> None:
+        """Serialize and guard one button action on an LFG post.
+
+        Every button reads and rewrites the same embed and they can be pressed
+        concurrently, so actions on one message are serialized through a
+        per-message lock. Inside the lock the live message is re-read: a
+        removed view means a racing press already started or cancelled the
+        game, so this action is skipped and the lock dropped.
+
+        ``action`` is awaited with the live message and returns True when it
+        closed the game, in which case the lock entry is dropped too. The
+        caller must already have deferred the interaction.
+        """
+        snapshot = interaction.message
+        if (snapshot is None):
+            # No message to lock or inspect (should not happen for a button
+            # press): still run the action so it applies its own guards.
+            await action(None)
             return
+        async with self._lfg_lock(snapshot.id):
+            message = await self._live_lfg_message(interaction, snapshot)
+            if (not utils.has_lfg_view(message)):
+                self._drop_lfg_lock(snapshot.id)
+                await interaction.followup.send(
+                    content="This game is already closed.", ephemeral=True)
+                return
+            if (await action(message)):
+                self._drop_lfg_lock(snapshot.id)
+
+    async def process_join(self, interaction: discord.Interaction, context: LFGContext):
+        # Defer before taking the per-message lock: waiting on another button
+        # press must not eat into the interaction's 3-second ACK window.
+        await interaction.response.defer(ephemeral=True)
+        await self._run_locked_lfg_action(
+            interaction,
+            lambda message: self._join_locked(interaction, context, message))
+
+    async def _join_locked(self, interaction: discord.Interaction,
+                           context: LFGContext, message) -> bool:
+        if (context.host == interaction.user):
+            await interaction.followup.send(
+                content="You are the host of this game.", ephemeral=True)
+            return False
         
         is_joining = interaction.user not in context.guests
         if (is_joining and context.max_guests is not None and len(context.guests) >= context.max_guests):
-            await interaction.response.send_message(
-                f"Sorry, this game is already full.", ephemeral=True
-            )
-            return
-
-        await interaction.response.defer(ephemeral=True)
+            await interaction.followup.send(
+                content="Sorry, this game is already full.", ephemeral=True)
+            return False
 
         if (is_joining):
             context.guests.add(interaction.user)
         else:
             context.guests.remove(interaction.user)
 
-        message = interaction.message
-        embed = message.embeds[0] if message.embeds else None
+        embed = message.embeds[0] if (message is not None and message.embeds) else None
         if (embed is not None):
             # Guest list
             guests_string = ""
@@ -235,19 +307,31 @@ class LFGInteractionMixin:
         
         if (is_joining and context.max_guests is not None and len(context.guests) >= context.max_guests):
             # factorize game start from process_start to allow for automatic start when max guests reached
-            await self.start_game(interaction, context)
+            return await self.start_game(interaction, context, message=message)
+        return False
 
     async def process_notify(self, interaction: discord.Interaction, context: LFGContext):
+        # Defer before taking the lock so a waiting press cannot time out.
         await interaction.response.defer(ephemeral=True)
+        await self._run_locked_lfg_action(
+            interaction,
+            lambda message: self._notify_locked(interaction, context, message))
 
+    async def _notify_locked(self, interaction: discord.Interaction,
+                             context: LFGContext, message) -> bool:
         is_subscribing = interaction.user not in context.users_to_notify
         if (is_subscribing):
             context.users_to_notify.add(interaction.user)
         else:
             context.users_to_notify.remove(interaction.user)
 
+        if (message is None):
+            await interaction.followup.send(
+                content="This LFG post is no longer available.",
+                ephemeral=True)
+            return False
+
         # Update message to persist users_to_notify in a separate field
-        message = interaction.message
         embed = message.embeds[0]
         subscribed_field_index = next(
             (index for index, field in enumerate(embed.fields)
@@ -273,19 +357,26 @@ class LFGInteractionMixin:
                      else f"You will no longer be notified when someone joins"
                           f" the game or when it is cancelled!"), ephemeral=True
         )
+        return False
 
     async def process_cancel(self, interaction: discord.Interaction, context: LFGContext):
+        # Defer before taking the lock so a waiting press cannot time out.
         await interaction.response.defer(ephemeral=True)
+        await self._run_locked_lfg_action(
+            interaction,
+            lambda message: self._cancel_locked(interaction, context, message))
 
+    async def _cancel_locked(self, interaction: discord.Interaction,
+                             context: LFGContext, message) -> bool:
         if (context.host != interaction.user):
             await interaction.followup.send(
                 content=f"Only the host can cancel the game.", ephemeral=True
             )
-            return
+            return False
 
-        await self.close_game(interaction,
-                              emoji=constants.EMOJI_CANCEL,
-                              footer_text="Game cancelled. Sorry!")
+        closed = await self.close_game(interaction, message=message,
+                                       emoji=constants.EMOJI_CANCEL,
+                                       footer_text="Game cancelled. Sorry!")
         
         # Notify the subscribed users, except the host.
         await self.notify_players(
@@ -297,35 +388,57 @@ class LFGInteractionMixin:
         await interaction.followup.send(
             content=f"The game has been canceled.", ephemeral=True
         )
+        return closed
 
     async def process_start(self, interaction: discord.Interaction, context: LFGContext):
+        # Defer before taking the lock so a waiting press cannot time out.
         await interaction.response.defer(ephemeral=True)
+        await self._run_locked_lfg_action(
+            interaction,
+            lambda message: self._start_locked(interaction, context, message))
 
+    async def _start_locked(self, interaction: discord.Interaction,
+                            context: LFGContext, message) -> bool:
         if (context.host != interaction.user):
             await interaction.followup.send(
                 content=f"Only the host can start the game.", ephemeral=True
             )
-            return
+            return False
 
-        await self.start_game(interaction, context)
+        return await self.start_game(interaction, context, message=message)
 
-    async def start_game(self, interaction: discord.Interaction, context: LFGContext):
-        await self.close_game(interaction,
-                              emoji=constants.EMOJI_START,
-                              footer_text="Game already started. Sorry!")
+    async def start_game(self, interaction: discord.Interaction,
+                         context: LFGContext,
+                         message: discord.Message = None) -> bool:
+        # One-shot by construction: the caller holds the per-message lock and
+        # the live-view guard already rejected a game whose buttons are gone,
+        # so a racing handler cannot create a second thread.
+        if (message is None):
+            message = interaction.message
+        closed = await self.close_game(interaction, message=message,
+                                       emoji=constants.EMOJI_START,
+                                       footer_text="Game already started. Sorry!")
 
-        await self.create_game_thread(interaction, context)
+        await self.create_game_thread(interaction, context, message=message)
 
         await interaction.followup.send(
             content=f"The game has started!", ephemeral=True
         )
+        return closed
 
     async def close_game(self, interaction: discord.Interaction,
+                         message: discord.Message = None,
                          emoji: str = constants.EMOJI_START,
-                         footer_text: str = "Game closed/full. Sorry!"):
-        message = interaction.message
+                         footer_text: str = "Game closed/full. Sorry!") -> bool:
+        """Remove the LFG buttons and freeze the embed. Returns success.
+
+        The returned flag drives dropping the per-message lock: the game is
+        only considered closed once the view has actually been removed.
+        """
         if (message is None):
-            return
+            message = interaction.message
+        if (message is None):
+            return False
         
         embed = message.embeds[0] if message.embeds else None
         if (embed is not None):
@@ -336,6 +449,8 @@ class LFGInteractionMixin:
             await message.edit(embed=embed, view=None)
         except Exception as error:
             print(error)
+            return False
+        return True
 
     def _settings_lines(self, guild_id: int,
                         game_command: str | None,
