@@ -45,54 +45,96 @@ class LFGView(discord.ui.View):
 
 
 ModalCallback = Callable[
-    [discord.Interaction, discord.ui.Modal, discord.ui.Select], Coroutine[Any, Any, None]
+    [discord.Interaction, discord.ui.Modal], Coroutine[Any, Any, None]
 ]
 RenameModalCallback = Callable[
     [discord.Interaction, str], Coroutine[Any, Any, None]
 ]
 
 
+class _LabelledTextInput(discord.ui.TextInput):
+    """A Label-wrapped text input that omits its unset label field.
+
+    Inside a Label the visible label is the Label's text; the documented
+    modal payload omits the inner label field entirely, so a None one is
+    dropped instead of being sent as null.
+    """
+
+    def to_component_dict(self):
+        payload = super().to_component_dict()
+        if (payload.get("label") is None):
+            payload.pop("label", None)
+        return payload
+
+
 class GameSettingsModal(discord.ui.Modal):
+    """The guided modal inputs: game select (guided mode) + LFG arguments.
 
-    description_input = discord.ui.TextInput(
-        label="Description",
-        placeholder="Provide details here...",
-        style=discord.TextStyle.paragraph,
-        max_length=200,
-        required=False,
-    )
-
-    max_players_input = discord.ui.TextInput(
-        label="Max number of players (2-100)",
-        placeholder="Enter a whole number...",
-        min_length=1,
-        max_length=3,  # Prevents extremely large numbers
-        required=False,
-    )
-
-    nb_games_input = discord.ui.TextInput(
-        label=f"Number of games ({constants.MIN_NB_GAMES}-"
-              f"{constants.MAX_NB_GAMES})",
-        placeholder="Enter a whole number...",
-        min_length=1,
-        max_length=2,  # Prevents extremely large numbers
-        required=False,
-    )
+    Every input is wrapped in a Label component: the modal API only accepts
+    Label-wrapped components — a bare select as an action-row child is
+    rejected with a 400 Invalid Form Body (type must be one of (4,)).
+    """
 
     description_value = None  # The description, as entered in the modal
     max_players_value = None  # The validated number of players
     nb_games_value = None  # ... and the validated number of games
+    game_command_value = None  # The selected game command (guided mode)
 
-    def __init__(self, 
-                 parent_select: discord.ui.Select | None = None,
+    def __init__(self,
+                 games: list[tuple[str, str]] | None = None,
                  title: str = "Game Settings",
                  on_confirm: ModalCallback | None = None,):
         super().__init__(title=title, timeout=300)
-        self.parent_select = parent_select
+        # Guided /lfg: the modal itself holds the game select, a required
+        # string select listing the guild's games, ahead of the settings.
+        # When the game is already known (game argument, per-game commands),
+        # no select is added.
+        self.game_select = None
+        if (games):
+            self.game_select = discord.ui.Select(
+                placeholder="Select a game option...",
+                options=[discord.SelectOption(label=name, value=command)
+                         for name, command in games],
+                required=True,
+            )
+            self.add_item(discord.ui.Label(text="Game",
+                                           component=self.game_select))
+
+        self.description_input = _LabelledTextInput(
+            placeholder="Provide details here...",
+            style=discord.TextStyle.paragraph,
+            max_length=200,
+            required=False,
+        )
+        self.add_item(discord.ui.Label(text="Description",
+                                       component=self.description_input))
+
+        self.max_players_input = _LabelledTextInput(
+            placeholder="Enter a whole number...",
+            min_length=1,
+            max_length=3,  # Prevents extremely large numbers
+            required=False,
+        )
+        self.add_item(discord.ui.Label(text="Max number of players (2-100)",
+                                       component=self.max_players_input))
+
+        self.nb_games_input = _LabelledTextInput(
+            placeholder="Enter a whole number...",
+            min_length=1,
+            max_length=2,  # Prevents extremely large numbers
+            required=False,
+        )
+        self.add_item(discord.ui.Label(
+            text=f"Number of games ({constants.MIN_NB_GAMES}-"
+                 f"{constants.MAX_NB_GAMES})",
+            component=self.nb_games_input))
+
         self.on_confirm = on_confirm
 
     async def on_submit(self, modal_interaction: discord.Interaction):
         self.description_value = self.description_input.value
+        self.game_command_value = (self.game_select.values[0]
+                                   if self.game_select is not None else None)
 
         # Validate that the input is a number
         if (self.max_players_input.value):
@@ -126,8 +168,7 @@ class GameSettingsModal(discord.ui.Modal):
 
         if self.on_confirm:
             # Execute the custom callback passed during initialization
-            await self.on_confirm(modal_interaction,
-                                  self, self.parent_select)
+            await self.on_confirm(modal_interaction, self)
         else:
             # Default fallback if no callback was provided
             await modal_interaction.response.send_message(

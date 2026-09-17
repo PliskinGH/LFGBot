@@ -92,25 +92,22 @@ class LFGInteractionMixin:
             nb_games=nb_games,
         )
 
-    async def process_game_selection(self,
-                                     interaction: discord.Interaction,
-                                     command_interaction: discord.Interaction,
-                                     select: discord.ui.Select
-    ):
-        modal = GameSettingsModal(
-            parent_select=select,
-            on_confirm=self.process_game_settings)
-
-        await interaction.response.send_modal(modal)
-
-        await command_interaction.delete_original_response()
+    async def _send_guided_lfg_modal(self, interaction: discord.Interaction):
+        # Guided /lfg: no game argument, so the modal itself holds the game
+        # select (listing the guild's games) next to the LFG arguments;
+        # process_game_settings then reads the selected game from the modal.
+        choices = [(game_option.name, game_option.command)
+                   for game_option in self.get_guild_config(
+                       interaction.guild_id).games.values()]
+        await interaction.response.send_modal(
+            GameSettingsModal(on_confirm=self.process_game_settings,
+                              games=choices))
 
     async def process_game_settings(self,
-                                       interaction: discord.Interaction,
-                                       modal: discord.ui.Modal,
-                                       select: discord.ui.Select
+                                    interaction: discord.Interaction,
+                                    modal: discord.ui.Modal
     ):
-        game_command = select.values[0]
+        game_command = modal.game_command_value
         await self._create_lfg_from_modal(interaction, modal, game_command)
 
     async def _create_lfg_from_modal(self,
@@ -118,9 +115,9 @@ class LFGInteractionMixin:
                                      modal: discord.ui.Modal,
                                      game_command: str
     ):
-        # Shared modal-confirmation tail for the guided mode of /lfg (after
-        # the game selection view or when only the game argument is given)
-        # and the per-game commands (game already known).
+        # Shared modal-confirmation tail for the guided mode of /lfg (the
+        # game comes from the modal's select or the game argument) and the
+        # per-game commands (game already known).
         await interaction.response.defer(ephemeral=True)
 
         game_option = self.get_guild_config(interaction.guild_id).games.get(game_command)
@@ -137,8 +134,8 @@ class LFGInteractionMixin:
     async def _send_game_settings_modal(self, interaction: discord.Interaction,
                                         game_identifier: str):
         # Shared modal route: the game is already known (per-game slash
-        # commands, or /lfg with only the game argument), so the settings
-        # modal opens directly, without the game selection view.
+        # commands, or /lfg with only the game argument), so the modal opens
+        # without the game select.
         # The modal holds the LFG arguments (description, max players, nb_games);
         # the per-game settings (games_parameters.ini) are
         # direct-arguments-only, since Discord caps modals at 5 components.
@@ -149,13 +146,12 @@ class LFGInteractionMixin:
         game_command = game_option.command
 
         async def on_confirm(modal_interaction: discord.Interaction,
-                             modal: discord.ui.Modal,
-                             _select: discord.ui.Select | None):
+                             modal: discord.ui.Modal):
             await self._create_lfg_from_modal(
                 modal_interaction, modal, game_command)
 
         await interaction.response.send_modal(
-            GameSettingsModal(parent_select=None, on_confirm=on_confirm))
+            GameSettingsModal(on_confirm=on_confirm))
 
     def _lfg_lock(self, message_id: int) -> asyncio.Lock:
         """The lock serializing button actions on one LFG post.

@@ -277,11 +277,6 @@ class FakeInteraction:
         self.response.edited = kwargs
         return None
 
-    async def delete_original_response(self, **kwargs):
-        # The guided game-selection view removes its prompt this way.
-        self.response.deleted = True
-        return None
-
 
 class FakeCommand:
     def __init__(self, name):

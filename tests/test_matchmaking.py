@@ -1205,11 +1205,12 @@ class TestGameCommandModal:
 
     @staticmethod
     def _modal_stub(description="let's play", max_players_value=None,
-                    nb_games_value=None):
+                    nb_games_value=None, game_command_value=None):
         return SimpleNamespace(
             description_value=description,
             max_players_value=max_players_value,
             nb_games_value=nb_games_value,
+            game_command_value=game_command_value,
         )
 
     def test_no_arguments_opens_settings_modal(self, matchmaking):
@@ -1255,7 +1256,7 @@ class TestGameCommandModal:
 
         _run(matchmaking._run_game_command(command, "game_a", {}))
         modal = command.response.modals[0]
-        _run(modal.on_confirm(confirmation, self._modal_stub(), None))
+        _run(modal.on_confirm(confirmation, self._modal_stub()))
 
         embed = confirmation.channel.sent[0][1]
         guests = [f.name for f in embed.fields if f.name.startswith("Guests")]
@@ -1264,10 +1265,11 @@ class TestGameCommandModal:
 
     def test_guided_lfg_selection_still_shares_modal_tail(self, matchmaking):
         interaction = FakeInteraction(user=FakeMember(100, "Host"), guild_id=1)
-        select = SimpleNamespace(values=["game_a"])
 
         _run(matchmaking.process_game_settings(
-            interaction, self._modal_stub(max_players_value=2), select))
+            interaction,
+            self._modal_stub(max_players_value=2,
+                             game_command_value="game_a")))
 
         embed = interaction.channel.sent[0][1]
         guests = [f.name for f in embed.fields if f.name.startswith("Guests")]
@@ -1780,11 +1782,12 @@ class TestLfgGameOnlyModal:
 
     @staticmethod
     def _modal_stub(description="let's play", max_players_value=None,
-                    nb_games_value=None):
+                    nb_games_value=None, game_command_value=None):
         return SimpleNamespace(
             description_value=description,
             max_players_value=max_players_value,
             nb_games_value=nb_games_value,
+            game_command_value=game_command_value,
         )
 
     def test_game_only_opens_settings_modal(self, matchmaking):
@@ -1796,6 +1799,10 @@ class TestLfgGameOnlyModal:
         assert isinstance(interaction.response.modals[0], GameSettingsModal)
         # The modal is the response; nothing else was sent.
         assert interaction.response.messages == []
+        # The game is already known: no select, just the three inputs.
+        modal = interaction.response.modals[0]
+        assert modal.game_select is None
+        assert len(modal.children) == 3
 
     def test_game_with_settings_goes_direct(self, matchmaking):
         interaction = FakeInteraction(user=FakeMember(100, "Host"), guild_id=1)
@@ -1825,7 +1832,7 @@ class TestLfgGameOnlyModal:
 
         _run(Matchmaking.lfg.callback(matchmaking, command, game="game_a"))
         modal = command.response.modals[0]
-        _run(modal.on_confirm(confirmation, self._modal_stub(), None))
+        _run(modal.on_confirm(confirmation, self._modal_stub()))
 
         embed = confirmation.channel.sent[0][1]
         guests = [f.name for f in embed.fields if f.name.startswith("Guests")]
@@ -1838,6 +1845,34 @@ class TestLfgGameOnlyModal:
         _run(Matchmaking.lfg.callback(matchmaking, interaction, max_players=4))
 
         assert "The `game` argument is required" in interaction.response.messages[0][0]
+
+
+class TestLfgGuidedModal:
+    """/lfg without arguments: the modal itself holds the game select."""
+
+    def test_guided_lfg_opens_a_modal_with_a_game_select(self, matchmaking):
+        interaction = FakeInteraction(user=FakeMember(100, "Host"), guild_id=1)
+
+        _run(Matchmaking.lfg.callback(matchmaking, interaction))
+
+        assert len(interaction.response.modals) == 1
+        # The modal is the response; nothing else was sent.
+        assert interaction.response.messages == []
+        modal = interaction.response.modals[0]
+        # Game select + the three settings inputs, within Discord's cap.
+        assert len(modal.children) == 4
+        # The select must be Label-wrapped: it is the only modal-supported
+        # format (a bare action-row select is rejected by the API).
+        game_label = modal.children[0]
+        assert game_label.type == discord.ComponentType.label
+        assert game_label.component is modal.game_select
+        select = modal.game_select
+        assert select.required is True
+        assert select.placeholder == "Select a game option..."
+        expected = [(option.name, option.command) for option
+                    in matchmaking.default_guild_config.games.values()]
+        assert [(option.label, option.value)
+                for option in select.options] == expected
 
 
 class TestGameParametersHelp:
@@ -2017,7 +2052,7 @@ class TestNumberOfGames:
         assert self._games_field(embed) is None
 
     @pytest.mark.asyncio
-    async def test_multi_game_post_records_the_NB_GAMES(self, matchmaking):
+    async def test_multi_game_post_records_the_nb_games(self, matchmaking):
         host = FakeMember(100, "Hosty")
         interaction = FakeInteraction(
             user=host, guild=FakeGuild(id=1, members={100: host}))
@@ -2030,7 +2065,7 @@ class TestNumberOfGames:
         assert self._games_field(embed).value == "3"
 
     @pytest.mark.asyncio
-    async def test_context_recovers_the_NB_GAMES(self, matchmaking):
+    async def test_context_recovers_the_nb_games(self, matchmaking):
         host = FakeMember(100, "Hosty")
         interaction = FakeInteraction(
             user=host, guild=FakeGuild(id=1, members={100: host}),
@@ -2223,7 +2258,7 @@ class TestNumberOfGames:
         assert self._games_field(embed).value == "3"
 
     @pytest.mark.asyncio
-    async def test_NB_GAMES_selects_the_direct_route(self, matchmaking):
+    async def test_nb_games_selects_the_direct_route(self, matchmaking):
         # Like the other LFG arguments (description, max_players), providing
         # the number of games as an argument skips the modal; the modal route
         # stays available with just the game argument.
@@ -2238,7 +2273,7 @@ class TestNumberOfGames:
         assert interaction.channel.sent
 
     @pytest.mark.asyncio
-    async def test_out_of_range_NB_GAMES_is_rejected(self, matchmaking):
+    async def test_out_of_range_nb_games_is_rejected(self, matchmaking):
         host = FakeMember(100, "Hosty")
         interaction = FakeInteraction(
             user=host, guild=FakeGuild(id=1, members={100: host}))
@@ -2253,7 +2288,7 @@ class TestNumberOfGames:
         assert interaction.channel.sent == []
 
     @pytest.mark.asyncio
-    async def test_game_command_passes_NB_GAMES(self, matchmaking):
+    async def test_game_command_passes_nb_games(self, matchmaking):
         host = FakeMember(100, "Hosty")
         interaction = FakeInteraction(
             user=host, guild=FakeGuild(id=1, members={100: host}))
@@ -2278,7 +2313,7 @@ class TestNumberOfGames:
             "Number of games (1-10)"]
         assert len(modal.children) <= 5
 
-    def test_modal_accepts_the_NB_GAMES(self):
+    def test_modal_accepts_the_nb_games(self):
         modal = GameSettingsModal()
         modal.nb_games_input._value = "3"
 
@@ -2286,7 +2321,7 @@ class TestNumberOfGames:
 
         assert modal.nb_games_value == 3
 
-    def test_modal_rejects_an_out_of_range_NB_GAMES(self):
+    def test_modal_rejects_an_out_of_range_nb_games(self):
         async def on_confirm(*args):
             raise AssertionError("an invalid modal must not confirm")
 
@@ -2301,7 +2336,7 @@ class TestNumberOfGames:
                 in interaction.response.messages[0][0])
 
     @pytest.mark.asyncio
-    async def test_modal_confirm_posts_the_NB_GAMES(self, matchmaking):
+    async def test_modal_confirm_posts_the_nb_games(self, matchmaking):
         host = FakeMember(100, "Hosty")
         guild = FakeGuild(id=1, members={100: host})
         confirmation = FakeInteraction(user=host, guild=guild)
@@ -2317,17 +2352,17 @@ class TestNumberOfGames:
         assert self._games_field(embed).value == "3"
 
     @pytest.mark.asyncio
-    async def test_guided_modal_NB_GAMES_reaches_the_post(self, matchmaking):
-        # End to end through the real modal: game selection view -> modal ->
-        # LFG post carrying the requested number of games.
+    async def test_guided_modal_nb_games_reaches_the_post(self, matchmaking):
+        # End to end through the real modal: /lfg -> modal (game select +
+        # settings) -> LFG post carrying the requested number of games.
         host = FakeMember(100, "Hosty")
         guild = FakeGuild(id=1, members={100: host})
-        selection = FakeInteraction(user=host, guild=guild)
-        select = SimpleNamespace(values=["game_a"])
+        command = FakeInteraction(user=host, guild=guild)
 
-        await matchmaking.process_game_selection(selection, selection, select)
+        await Matchmaking.lfg.callback(matchmaking, command)
 
-        modal = selection.response.modals[0]
+        modal = command.response.modals[0]
+        modal.game_select._values = ["game_a"]
         modal.nb_games_input._value = "3"
         confirmation = FakeInteraction(user=host, guild=guild)
 
@@ -2335,8 +2370,6 @@ class TestNumberOfGames:
 
         embed = confirmation.channel.sent[0][1]
         assert self._games_field(embed).value == "3"
-        # The game-selection prompt is replaced by the modal.
-        assert selection.response.deleted is True
 
     @pytest.mark.asyncio
     async def test_long_titles_keep_the_game_prefix(self, matchmaking):

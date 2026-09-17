@@ -4,7 +4,6 @@ import discord
 from discord import app_commands
 
 from common import constants as common_constants, utils
-from common.views import DynamicSelectView
 
 from . import constants
 from .utils import fetch_host_id
@@ -171,17 +170,6 @@ class LFGCommandsMixin:
             )
             return
 
-        choices = [ (game_option.name, game_option.command)
-                    for game_option in self.get_guild_config(interaction.guild_id).games.values() ]
-
-        view = DynamicSelectView(
-            choices=choices, 
-            command_interaction=interaction,
-            on_select=self.process_game_selection,
-            placeholder="Select a game option...",
-            timeout=300
-        )
-
-        await interaction.response.send_message(
-            view=view, ephemeral=True
-        )
+        # Guided route: no game argument, so the modal itself holds the
+        # game select next to the settings inputs.
+        await self._send_guided_lfg_modal(interaction)
