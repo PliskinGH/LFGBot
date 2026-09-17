@@ -11,7 +11,7 @@ code changes.
 
 | Command | Description |
 | --- | --- |
-| `/lfg [game] [description] [max_players]` | Post an LFG. Without `game:`, a guided game-selection view opens. |
+| `/lfg [game] [description] [max_players] [nb_games]` | Post an LFG. Without `game:`, a guided game-selection view opens. |
 | `/<game command>` (per server) | LFG shortcut for a configured game, with optional per-game parameters (e.g. `/rdl map:autumn,winter deck:standard`). |
 | `/rename [title]` | Rename a bot-created game thread (host only). |
 | `/random category:<category> [subset:<subset>] [display:<true\|false>]` | Random item from a configured set; subsets accept indices/ranges (e.g. `2,5-9`). |
@@ -35,6 +35,8 @@ An LFG post is an embed with four buttons:
 (in the game's forum channel, if configured) and pings the participants.
 - If the game has league APIs configured, the bot also checks
 that players are registered and registers the match.
+- `nb_games` (1-10, default 1) starts several games from the same lobby:
+each game gets its own thread and its own match registration.
 - The bot is not persistent and therefore stores every information about a single LFG
 into the corresponding message embed.
 

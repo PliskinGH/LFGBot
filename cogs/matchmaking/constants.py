@@ -7,6 +7,11 @@ import discord
 LFG_COMMAND = "lfg"
 LFG_DESCRIPTION = "Looking for a game."
 
+# Number of games one LFG post can start with the same lobby.
+DEFAULT_NB_GAMES = 1
+MIN_NB_GAMES = 1
+MAX_NB_GAMES = 10
+
 LFG_JOIN_BUTTON_LABEL = "Join/Leave"
 LFG_NOTIFY_BUTTON_LABEL = "Toggle Notification"
 LFG_CANCEL_BUTTON_LABEL = "Cancel"
@@ -91,6 +96,7 @@ GUESTS_OVER_LIMIT = " and others..."
 # share these definitions.
 LFG_FIELD_TARGET = "Target"
 LFG_FIELD_HOST = "Host"
+LFG_FIELD_GAMES = "Games"
 LFG_FIELD_GUESTS = "Guests"
 LFG_FIELD_SUBSCRIBED = "Subscribed"
 LFG_FIELD_SETTINGS = "Settings"

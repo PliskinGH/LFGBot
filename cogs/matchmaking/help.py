@@ -29,7 +29,7 @@ class LFGHelpMixin:
             "modal directly for that game.\n"
             "## Direct mode\n"
             f"`/{constants.LFG_COMMAND} game:<game> [description:<text>] "
-            "[max_players:<number>]`\n"
+            "[max_players:<number>] [nb_games:<number>]`\n"
             "### game\n"
             "The game/role to ping for this LFG post.\n"
             "### description\n"
@@ -38,6 +38,11 @@ class LFGHelpMixin:
             "Optional maximum number of players (including host) (2-100).\n"
             "The LFG will automatically close when this number is reached.\n"
             "Some games may have a default maximum number of players, which will be used if this argument is not provided.\n"
+            "### nb_games\n"
+            f"Optional number of games to start with the same players "
+            f"({constants.MIN_NB_GAMES}-{constants.MAX_NB_GAMES}, "
+            f"default {constants.DEFAULT_NB_GAMES}).\n"
+            "Each game gets its own thread and match registration.\n"
             # Discord strips trailing newlines from message content, so a
             # zero-width space keeps the two blank lines that separate the
             # text from the embeds below.

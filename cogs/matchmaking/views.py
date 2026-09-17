@@ -54,7 +54,7 @@ RenameModalCallback = Callable[
 
 class GameSettingsModal(discord.ui.Modal):
 
-    description = discord.ui.TextInput(
+    description_input = discord.ui.TextInput(
         label="Description",
         placeholder="Provide details here...",
         style=discord.TextStyle.paragraph,
@@ -62,7 +62,7 @@ class GameSettingsModal(discord.ui.Modal):
         required=False,
     )
 
-    max_players = discord.ui.TextInput(
+    max_players_input = discord.ui.TextInput(
         label="Max number of players (2-100)",
         placeholder="Enter a whole number...",
         min_length=1,
@@ -70,7 +70,18 @@ class GameSettingsModal(discord.ui.Modal):
         required=False,
     )
 
-    max_players_number = None  # This will hold the validated number of players
+    nb_games_input = discord.ui.TextInput(
+        label=f"Number of games ({constants.MIN_NB_GAMES}-"
+              f"{constants.MAX_NB_GAMES})",
+        placeholder="Enter a whole number...",
+        min_length=1,
+        max_length=2,  # Prevents extremely large numbers
+        required=False,
+    )
+
+    description_value = None  # The description, as entered in the modal
+    max_players_value = None  # The validated number of players
+    nb_games_value = None  # ... and the validated number of games
 
     def __init__(self, 
                  parent_select: discord.ui.Select | None = None,
@@ -81,16 +92,34 @@ class GameSettingsModal(discord.ui.Modal):
         self.on_confirm = on_confirm
 
     async def on_submit(self, modal_interaction: discord.Interaction):
+        self.description_value = self.description_input.value
+
         # Validate that the input is a number
-        if (self.max_players.value):
+        if (self.max_players_input.value):
             try:
-                value = int(self.max_players.value)
+                value = int(self.max_players_input.value)
                 if (value < 2 or value > 100):
                     raise ValueError
-                self.max_players_number = value
+                self.max_players_value = value
             except ValueError:
                 await modal_interaction.response.send_message(
                     "❌ **Invalid input:** Please enter a number from 2 to 100.",
+                    ephemeral=True,
+                )
+                return
+
+        if (self.nb_games_input.value):
+            try:
+                value = int(self.nb_games_input.value)
+                if (value < constants.MIN_NB_GAMES
+                        or value > constants.MAX_NB_GAMES):
+                    raise ValueError
+                self.nb_games_value = value
+            except ValueError:
+                await modal_interaction.response.send_message(
+                    f"❌ **Invalid input:** Please enter a number of games from"
+                    f" {constants.MIN_NB_GAMES} to"
+                    f" {constants.MAX_NB_GAMES}.",
                     ephemeral=True,
                 )
                 return
@@ -102,7 +131,7 @@ class GameSettingsModal(discord.ui.Modal):
         else:
             # Default fallback if no callback was provided
             await modal_interaction.response.send_message(
-                f"Logged **{self.title}** request:\n> {self.description.value}",
+                f"Logged **{self.title}** request:\n> {self.description_value}",
                 ephemeral=True,
             )
 

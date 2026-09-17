@@ -90,7 +90,8 @@ class LFGContext(object):
                  max_guests: int | None = None,
                  guests: set[discord.Member] | None = None,
                  users_to_notify: set[discord.Member] | None = None,
-                 game_settings: dict[str, list[str]] | None = None):
+                 game_settings: dict[str, list[str]] | None = None,
+                 nb_games: int | None = None):
         super().__init__()
         self.game_option = game_option
         self.host = host
@@ -105,6 +106,12 @@ class LFGContext(object):
         self.game_settings = game_settings
         if (self.game_settings is None):
             self.game_settings = {}
+        self.nb_games = nb_games
+        if (self.nb_games is None
+                or self.nb_games < constants.MIN_NB_GAMES):
+            self.nb_games = constants.DEFAULT_NB_GAMES
+        elif (self.nb_games > constants.MAX_NB_GAMES):
+            self.nb_games = constants.MAX_NB_GAMES
 
     @classmethod
     async def from_interaction(cls,
@@ -223,10 +230,24 @@ class LFGContext(object):
                             values, param_mappings.get(param_name, {}).get("values", {}))
             break
 
+        # Recover the number of games from the Games field. The field only
+        # exists when it differs from the default, so a missing (or
+        # unparsable) value falls back to a single game.
+        nb_games = constants.DEFAULT_NB_GAMES
+        for field in embed.fields:
+            if field.name != constants.LFG_FIELD_GAMES:
+                continue
+            try:
+                nb_games = int(field.value.strip())
+            except (TypeError, ValueError):
+                nb_games = constants.DEFAULT_NB_GAMES
+            break
+
         context = cls(game_option=game_option,
                       host=host, target_role=target_role,
                       max_guests=max_guests, guests=guests,
                       users_to_notify=users_to_notify,
-                      game_settings=game_settings)
+                      game_settings=game_settings,
+                      nb_games=nb_games)
 
         return context

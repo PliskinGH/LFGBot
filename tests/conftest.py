@@ -84,6 +84,8 @@ class FakeChannel:
         self.owner_id = None
         self.parent = None  # parent channel when this channel is a thread
         self.created_kwargs = None
+        self.created_thread_kwargs = []  # every create_thread request
+        self.thread_factory = None  # optional: callable(**kwargs) -> thread
         self.message = None  # FakeMessage returned by fetch_message
         self.starter_message = None  # cached thread starter (discord.Thread)
         self.messages = []  # FakeMessage list iterated by history()
@@ -96,6 +98,11 @@ class FakeChannel:
 
     async def create_thread(self, **kwargs):
         self.created_kwargs = kwargs
+        self.created_thread_kwargs.append(kwargs)
+        if (self.thread_factory is not None):
+            # Test-provided factory building the created thread (a forum
+            # channel returns a (thread, message) 2-tuple instead).
+            return self.thread_factory(**kwargs)
         # discord.py returns a 2-tuple when creating in a forum channel.
         return (None, None)
 
@@ -150,6 +157,26 @@ class FakeMessage:
         if ("view" in kwargs and kwargs["view"] is None):
             self.components = []
         return None
+
+
+class FakeThread:
+    """A created thread stub capturing the messages posted into it."""
+
+    def __init__(self, name=None, id=5000):
+        self.id = id
+        self.name = name
+        self.mention = f"<#{self.id}>"
+        self.jump_url = f"https://discord.com/channels/1/1/{self.id}"
+        self.owner_id = None
+        self.parent = None
+        self.starter_message = None
+        self.sent = []  # contents recorded by send
+        self.sent_embeds = []  # embeds recorded by send, parallel to sent
+
+    async def send(self, content=None, embed=None, **kwargs):
+        self.sent.append(content)
+        self.sent_embeds.append(embed)
+        return FakeMessage()
 
 
 # Sentinel mirroring discord.utils.MISSING: lets the fake tell an omitted
@@ -248,6 +275,11 @@ class FakeInteraction:
     async def edit_original_response(self, **kwargs):
         # ``ConfirmView`` swaps the prompt for its outcome text this way.
         self.response.edited = kwargs
+        return None
+
+    async def delete_original_response(self, **kwargs):
+        # The guided game-selection view removes its prompt this way.
+        self.response.deleted = True
         return None
 
 

@@ -92,6 +92,12 @@ class LFGGuildCommandsMixin:
                 annotation=Optional[int],
                 default=None,
             ),
+            inspect.Parameter(
+                "nb_games",
+                inspect.Parameter.KEYWORD_ONLY,
+                annotation=Optional[int],
+                default=None,
+            ),
         ]
         for param_name in parameter_names:
             signature_parameters.append(
@@ -106,6 +112,10 @@ class LFGGuildCommandsMixin:
         descriptions = {
             "description": "Optional description for the game.",
             "max_players": "Optional maximum number of players (2-100).",
+            "nb_games": (
+                f"Optional number of games to start with the same players "
+                f"({constants.MIN_NB_GAMES}-{constants.MAX_NB_GAMES}, "
+                f"default {constants.DEFAULT_NB_GAMES})."),
         }
         autocompletes = {}
         for param_name in parameter_names:
@@ -197,8 +207,11 @@ class LFGGuildCommandsMixin:
 
         description = command_kwargs.pop("description", None)
         max_players = command_kwargs.pop("max_players", None)
+        nb_games = command_kwargs.pop("nb_games", None)
 
-        if all(value is None for value in (description, max_players, *command_kwargs.values())):
+        if all(value is None for value in (
+                description, max_players, nb_games,
+                *command_kwargs.values())):
             # No arguments at all: same guided modal route as /lfg.
             await self._send_game_settings_modal(interaction, game_command)
             return
@@ -221,4 +234,5 @@ class LFGGuildCommandsMixin:
             parsed_parameters[param_name] = values
 
         await self._direct_lfg(interaction, game_command, description, max_players,
+                               nb_games=nb_games,
                                game_settings=parsed_parameters)

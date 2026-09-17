@@ -17,28 +17,127 @@ MULTI_VALUE_FIELD_TYPES = ("multiple choice", "multiple_choice", "list")
 class MatchMixin:
     """Match lifecycle after the LFG succeeds: thread creation and match API registration."""
 
-    async def create_game_thread(self, interaction: discord.Interaction, context: LFGContext,
+    async def start_game_matches(self, interaction: discord.Interaction, context: LFGContext,
                                  message: discord.Message = None):
+        """Start the games of an LFG post: one thread per game, then one
+        match registration per thread."""
         if (message is None):
             message = interaction.message
         if (message is None):
             return
+        game_option = context.game_option
+        host = context.host
+        guests = context.guests
+        embed = message.embeds[0] if message.embeds else None
+
+        # Create thread(s)
+        # 3 cases: a) Do nothing if this message already has a thread
+        #          b) Create thread(s) in a (forum) channel if available
+        #          c) Create thread(s) under this message otherwise
+        # One thread is created per game (see _create_game_threads), then
+        # each thread gets its own match registration.
+        if (getattr(message, "thread", None) is not None):
+            return
+
+        # The forum is stored as a mention, resolved like roles; a game
+        # without one (or with an unresolvable one) posts in the LFG channel.
+        forum = None
+        forum_id = None
+        if (game_option.forum):
+            forum_id = utils.get_id_from_mention(game_option.forum)
+        if (forum_id):
+            forum = self.bot.get_channel(forum_id)
+
+        # Thread title = embed description without custom emojis.
+        thread_title = utils.clean_thread_title(embed.description)
+        if (thread_title is None or not(len(thread_title))):
+            thread_title = embed.title
+        if (thread_title is None or not(len(thread_title))):
+            thread_title = "Game thread"
+
+        # One thread per game: the same players can then play several games
+        # (each with its own match registration) from a single post.
+        created_threads = await self._create_game_threads(
+            interaction, context, message, embed, forum, thread_title)
+
+        if (created_threads):
+            if (forum is not None):
+                embed.url = created_threads[0].jump_url
+            else:
+                embed.url = message.jump_url
+            try:
+                await message.edit(embed=embed)
+            except Exception as error:
+                print(error)
+
+            gameName = None
+            if (game_option.name):
+                gameName = game_option.name
+            registration_api_url = None
+            if (game_option.registration_api):
+                registration_api_url = game_option.registration_api
+            match_api_url = None
+            if (game_option.match_api):
+                match_api_url = game_option.match_api
+            match_url = None
+            if (game_option.match_url):
+                match_url = game_option.match_url
+            auth_token = None
+            if (game_option.api_token):
+                auth_token = game_option.api_token
+            website_url = None
+            if (game_option.website_url):
+                website_url = game_option.website_url
+            registration_url = None
+            if (game_option.registration_url):
+                registration_url = game_option.registration_url
+            profile_url = None
+            if (game_option.profile_url):
+                profile_url = game_option.profile_url
+
+            verified_users = []
+            if registration_api_url:
+                try:
+                    # Registration is a property of the players, who are the
+                    # same in every game: check it once, for all the threads.
+                    users = [host] + list(guests)
+                    verified_users = await self.check_registration(
+                        created_threads[0], users, registration_api_url,
+                        gameName, auth_token,
+                        website_url, registration_url, profile_url)
+                except Exception as error:
+                    print(f"League player registration check failed: {error}")
+            if match_api_url:
+                for thread in created_threads:
+                    try:
+                        await self.register_match(
+                            thread, match_api_url, match_url,
+                            auth_token,
+                            getattr(thread, "name", None) or thread_title,
+                            gameName, verified_users,
+                            game_settings=context.game_settings,
+                            game_command=(context.game_option.command
+                                          if context.game_option else None),
+                            guild_id=interaction.guild_id,
+                            website_url=website_url)
+                    except Exception as error:
+                        print(f"League match registration request failed: {error}")
+
+    async def _create_game_threads(self, interaction, context,
+                                   message, embed, forum, thread_title) -> list:
+        """Create one thread per game for a started LFG post:
+        the extras threads beyond the first cannot attach to the LFG message and are standlone;
+        failures are reported and skipped.
+        """
         channel = interaction.channel
         host = context.host
         guests = context.guests
         game_option = context.game_option
-        embed = message.embeds[0] if message.embeds else None
+        nb_games = context.nb_games
 
-        # Create thread
-        # 3 cases: a) Do nothing if this message already has a thread
-        #          b) Create thread in a (forum) channel if available
-        #          c) Create thread under this message otherwise
-        if (getattr(message, "thread", None) is not None):
-            return
-         
-        thread_channel = channel
+        thread_in_forum = forum is not None
+        thread_channel = forum if thread_in_forum else channel
         parent_message = message
-        thread_in_forum = False
         thread_pings = host.mention
         for guest in guests:
             if (len(thread_pings)):
@@ -49,33 +148,15 @@ class MatchMixin:
         game_message = game_option.message
         if (len(game_message)):
             thread_message += " " + game_message
-        thread_embed = None
-        
-        # Thread title = embed description without custom emojis
-        thread_title = utils.clean_thread_title(embed.description)
-        if (thread_title is None or not(len(thread_title))):
-            thread_title = embed.title
-        if (thread_title is None or not(len(thread_title))):
-            thread_title = "Game thread"
+
         thread_visibility = True
         thread_tag = None
-        
+
         keywords = {}
-        keywords['name'] = thread_title
-        
-        forum_id = ""
-        if (game_option.forum):
-            # Forums are stored as mentions, resolved like roles.
-            forum_id = utils.get_id_from_mention(game_option.forum)
-        forum = None
-        tag_name = ""
-        if (game_option.tag):
-            tag_name = game_option.tag
-        if (forum_id):
-            forum = self.bot.get_channel(forum_id)
-        if (forum is not None):
-            thread_in_forum = True
-            thread_channel = forum
+        if (thread_in_forum):
+            tag_name = ""
+            if (game_option.tag):
+                tag_name = game_option.tag
             if (len(tag_name)):
                 for forum_tag in forum.available_tags:
                     if (forum_tag.name == tag_name):
@@ -84,85 +165,59 @@ class MatchMixin:
             visibility = game_option.visibility
             if (len(visibility) and int(visibility) == 0):
                 thread_visibility = False
-        
-        thread_has_parent = not(thread_in_forum) and thread_visibility
-        if (not(thread_has_parent)):
-            thread_embed = embed.copy()
-            thread_embed.url = message.jump_url
-            thread_embed.remove_footer()
+
         if (thread_in_forum):
             if (thread_tag is not None):
                 keywords['applied_tags'] = [thread_tag]
             keywords['content'] = thread_message
-            keywords['embed'] = thread_embed
-        if(thread_has_parent):
-            keywords['message'] = parent_message
         if (not(thread_visibility)):
             keywords['type'] = discord.ChannelType.private_thread
 
-        gameName = None
-        if (game_option.name):
-            gameName = game_option.name
-        registration_api_url = None
-        if (game_option.registration_api):
-            registration_api_url = game_option.registration_api
-        match_api_url = None
-        if (game_option.match_api):
-            match_api_url = game_option.match_api
-        match_url = None
-        if (game_option.match_url):
-            match_url = game_option.match_url
-        auth_token = None
-        if (game_option.api_token):
-            auth_token = game_option.api_token
-        website_url = None
-        if (game_option.website_url):
-            website_url = game_option.website_url
-        registration_url = None
-        if (game_option.registration_url):
-            registration_url = game_option.registration_url
-        profile_url = None
-        if (game_option.profile_url):
-            profile_url = game_option.profile_url
-
-        try:
-            thread = await thread_channel.create_thread(**keywords)
-            if (thread_in_forum):
-                thread, _ = thread
-            if (thread is not None):
+        created_threads = []
+        for game_index in range(nb_games):
+            thread_keywords = dict(keywords)
+            if (nb_games > 1):
+                # The (i/n) prefix comes first so it survives the
+                # 100-character cap, which keeps the beginning of the name.
+                thread_keywords['name'] = utils.clean_thread_title(
+                    f"({game_index + 1}/{nb_games}) {thread_title}")
+            else:
+                thread_keywords['name'] = thread_title
+            # Per-thread parentage: a message holds a single thread, so only
+            # the first game's thread can attach to the LFG message; the
+            # other games are standalone threads that carry their own copy of
+            # the post's embed instead.
+            thread_has_parent = (game_index == 0 and not(thread_in_forum)
+                                 and thread_visibility)
+            thread_embed = None
+            if (thread_has_parent):
+                thread_keywords['message'] = parent_message
+            else:
+                thread_embed = embed.copy()
+                thread_embed.url = message.jump_url
+                thread_embed.remove_footer()
+                if (thread_in_forum):
+                    thread_keywords['embed'] = thread_embed
+                elif (game_index and thread_visibility):
+                    # The extra games cannot attach to the LFG message: they
+                    # become standalone public threads in the same channel.
+                    thread_keywords['type'] = discord.ChannelType.public_thread
+            try:
+                thread = await thread_channel.create_thread(**thread_keywords)
+                if (thread_in_forum):
+                    thread, _ = thread
+            except Exception as error:
+                print(error)
+                continue
+            if (thread is None):
+                continue
+            try:
                 if (not(thread_in_forum)):
                     await thread.send(content=thread_message, embed=thread_embed)
-                if (thread_in_forum):
-                    embed.url = thread.jump_url
-                else:
-                    embed.url = message.jump_url
-                await message.edit(embed=embed)
-
-                verified_users = []
-                if registration_api_url:
-                    try:
-                        users = [host] + list(guests)
-                        verified_users = await self.check_registration(
-                            thread, users, registration_api_url,
-                            gameName, auth_token,
-                            website_url, registration_url, profile_url)
-                    except Exception as error:
-                        print(f"League player registration check failed: {error}")
-                if match_api_url:
-                    try:
-                        await self.register_match(
-                            thread, match_api_url, match_url,
-                            auth_token, thread_title, gameName,
-                            verified_users,
-                            game_settings=context.game_settings,
-                            game_command=(context.game_option.command
-                                          if context.game_option else None),
-                            guild_id=interaction.guild_id,
-                            website_url=website_url)
-                    except Exception as error:
-                        print(f"League match registration request failed: {error}")
-        except Exception as e:
-            print(e)
+            except Exception as error:
+                print(error)
+            created_threads.append(thread)
+        return created_threads
 
     async def _get_multi_value_fields(self, match_api_url: str,
                                       auth_token: str | None = None

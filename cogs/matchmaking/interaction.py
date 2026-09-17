@@ -53,7 +53,7 @@ class LFGInteractionMixin:
         )
 
     async def _direct_lfg(self, interaction, game_identifier, description,
-                          max_players, game_settings=None):
+                          max_players, nb_games=None, game_settings=None):
         # Shared LFG-creation tail for the /lfg command (direct mode) and the
         # dynamically-generated per-game commands.
         game_option = self._resolve_game_option(interaction.guild_id, game_identifier)
@@ -68,6 +68,17 @@ class LFGInteractionMixin:
             )
             return
 
+        if (nb_games is not None and not (
+                constants.MIN_NB_GAMES <= nb_games
+                <= constants.MAX_NB_GAMES)):
+            await interaction.response.send_message(
+                f"`nb_games` must be between"
+                f" {constants.MIN_NB_GAMES} and"
+                f" {constants.MAX_NB_GAMES}.",
+                ephemeral=True,
+            )
+            return
+
         # Defer ephemerally: the LFG post itself is sent as a regular channel
         # message.
         await interaction.response.defer(ephemeral=True)
@@ -78,6 +89,7 @@ class LFGInteractionMixin:
         await self.create_lfg(
             interaction, game_option, description or "", max_guests,
             game_settings=game_settings,
+            nb_games=nb_games,
         )
 
     async def process_game_selection(self,
@@ -113,21 +125,23 @@ class LFGInteractionMixin:
 
         game_option = self.get_guild_config(interaction.guild_id).games.get(game_command)
 
-        max_players = modal.max_players_number
+        max_players = modal.max_players_value
         if (max_players is None):
             max_guests = game_option.default_max_guests
         else:
             max_guests = max_players - 1
-        await self.create_lfg(interaction, game_option, modal.description.value, max_guests)
+        await self.create_lfg(interaction, game_option, modal.description_value,
+                              max_guests,
+                              nb_games=modal.nb_games_value)
 
     async def _send_game_settings_modal(self, interaction: discord.Interaction,
                                         game_identifier: str):
         # Shared modal route: the game is already known (per-game slash
         # commands, or /lfg with only the game argument), so the settings
         # modal opens directly, without the game selection view.
-        # The modal deliberately holds only description and max_players:
-        # game parameters (games_parameters.ini) are direct-arguments-only,
-        # since Discord caps modals at 5 components.
+        # The modal holds the LFG arguments (description, max players, nb_games);
+        # the per-game settings (games_parameters.ini) are
+        # direct-arguments-only, since Discord caps modals at 5 components.
         game_option = self._resolve_game_option(interaction.guild_id, game_identifier)
         if (game_option is None):
             await self._reject_unknown_game(interaction, game_identifier)
@@ -259,6 +273,9 @@ class LFGInteractionMixin:
             if (context.host):
                 embed.add_field(name=constants.LFG_FIELD_HOST,
                                 value=context.host.mention, inline=True)
+            if (context.nb_games > constants.DEFAULT_NB_GAMES):
+                embed.add_field(name=constants.LFG_FIELD_GAMES,
+                                value=str(context.nb_games), inline=True)
             nb_guests = len(context.guests)
             if (nb_guests or context.max_guests is not None):
                 embed.add_field(
@@ -419,7 +436,7 @@ class LFGInteractionMixin:
                                        emoji=constants.EMOJI_START,
                                        footer_text="Game already started. Sorry!")
 
-        await self.create_game_thread(interaction, context, message=message)
+        await self.start_game_matches(interaction, context, message=message)
 
         await interaction.followup.send(
             content=f"The game has started!", ephemeral=True
@@ -472,7 +489,8 @@ class LFGInteractionMixin:
                          game_option: GameOption,
                          description: str,
                          max_guests: int | None,
-                         game_settings: Optional[dict[str, list[str]]] = None):
+                         game_settings: Optional[dict[str, list[str]]] = None,
+                         nb_games: int | None = None):
         # Create an LFG post
         # Embed + buttons to interact
 
@@ -487,6 +505,15 @@ class LFGInteractionMixin:
         field_text = host.mention
         embed.add_field(name=constants.LFG_FIELD_HOST,
                         value=field_text, inline=True)
+
+        if (nb_games is None):
+            nb_games = constants.DEFAULT_NB_GAMES
+        if (nb_games > constants.DEFAULT_NB_GAMES):
+            # Only rendered when it differs from the default, so single-game
+            # posts are unchanged. Starting the game then creates one thread
+            # (and one match registration) per game.
+            embed.add_field(name=constants.LFG_FIELD_GAMES,
+                            value=str(nb_games), inline=True)
 
         if (max_guests is not None):
             embed.add_field(name=utils.guests_field_name(0, max_guests),

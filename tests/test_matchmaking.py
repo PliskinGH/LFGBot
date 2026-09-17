@@ -11,7 +11,8 @@ import pytest
 from common import constants
 from cogs.matchmaking.cog import Matchmaking
 from cogs.matchmaking.constants import (
-    DEFAULT_GUILD_ID, EMOJI_START, GAMES_COMMAND, LFG_COMMAND, RENAME_COMMAND,
+    DEFAULT_GUILD_ID, DEFAULT_NB_GAMES, EMOJI_START, GAMES_COMMAND,
+    LFG_COMMAND, LFG_FIELD_GAMES, MAX_NB_GAMES, RENAME_COMMAND,
 )
 from cogs.matchmaking.models import GameOption, LFGContext
 from cogs.matchmaking.utils import has_lfg_view
@@ -25,6 +26,7 @@ from tests.conftest import (
     FakeMember,
     FakeMessage,
     FakeMentionable,
+    FakeThread,
     lfg_view_components,
 )
 
@@ -244,7 +246,7 @@ class TestMinimalDynamicGame:
         assert ephemeral is True
 
     @pytest.mark.asyncio
-    async def test_create_game_thread_uses_forum_mention_and_tolerates_none(
+    async def test_start_game_matches_uses_forum_mention_and_tolerates_none(
             self, matchmaking):
         # A configured forum: the thread goes there (the fake's LFG-channel
         # branch cannot build a real thread object). message=None is treated
@@ -257,7 +259,7 @@ class TestMinimalDynamicGame:
         message = FakeMessage([discord.Embed(description="desc")])
         interaction = FakeInteraction(user=FakeMember(1, "host"), message=message)
         context = LFGContext(game_option=game_option, host=interaction.user)
-        await matchmaking.create_game_thread(interaction, context)
+        await matchmaking.start_game_matches(interaction, context)
         assert forum_channel.created_kwargs["name"] == "desc"
 
 
@@ -820,13 +822,13 @@ class TestLfgConcurrency:
 
     def _spy_on_thread_creation(self, matchmaking):
         started = []
-        original = matchmaking.create_game_thread
+        original = matchmaking.start_game_matches
 
         async def spy(*args, **kwargs):
             started.append(1)
             return await original(*args, **kwargs)
 
-        matchmaking.create_game_thread = spy
+        matchmaking.start_game_matches = spy
         return started
 
     def _followup_messages(self, *interactions):
@@ -1056,7 +1058,7 @@ class TestGuildCommandRegistration:
         # The always-present arguments plus one argument per configured
         # parameter of the game (derived from the fixture config).
         assert set(names) == (
-            {"interaction", "description", "max_players"}
+            {"interaction", "description", "max_players", "nb_games"}
             | set(matchmaking.game_parameters[DEFAULT_GUILD_ID]["game_a"])
         )
 
@@ -1202,10 +1204,12 @@ class TestGameCommandModal:
     """Guided (modal) route of the per-game slash commands."""
 
     @staticmethod
-    def _modal_stub(description="let's play", max_players_number=None):
+    def _modal_stub(description="let's play", max_players_value=None,
+                    nb_games_value=None):
         return SimpleNamespace(
-            description=SimpleNamespace(value=description),
-            max_players_number=max_players_number,
+            description_value=description,
+            max_players_value=max_players_value,
+            nb_games_value=nb_games_value,
         )
 
     def test_no_arguments_opens_settings_modal(self, matchmaking):
@@ -1236,7 +1240,7 @@ class TestGameCommandModal:
         confirmation = FakeInteraction(user=host, guild=guild)
 
         _run(matchmaking._create_lfg_from_modal(
-            confirmation, self._modal_stub(max_players_number=4), "game_a"))
+            confirmation, self._modal_stub(max_players_value=4), "game_a"))
 
         embed = confirmation.channel.sent[0][1]
         guests = [f.name for f in embed.fields if f.name.startswith("Guests")]
@@ -1263,7 +1267,7 @@ class TestGameCommandModal:
         select = SimpleNamespace(values=["game_a"])
 
         _run(matchmaking.process_game_settings(
-            interaction, self._modal_stub(max_players_number=2), select))
+            interaction, self._modal_stub(max_players_value=2), select))
 
         embed = interaction.channel.sent[0][1]
         guests = [f.name for f in embed.fields if f.name.startswith("Guests")]
@@ -1321,17 +1325,6 @@ class FakeMatchApiSession:
         if self.post_exception is not None:
             raise self.post_exception
         return FakeMatchApiResponse(self.post_status, self.post_payload, self.error_text)
-
-
-class FakeThread:
-    """Stands in for a discord.Thread inside register_match."""
-
-    def __init__(self):
-        self.sent = []
-        self.jump_url = "https://discord.com/channels/1/1/1"
-
-    async def send(self, content=None, **kwargs):
-        self.sent.append(content)
 
 
 class TestAddGameSettingsPayload:
@@ -1786,10 +1779,12 @@ class TestLfgGameOnlyModal:
     """Modal route of /lfg when only the game argument is given."""
 
     @staticmethod
-    def _modal_stub(description="let's play", max_players_number=None):
+    def _modal_stub(description="let's play", max_players_value=None,
+                    nb_games_value=None):
         return SimpleNamespace(
-            description=SimpleNamespace(value=description),
-            max_players_number=max_players_number,
+            description_value=description,
+            max_players_value=max_players_value,
+            nb_games_value=nb_games_value,
         )
 
     def test_game_only_opens_settings_modal(self, matchmaking):
@@ -1971,3 +1966,397 @@ class TestCreateLfgChannel:
         await matchmaking.create_lfg(interaction, game_option, "desc", None)
 
         assert interaction.channel.sent
+class TestNumberOfGames:
+    """The nb_games option: one thread (and match) per game.
+
+    The value is part of the LFG post's persisted state (a Games embed
+    field), so it survives the context rebuild of every button press and
+    drives how many threads are created when the game starts.
+    """
+
+    def _game_option(self, matchmaking):
+        return matchmaking.default_guild_config.games["game_a"]
+
+    def _embed(self, host, nb_games=None):
+        embed = discord.Embed(title="Looking for a Game A game",
+                              description="Game A night")
+        embed.add_field(name="Host", value=host.mention, inline=True)
+        if (nb_games is not None):
+            embed.add_field(name=LFG_FIELD_GAMES, value=str(nb_games),
+                            inline=True)
+        return embed
+
+    def _lfg_message(self, host, nb_games=None):
+        return FakeMessage([self._embed(host, nb_games)])
+
+    def _thread_factory(self, created, forum=False):
+        """A create_thread replacement recording the threads it hands out."""
+        def factory(**kwargs):
+            thread = FakeThread(name=kwargs.get("name"),
+                                id=5000 + len(created))
+            created.append(thread)
+            if (forum):
+                return (thread, FakeMessage())
+            return thread
+        return factory
+
+    def _games_field(self, embed):
+        return next((field for field in embed.fields
+                     if field.name == LFG_FIELD_GAMES), None)
+
+    @pytest.mark.asyncio
+    async def test_single_game_post_has_no_games_field(self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        interaction = FakeInteraction(
+            user=host, guild=FakeGuild(id=1, members={100: host}))
+
+        await matchmaking.create_lfg(
+            interaction, self._game_option(matchmaking), "desc", None)
+
+        embed = interaction.channel.sent[0][1]
+        assert self._games_field(embed) is None
+
+    @pytest.mark.asyncio
+    async def test_multi_game_post_records_the_NB_GAMES(self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        interaction = FakeInteraction(
+            user=host, guild=FakeGuild(id=1, members={100: host}))
+
+        await matchmaking.create_lfg(
+            interaction, self._game_option(matchmaking), "desc", None,
+            nb_games=3)
+
+        embed = interaction.channel.sent[0][1]
+        assert self._games_field(embed).value == "3"
+
+    @pytest.mark.asyncio
+    async def test_context_recovers_the_NB_GAMES(self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        interaction = FakeInteraction(
+            user=host, guild=FakeGuild(id=1, members={100: host}),
+            message=self._lfg_message(host, nb_games=4))
+
+        context = await LFGContext.from_interaction(matchmaking, interaction)
+
+        assert context.nb_games == 4
+
+    @pytest.mark.asyncio
+    async def test_context_defaults_to_a_single_game(self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        interaction = FakeInteraction(
+            user=host, guild=FakeGuild(id=1, members={100: host}),
+            message=self._lfg_message(host))
+
+        context = await LFGContext.from_interaction(matchmaking, interaction)
+
+        assert context.nb_games == DEFAULT_NB_GAMES
+
+    @pytest.mark.asyncio
+    async def test_unparsable_games_field_falls_back_to_one(self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        embed = self._embed(host)
+        embed.add_field(name=LFG_FIELD_GAMES, value="squad", inline=True)
+        interaction = FakeInteraction(
+            user=host, guild=FakeGuild(id=1, members={100: host}),
+            message=FakeMessage([embed]))
+
+        context = await LFGContext.from_interaction(matchmaking, interaction)
+
+        assert context.nb_games == DEFAULT_NB_GAMES
+
+    @pytest.mark.asyncio
+    async def test_out_of_range_games_field_is_capped(self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        embed = self._embed(host)
+        embed.add_field(name=LFG_FIELD_GAMES, value="99", inline=True)
+        interaction = FakeInteraction(
+            user=host, guild=FakeGuild(id=1, members={100: host}),
+            message=FakeMessage([embed]))
+
+        context = await LFGContext.from_interaction(matchmaking, interaction)
+
+        assert context.nb_games == MAX_NB_GAMES
+
+    @pytest.mark.asyncio
+    async def test_join_preserves_the_games_field(self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        guest = FakeMember(101, "G")
+        guild = FakeGuild(id=1, members={100: host, 101: guest})
+        message = self._lfg_message(host, nb_games=3)
+        interaction = FakeInteraction(
+            user=guest, guild=guild, message=message, channel=FakeChannel())
+        context = await LFGContext.from_interaction(matchmaking, interaction)
+
+        await matchmaking.process_join(interaction, context)
+
+        updated_embed = message.edited["embed"]
+        assert self._games_field(updated_embed).value == "3"
+
+    @pytest.mark.asyncio
+    async def test_start_creates_one_thread_per_game(self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        guild = FakeGuild(id=1, members={100: host})
+        message = self._lfg_message(host, nb_games=3)
+        channel = FakeChannel()
+        created = []
+        channel.thread_factory = self._thread_factory(created)
+        interaction = FakeInteraction(
+            user=host, guild=guild, message=message, channel=channel)
+        context = await LFGContext.from_interaction(matchmaking, interaction)
+
+        await matchmaking.process_start(interaction, context)
+
+        assert [thread.name for thread in created] == [
+            "(1/3) Game A night", "(2/3) Game A night", "(3/3) Game A night"]
+        # Every game's thread pings the players.
+        assert all(thread.sent for thread in created)
+        # The first thread inherits the post's embed from the LFG message it
+        # attaches to; the standalone extras carry their own copy instead.
+        assert created[0].sent_embeds == [None]
+        for extra in created[1:]:
+            assert len(extra.sent_embeds) == 1
+            assert extra.sent_embeds[0].url == message.jump_url
+
+    @pytest.mark.asyncio
+    async def test_single_game_keeps_the_plain_thread_name(self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        guild = FakeGuild(id=1, members={100: host})
+        message = self._lfg_message(host)
+        channel = FakeChannel()
+        created = []
+        channel.thread_factory = self._thread_factory(created)
+        interaction = FakeInteraction(
+            user=host, guild=guild, message=message, channel=channel)
+        context = await LFGContext.from_interaction(matchmaking, interaction)
+
+        await matchmaking.process_start(interaction, context)
+
+        assert [thread.name for thread in created] == ["Game A night"]
+
+    @pytest.mark.asyncio
+    async def test_extra_games_become_standalone_threads(self, matchmaking):
+        # A message holds a single thread: only the first game attaches to
+        # the LFG message, the others are standalone public threads.
+        host = FakeMember(100, "Hosty")
+        guild = FakeGuild(id=1, members={100: host})
+        message = self._lfg_message(host, nb_games=3)
+        channel = FakeChannel()
+        created = []
+        channel.thread_factory = self._thread_factory(created)
+        interaction = FakeInteraction(
+            user=host, guild=guild, message=message, channel=channel)
+        context = await LFGContext.from_interaction(matchmaking, interaction)
+
+        await matchmaking.process_start(interaction, context)
+
+        requests = channel.created_thread_kwargs
+        assert len(requests) == 3
+        assert requests[0]["message"] is message
+        for extra in requests[1:]:
+            assert "message" not in extra
+            assert extra["type"] == discord.ChannelType.public_thread
+
+    @pytest.mark.asyncio
+    async def test_forum_gets_one_post_per_game(self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        guild = FakeGuild(id=1, members={100: host})
+        forum = FakeChannel(id=555, name="game-a-forum",
+                            type_=discord.ChannelType.forum)
+        matchmaking.bot._channels = {555: forum}
+        game_option = self._game_option(matchmaking)
+        game_option.forum = "<#555>"
+        created = []
+        forum.thread_factory = self._thread_factory(created, forum=True)
+        message = self._lfg_message(host, nb_games=2)
+        interaction = FakeInteraction(
+            user=host, guild=guild, message=message, channel=FakeChannel())
+        context = LFGContext(game_option=game_option, host=host,
+                             nb_games=2)
+
+        await matchmaking.start_game_matches(interaction, context)
+
+        assert len(created) == 2
+        assert [request["name"] for request in forum.created_thread_kwargs] == [
+            "(1/2) Game A night", "(2/2) Game A night"]
+        # The LFG post links to the first game's thread.
+        assert message.edited["embed"].url == created[0].jump_url
+
+    @pytest.mark.asyncio
+    async def test_each_game_registers_its_own_match(self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        guild = FakeGuild(id=1, members={100: host})
+        channel = FakeChannel()
+        created = []
+        channel.thread_factory = self._thread_factory(created)
+        game_option = self._game_option(matchmaking)
+        game_option.match_api = "https://site/api/matches/"
+        message = self._lfg_message(host, nb_games=3)
+        interaction = FakeInteraction(
+            user=host, guild=guild, message=message, channel=channel)
+        context = LFGContext(game_option=game_option, host=host,
+                             nb_games=3)
+        registered = []
+
+        async def fake_register(thread, match_api_url, match_url, auth_token,
+                                title, website_name, verified_users, **kwargs):
+            registered.append((thread, title))
+
+        matchmaking.register_match = fake_register
+
+        await matchmaking.start_game_matches(interaction, context)
+
+        # Each game is registered with its own thread link and title.
+        assert [thread for thread, _ in registered] == created
+        assert [title for _, title in registered] == [
+            "(1/3) Game A night", "(2/3) Game A night", "(3/3) Game A night"]
+
+    @pytest.mark.asyncio
+    async def test_lfg_command_starts_several_games(self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        interaction = FakeInteraction(
+            user=host, guild=FakeGuild(id=1, members={100: host}))
+
+        await Matchmaking.lfg.callback(
+            matchmaking, interaction, game="game_a", nb_games=3)
+
+        embed = interaction.channel.sent[0][1]
+        assert self._games_field(embed).value == "3"
+
+    @pytest.mark.asyncio
+    async def test_NB_GAMES_selects_the_direct_route(self, matchmaking):
+        # Like the other LFG arguments (description, max_players), providing
+        # the number of games as an argument skips the modal; the modal route
+        # stays available with just the game argument.
+        host = FakeMember(100, "Hosty")
+        interaction = FakeInteraction(
+            user=host, guild=FakeGuild(id=1, members={100: host}))
+
+        await Matchmaking.lfg.callback(
+            matchmaking, interaction, game="game_a", nb_games=2)
+
+        assert interaction.response.modals == []
+        assert interaction.channel.sent
+
+    @pytest.mark.asyncio
+    async def test_out_of_range_NB_GAMES_is_rejected(self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        interaction = FakeInteraction(
+            user=host, guild=FakeGuild(id=1, members={100: host}))
+
+        # /lfg caps the option at the Discord level, but the per-game
+        # commands declare it as a plain integer.
+        await matchmaking._direct_lfg(interaction, "game_a", None, None,
+                                      nb_games=99)
+
+        assert ("`nb_games` must be between 1 and 10"
+                in interaction.response.messages[0][0])
+        assert interaction.channel.sent == []
+
+    @pytest.mark.asyncio
+    async def test_game_command_passes_NB_GAMES(self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        interaction = FakeInteraction(
+            user=host, guild=FakeGuild(id=1, members={100: host}))
+
+        await matchmaking._run_game_command(
+            interaction, "game_a", {"nb_games": 2})
+
+        assert interaction.response.modals == []
+        embed = interaction.channel.sent[0][1]
+        assert self._games_field(embed).value == "2"
+
+    def test_modal_holds_the_lfg_arguments(self):
+        # The modal holds the LFG arguments (well within Discord's 5-component
+        # cap); the per-game settings stay command-argument only, since their
+        # number is not bounded.
+        modal = GameSettingsModal()
+        labels = [child.to_component_dict()["label"]
+                  for child in modal.children]
+
+        assert labels == [
+            "Description", "Max number of players (2-100)",
+            "Number of games (1-10)"]
+        assert len(modal.children) <= 5
+
+    def test_modal_accepts_the_NB_GAMES(self):
+        modal = GameSettingsModal()
+        modal.nb_games_input._value = "3"
+
+        _run(modal.on_submit(FakeInteraction(user=FakeMember(1, "Hosty"))))
+
+        assert modal.nb_games_value == 3
+
+    def test_modal_rejects_an_out_of_range_NB_GAMES(self):
+        async def on_confirm(*args):
+            raise AssertionError("an invalid modal must not confirm")
+
+        modal = GameSettingsModal(on_confirm=on_confirm)
+        modal.nb_games_input._value = "99"
+        interaction = FakeInteraction(user=FakeMember(1, "Hosty"))
+
+        _run(modal.on_submit(interaction))
+
+        assert modal.nb_games_value is None
+        assert ("number of games from 1 to 10"
+                in interaction.response.messages[0][0])
+
+    @pytest.mark.asyncio
+    async def test_modal_confirm_posts_the_NB_GAMES(self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        guild = FakeGuild(id=1, members={100: host})
+        confirmation = FakeInteraction(user=host, guild=guild)
+        modal = SimpleNamespace(
+            description_value="Game A night",
+            max_players_value=None,
+            nb_games_value=3,
+        )
+
+        await matchmaking._create_lfg_from_modal(confirmation, modal, "game_a")
+
+        embed = confirmation.channel.sent[0][1]
+        assert self._games_field(embed).value == "3"
+
+    @pytest.mark.asyncio
+    async def test_guided_modal_NB_GAMES_reaches_the_post(self, matchmaking):
+        # End to end through the real modal: game selection view -> modal ->
+        # LFG post carrying the requested number of games.
+        host = FakeMember(100, "Hosty")
+        guild = FakeGuild(id=1, members={100: host})
+        selection = FakeInteraction(user=host, guild=guild)
+        select = SimpleNamespace(values=["game_a"])
+
+        await matchmaking.process_game_selection(selection, selection, select)
+
+        modal = selection.response.modals[0]
+        modal.nb_games_input._value = "3"
+        confirmation = FakeInteraction(user=host, guild=guild)
+
+        await modal.on_submit(confirmation)
+
+        embed = confirmation.channel.sent[0][1]
+        assert self._games_field(embed).value == "3"
+        # The game-selection prompt is replaced by the modal.
+        assert selection.response.deleted is True
+
+    @pytest.mark.asyncio
+    async def test_long_titles_keep_the_game_prefix(self, matchmaking):
+        # The cap keeps the beginning of the name: the (i/n) prefix must
+        # survive a description long enough to hit the 100-character limit.
+        host = FakeMember(100, "Hosty")
+        guild = FakeGuild(id=1, members={100: host})
+        embed = discord.Embed(title="Looking for a Game A game",
+                              description="x" * 120)
+        embed.add_field(name="Host", value=host.mention, inline=True)
+        embed.add_field(name=LFG_FIELD_GAMES, value="3", inline=True)
+        message = FakeMessage([embed])
+        channel = FakeChannel()
+        created = []
+        channel.thread_factory = self._thread_factory(created)
+        interaction = FakeInteraction(
+            user=host, guild=guild, message=message, channel=channel)
+        context = await LFGContext.from_interaction(matchmaking, interaction)
+
+        await matchmaking.process_start(interaction, context)
+
+        expected = [f"({index}/3) " + "x" * 94 for index in (1, 2, 3)]
+        assert [thread.name for thread in created] == expected

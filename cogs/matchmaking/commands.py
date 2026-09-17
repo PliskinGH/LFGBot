@@ -134,28 +134,37 @@ class LFGCommandsMixin:
         game="The game/role to ping for this LFG post.",
         description="Optional description for the game.",
         max_players="Optional maximum number of players (including host) (2-100).",
+        nb_games=(f"Optional number of games to start with the same players "
+                  f"({constants.MIN_NB_GAMES}-{constants.MAX_NB_GAMES}, "
+                  f"default {constants.DEFAULT_NB_GAMES})."),
     )
     @app_commands.autocomplete(game=game_autocomplete)
     async def lfg(self, interaction: discord.Interaction,
                   game: str | None = None,
                   description: str | None = None,
                   max_players: app_commands.Range[int, 2, 100] | None = None,
+                  nb_games: app_commands.Range[
+                      int, constants.MIN_NB_GAMES,
+                      constants.MAX_NB_GAMES] | None = None,
                   ):
         if (not await self._guard_lfg_channel(interaction, constants.LFG_COMMAND)):
             return
 
         if (game is not None):
-            if (description is None and max_players is None):
+            if (description is None and max_players is None
+                    and nb_games is None):
                 # Modal route: a game without settings, same guided modal as
                 # the per-game slash commands.
                 await self._send_game_settings_modal(interaction, game)
                 return
 
             # Direct mode: same creation path as the per-game slash commands.
-            await self._direct_lfg(interaction, game, description, max_players)
+            await self._direct_lfg(interaction, game, description, max_players,
+                                   nb_games)
             return
 
-        if (description is not None or max_players is not None):
+        if (description is not None or max_players is not None
+                or nb_games is not None):
             await interaction.response.send_message(
                 "The `game` argument is required when using direct settings.",
                 ephemeral=True,
