@@ -213,7 +213,7 @@ class TestMinimalDynamicGame:
     async def test_create_lfg_does_not_crash_on_unset_fields(self, matchmaking):
         interaction = FakeInteraction(user=FakeMember(1, "host"))
         await matchmaking.create_lfg(
-            interaction, self._minimal_game_option(), "desc", None)
+            interaction, self._minimal_game_option(), None, "desc", None)
         # The LFG post goes out as a regular channel message (not an
         # interaction followup), and the deferred placeholder is removed.
         content, embed, _ = interaction.channel.sent[0]
@@ -236,7 +236,7 @@ class TestMinimalDynamicGame:
 
         interaction.channel.send = failing_send
         await matchmaking.create_lfg(
-            interaction, self._minimal_game_option(), "desc", None)
+            interaction, self._minimal_game_option(), None, "desc", None)
 
         assert interaction.channel.sent == []
         content, ephemeral, _, _ = interaction.followup.sent[0]
@@ -1058,7 +1058,7 @@ class TestGuildCommandRegistration:
         # The always-present arguments plus one argument per configured
         # parameter of the game (derived from the fixture config).
         assert set(names) == (
-            {"interaction", "description", "max_players", "nb_games"}
+            {"interaction", "title", "description", "max_players", "nb_games"}
             | set(matchmaking.game_parameters[DEFAULT_GUILD_ID]["game_a"])
         )
 
@@ -1205,8 +1205,10 @@ class TestGameCommandModal:
 
     @staticmethod
     def _modal_stub(description="let's play", max_players_value=None,
-                    nb_games_value=None, game_command_value=None):
+                    nb_games_value=None, game_command_value=None,
+                    title_value=None):
         return SimpleNamespace(
+            title_value=title_value,
             description_value=description,
             max_players_value=max_players_value,
             nb_games_value=nb_games_value,
@@ -1241,12 +1243,16 @@ class TestGameCommandModal:
         confirmation = FakeInteraction(user=host, guild=guild)
 
         _run(matchmaking._create_lfg_from_modal(
-            confirmation, self._modal_stub(max_players_value=4), "game_a"))
+            confirmation,
+            self._modal_stub(title_value="Raid night", max_players_value=4),
+            "game_a"))
 
         embed = confirmation.channel.sent[0][1]
         guests = [f.name for f in embed.fields if f.name.startswith("Guests")]
         # Modal max_players=4 -> 3 guests.
         assert guests == ["Guests (0/3)"]
+        # The modal title lands in the embed title suffix.
+        assert embed.title == "Looking for a Game A game: Raid night"
 
     def test_game_modal_confirm_uses_default_max_guests(self, matchmaking):
         host = FakeMember(100, "Host")
@@ -1782,8 +1788,10 @@ class TestLfgGameOnlyModal:
 
     @staticmethod
     def _modal_stub(description="let's play", max_players_value=None,
-                    nb_games_value=None, game_command_value=None):
+                    nb_games_value=None, game_command_value=None,
+                    title_value=None):
         return SimpleNamespace(
+            title_value=title_value,
             description_value=description,
             max_players_value=max_players_value,
             nb_games_value=nb_games_value,
@@ -1799,10 +1807,10 @@ class TestLfgGameOnlyModal:
         assert isinstance(interaction.response.modals[0], GameSettingsModal)
         # The modal is the response; nothing else was sent.
         assert interaction.response.messages == []
-        # The game is already known: no select, just the three inputs.
+        # The game is already known: no select, just the four inputs.
         modal = interaction.response.modals[0]
         assert modal.game_select is None
-        assert len(modal.children) == 3
+        assert len(modal.children) == 4
 
     def test_game_with_settings_goes_direct(self, matchmaking):
         interaction = FakeInteraction(user=FakeMember(100, "Host"), guild_id=1)
@@ -1859,8 +1867,8 @@ class TestLfgGuidedModal:
         # The modal is the response; nothing else was sent.
         assert interaction.response.messages == []
         modal = interaction.response.modals[0]
-        # Game select + the three settings inputs, within Discord's cap.
-        assert len(modal.children) == 4
+        # Game select + the four settings inputs, within Discord's cap.
+        assert len(modal.children) == 5
         # The select must be Label-wrapped: it is the only modal-supported
         # format (a bare action-row select is rejected by the API).
         game_label = modal.children[0]
@@ -1933,7 +1941,7 @@ class TestCreateLfgSettings:
         game_option = matchmaking.default_guild_config.games["game_a"]
 
         await matchmaking.create_lfg(
-            interaction, game_option, "desc", None,
+            interaction, game_option, None, "desc", None,
             game_settings={"param1": ["alpha", "delta"], "param2": ["first"]},
         )
 
@@ -1964,7 +1972,7 @@ class TestCreateLfgChannel:
         # Fixture game_a has GamesChannels = <#777>.
         game_option = matchmaking.default_guild_config.games["game_a"]
 
-        await matchmaking.create_lfg(interaction, game_option, "desc", None)
+        await matchmaking.create_lfg(interaction, game_option, None, "desc", None)
 
         # The post went to the configured LFG channel, not the command's.
         assert interaction.channel.sent == []
@@ -1982,7 +1990,7 @@ class TestCreateLfgChannel:
         # Fixture game_a points at <#777>, which is not registered on the bot.
         game_option = matchmaking.default_guild_config.games["game_a"]
 
-        await matchmaking.create_lfg(interaction, game_option, "desc", None)
+        await matchmaking.create_lfg(interaction, game_option, None, "desc", None)
 
         # The un-resolvable target silently falls back to the command channel.
         assert interaction.channel.sent
@@ -1998,7 +2006,7 @@ class TestCreateLfgChannel:
         game_option = matchmaking.default_guild_config.games["game_b"]
         game_option.color = ""
 
-        await matchmaking.create_lfg(interaction, game_option, "desc", None)
+        await matchmaking.create_lfg(interaction, game_option, None, "desc", None)
 
         assert interaction.channel.sent
 class TestNumberOfGames:
@@ -2046,7 +2054,7 @@ class TestNumberOfGames:
             user=host, guild=FakeGuild(id=1, members={100: host}))
 
         await matchmaking.create_lfg(
-            interaction, self._game_option(matchmaking), "desc", None)
+            interaction, self._game_option(matchmaking), None, "desc", None)
 
         embed = interaction.channel.sent[0][1]
         assert self._games_field(embed) is None
@@ -2058,7 +2066,7 @@ class TestNumberOfGames:
             user=host, guild=FakeGuild(id=1, members={100: host}))
 
         await matchmaking.create_lfg(
-            interaction, self._game_option(matchmaking), "desc", None,
+            interaction, self._game_option(matchmaking), None, "desc", None,
             nb_games=3)
 
         embed = interaction.channel.sent[0][1]
@@ -2281,7 +2289,7 @@ class TestNumberOfGames:
         # /lfg caps the option at the Discord level, but the per-game
         # commands declare it as a plain integer.
         await matchmaking._direct_lfg(interaction, "game_a", None, None,
-                                      nb_games=99)
+                                      None, nb_games=99)
 
         assert ("`nb_games` must be between 1 and 10"
                 in interaction.response.messages[0][0])
@@ -2309,7 +2317,7 @@ class TestNumberOfGames:
                   for child in modal.children]
 
         assert labels == [
-            "Description", "Max number of players (2-100)",
+            "Title", "Description", "Max number of players (2-100)",
             "Number of games (1-10)"]
         assert len(modal.children) <= 5
 
@@ -2341,6 +2349,7 @@ class TestNumberOfGames:
         guild = FakeGuild(id=1, members={100: host})
         confirmation = FakeInteraction(user=host, guild=guild)
         modal = SimpleNamespace(
+            title_value=None,
             description_value="Game A night",
             max_players_value=None,
             nb_games_value=3,
@@ -2393,3 +2402,271 @@ class TestNumberOfGames:
 
         expected = [f"({index}/3) " + "x" * 94 for index in (1, 2, 3)]
         assert [thread.name for thread in created] == expected
+
+
+class TestLfgTitle:
+    """The optional LFG title: embed-title suffix, thread title, and limits."""
+
+    def _embed(self, title, description=None):
+        host = FakeMember(100, "Hosty")
+        embed = discord.Embed(title=title, description=description)
+        embed.add_field(name="Host", value=host.mention, inline=True)
+        return embed
+
+    def test_embed_title_without_title_keeps_the_legacy_format(self):
+        from cogs.matchmaking import utils as mm_utils
+
+        assert mm_utils.embed_title("Game A") == "Looking for a Game A game"
+        assert mm_utils.embed_title("Apple") == "Looking for an Apple game"
+
+    def test_embed_title_appends_the_title_suffix(self):
+        from cogs.matchmaking import utils as mm_utils
+
+        assert mm_utils.embed_title("Game A", "Raid night") == (
+            "Looking for a Game A game: Raid night")
+
+    def test_embed_title_suffix_is_skipped_for_game_colon_names(self):
+        # "Quiz game: Night" would parse back as "Quiz": the suffix must not
+        # be appended for such names.
+        from cogs.matchmaking import utils as mm_utils
+
+        assert mm_utils.embed_title("Quiz game: Night", "Raid") == (
+            "Looking for a Quiz game: Night game")
+
+    def test_embed_title_suffix_is_skipped_for_oversized_names(self):
+        from cogs.matchmaking import utils as mm_utils, constants as mm_constants
+
+        long_name = "G" * (mm_constants.GAME_NAME_MAX + 1)
+        title = mm_utils.embed_title(long_name, "Raid")
+        assert title == f"Looking for a {long_name} game"
+
+    def test_embed_title_is_always_within_the_discord_limit(self):
+        from cogs.matchmaking import utils as mm_utils, constants as mm_constants
+
+        # Worst case allowed by the command's Range caps.
+        title = mm_utils.embed_title("G" * mm_constants.GAME_NAME_MAX,
+                                     "T" * mm_constants.LFG_TITLE_MAX)
+        assert len(title) <= mm_constants.LFG_EMBED_TITLE_MAX
+
+    def test_game_recovery_round_trips_through_the_title_suffix(self):
+        from cogs.matchmaking import constants as mm_constants
+
+        title = "Looking for a Board game game: Friday night"
+        game_name = mm_constants.LFG_TITLE_RE.search(title).group(1)
+        assert game_name == "Board game"
+
+    def test_lfg_title_from_embed(self):
+        from cogs.matchmaking import utils as mm_utils
+
+        assert mm_utils.lfg_title_from_embed(
+            self._embed("Looking for a Game A game: Raid night")) == "Raid night"
+        # Legacy posts carry no suffix.
+        assert mm_utils.lfg_title_from_embed(
+            self._embed("Looking for a Game A game")) is None
+
+    def test_thread_title_prefers_the_lfg_title_over_the_description(self):
+        from cogs.matchmaking import utils as mm_utils
+
+        embed = self._embed("Looking for a Game A game: Raid night",
+                            description="Game A night")
+        assert mm_utils.thread_title_from_embed(embed) == "Raid night"
+
+    def test_thread_title_falls_back_to_the_description(self):
+        from cogs.matchmaking import utils as mm_utils
+
+        embed = self._embed("Looking for a Game A game",
+                            description="Game A night")
+        assert mm_utils.thread_title_from_embed(embed) == "Game A night"
+
+    def test_thread_title_final_fallbacks(self):
+        from cogs.matchmaking import utils as mm_utils
+
+        embed = self._embed("Looking for a Game A game")
+        assert mm_utils.thread_title_from_embed(embed) == (
+            "Looking for a Game A game")
+        empty = self._embed("")
+        assert mm_utils.thread_title_from_embed(empty) == "Game thread"
+
+    def test_thread_title_is_capped_at_100(self):
+        from cogs.matchmaking import utils as mm_utils
+
+        embed = self._embed("Looking for a Game A game: " + "T" * 120)
+        assert mm_utils.thread_title_from_embed(embed) == "T" * 100
+
+    @pytest.mark.asyncio
+    async def test_direct_lfg_title_reaches_the_embed(self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        interaction = FakeInteraction(
+            user=host, guild=FakeGuild(id=1, members={100: host}))
+
+        await matchmaking._direct_lfg(
+            interaction, "game_a", "Raid night", "the description", None)
+
+        embed = interaction.channel.sent[0][1]
+        assert embed.title == "Looking for a Game A game: Raid night"
+        assert embed.description == "the description"
+
+    @pytest.mark.asyncio
+    async def test_lfg_command_with_title_only_goes_direct(self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        interaction = FakeInteraction(
+            user=host, guild=FakeGuild(id=1, members={100: host}))
+
+        await Matchmaking.lfg.callback(
+            matchmaking, interaction, game="game_a", title="Raid night")
+
+        # A title alone counts as direct settings: no modal, direct post.
+        assert interaction.response.modals == []
+        assert interaction.response.deferred is True
+        embed = interaction.channel.sent[0][1]
+        assert embed.title == "Looking for a Game A game: Raid night"
+
+    @pytest.mark.asyncio
+    async def test_lfg_title_without_game_is_rejected(self, matchmaking):
+        interaction = FakeInteraction(user=FakeMember(100, "Hosty"), guild_id=1)
+
+        await Matchmaking.lfg.callback(
+            matchmaking, interaction, title="Raid night")
+
+        assert ("The `game` argument is required"
+                in interaction.response.messages[0][0])
+        assert interaction.channel.sent == []
+
+    @pytest.mark.asyncio
+    async def test_per_game_command_passes_the_title(self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        interaction = FakeInteraction(
+            user=host, guild=FakeGuild(id=1, members={100: host}))
+
+        await matchmaking._run_game_command(
+            interaction, "game_a", {"title": "Raid night"})
+
+        embed = interaction.channel.sent[0][1]
+        assert embed.title == "Looking for a Game A game: Raid night"
+
+    @pytest.mark.asyncio
+    async def test_started_post_uses_the_title_for_the_thread(
+            self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        guild = FakeGuild(id=1, members={100: host})
+        embed = self._embed("Looking for a Game A game: Raid night",
+                            description="Game A night")
+        message = FakeMessage([embed])
+        channel = FakeChannel()
+        created = []
+
+        def thread_factory(**kwargs):
+            thread = FakeThread(id=900 + len(created), name=kwargs.get("name"))
+            created.append(thread)
+            return thread
+
+        channel.thread_factory = thread_factory
+        interaction = FakeInteraction(
+            user=host, guild=guild, message=message, channel=channel)
+        context = await LFGContext.from_interaction(matchmaking, interaction)
+
+        await matchmaking.process_start(interaction, context)
+
+        # The thread gets the title, not the description.
+        assert created
+        assert created[0].name == "Raid night"
+
+    @pytest.mark.asyncio
+    async def test_started_legacy_post_still_uses_the_description(
+            self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        guild = FakeGuild(id=1, members={100: host})
+        embed = self._embed("Looking for a Game A game",
+                            description="Game A night")
+        message = FakeMessage([embed])
+        channel = FakeChannel()
+        created = []
+
+        def thread_factory(**kwargs):
+            thread = FakeThread(id=900 + len(created), name=kwargs.get("name"))
+            created.append(thread)
+            return thread
+
+        channel.thread_factory = thread_factory
+        interaction = FakeInteraction(
+            user=host, guild=guild, message=message, channel=channel)
+        context = await LFGContext.from_interaction(matchmaking, interaction)
+
+        await matchmaking.process_start(interaction, context)
+
+        assert created
+        assert created[0].name == "Game A night"
+
+
+class TestGameNameValidation:
+    """Games add and update name caps keeping the embed title parsable."""
+
+    def test_long_name_is_rejected(self):
+        from cogs.matchmaking.admin import LFGAdminMixin
+
+        assert LFGAdminMixin._game_name_error("G" * 101) is not None
+        assert LFGAdminMixin._game_name_error("G" * 100) is None
+
+    def test_game_colon_name_is_rejected(self):
+        from cogs.matchmaking.admin import LFGAdminMixin
+
+        assert LFGAdminMixin._game_name_error("Quiz game: Night") is not None
+        assert LFGAdminMixin._game_name_error("Quiz Game: Night") is not None
+        assert LFGAdminMixin._game_name_error("Game Night") is None
+        assert LFGAdminMixin._game_name_error("") is None
+        assert LFGAdminMixin._game_name_error(None) is None
+
+    def test_games_add_rejects_an_invalid_name(self):
+        from cogs.matchmaking.admin import LFGAdminMixin
+
+        fields, error = LFGAdminMixin._game_fields(
+            name="Quiz game: Night", role="", icon="", color="")
+        assert fields is None
+        assert "game:" in error
+
+    def test_updated_fields_rejects_an_invalid_name(self):
+        from cogs.matchmaking.admin import LFGAdminMixin
+
+        fields, error = LFGAdminMixin._updated_fields(name="Quiz game: Night")
+        assert fields is None
+        assert "game:" in error
+
+    def test_updated_fields_do_not_reset_the_name_with_the_sentinel(self):
+        from cogs.matchmaking.admin import LFGAdminMixin
+
+        # Unlike api_token, the name has no "-" reset: a game always has a
+        # display name, so the sentinel is just an (invalid) name.
+        fields, error = LFGAdminMixin._updated_fields(name="-")
+        assert error is not None
+
+
+class TestConfigGameNameCaps:
+    """Config-file game names are capped and flagged at load time."""
+
+    def _load(self, names_line):
+        import configparser as cp
+        from cogs.matchmaking.config import LFGConfigMixin
+        from cogs.matchmaking.models import GuildGamesConfig
+
+        config = cp.ConfigParser()
+        config.read_string(
+            "[DEFAULT]\nID = 0\n"
+            "[Guild]\nID = 1\n"
+            f"GamesCommands = game_a\nGamesFullNames = {names_line}\n"
+        )
+        guild_config = GuildGamesConfig(1)
+        LFGConfigMixin._load_guild_config(guild_config, config, "Guild")
+        return guild_config.games["game_a"]
+
+    def test_long_name_is_capped(self):
+        game = self._load("G" * 120)
+        assert len(game.name) == 100
+
+    def test_short_name_is_unchanged(self):
+        game = self._load("Game A")
+        assert game.name == "Game A"
+
+    def test_game_colon_name_is_kept_but_flagged(self):
+        # Kept (create_lfg skips the suffix for it); only a print warning.
+        game = self._load("Quiz game: Night")
+        assert game.name == "Quiz game: Night"

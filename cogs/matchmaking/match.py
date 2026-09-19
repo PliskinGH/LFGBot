@@ -3,9 +3,8 @@
 import aiohttp
 import discord
 
-from common import utils
-
 from . import constants
+from . import utils
 from .models import LFGContext
 
 # DRF metadata marks fields accepting several values with one of these types.
@@ -48,12 +47,8 @@ class MatchMixin:
         if (forum_id):
             forum = self.bot.get_channel(forum_id)
 
-        # Thread title = embed description without custom emojis.
-        thread_title = utils.clean_thread_title(embed.description)
-        if (thread_title is None or not(len(thread_title))):
-            thread_title = embed.title
-        if (thread_title is None or not(len(thread_title))):
-            thread_title = "Game thread"
+        # Thread title = the LFG title, else the description (legacy posts).
+        thread_title = utils.thread_title_from_embed(embed)
 
         # One thread per game: the same players can then play several games
         # (each with its own match registration) from a single post.

@@ -16,7 +16,7 @@ from .models import GameOption
 
 # Option descriptions shared by /games add and /games update.
 _GAME_OPTION_DESCRIPTIONS = {
-    "name": "Display name of the game.",
+    "name": ("Display name of the game (at most 100 characters)."),
     "role": "Role or user mention to ping.",
     "icon": "Icon URL shown in embeds.",
     "color": "Embed color.",
@@ -75,6 +75,19 @@ class LFGAdminMixin:
     def is_valid_command_name(name: str) -> bool:
         """Whether ``name`` can become a Discord slash command."""
         return bool(common_constants.COMMAND_NAME_RE.match(name))
+
+    @staticmethod
+    def _game_name_error(name: str | None) -> str | None:
+        """An error message when a game display name is invalid, else None."""
+        if (not name):
+            return None
+        if (name == common_constants.RESET_SENTINEL):
+            return "`name` cannot be `-`: the display name has no reset; just omit the option to keep it."
+        if (len(name) > constants.GAME_NAME_MAX):
+            return f"`name` must be at most {constants.GAME_NAME_MAX} characters."
+        if (constants.GAME_NAME_INVALID_RE.search(name)):
+            return "`name` cannot contain \"game:\": it would break the LFG title parsing."
+        return None
 
     @staticmethod
     def _parameter_error(name: str, values: str | None,
@@ -179,6 +192,9 @@ class LFGAdminMixin:
         mention_error = LFGAdminMixin._mention_error(role, channel, forum)
         if (mention_error is not None):
             return None, mention_error
+        name_error = LFGAdminMixin._game_name_error(name)
+        if (name_error is not None):
+            return None, name_error
         default_max_guests = None
         if (max_players is not None):
             default_max_guests = LFGConfigMixin.parse_default_max_guests(str(max_players))
@@ -223,6 +239,9 @@ class LFGAdminMixin:
         mention_error = LFGAdminMixin._mention_error(role, channel, forum)
         if (mention_error is not None):
             return None, mention_error
+        name_error = LFGAdminMixin._game_name_error(name)
+        if (name_error is not None):
+            return None, name_error
         fields = {}
         for field_name, value in (
             ("name", name), ("role", role), ("icon", icon), ("color", color),
@@ -284,7 +303,7 @@ class LFGAdminMixin:
         self,
         interaction: discord.Interaction,
         command: str,
-        name: str = "",
+        name: Optional[app_commands.Range[str, 1, constants.GAME_NAME_MAX]] = None,
         role: str = "",
         icon: str = "",
         color: str = "",
@@ -316,7 +335,7 @@ class LFGAdminMixin:
                 ephemeral=True)
             return
         fields, error = self._game_fields(
-            name=name, role=role, icon=icon, color=color,
+            name=name or "", role=role, icon=icon, color=color,
             channel=channel, forum=forum, tag=tag, visibility=visibility,
             message=message,
             registration_api=registration_api, match_api=match_api,
@@ -363,7 +382,7 @@ class LFGAdminMixin:
         self,
         interaction: discord.Interaction,
         command: str,
-        name: Optional[str] = None,
+        name: Optional[app_commands.Range[str, 1, constants.GAME_NAME_MAX]] = None,
         role: Optional[str] = None,
         icon: Optional[str] = None,
         color: Optional[str] = None,

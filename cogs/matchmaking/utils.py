@@ -6,7 +6,11 @@ import configparser
 
 import discord
 
-from common.utils import get_id_from_mention
+from common.utils import (
+    clean_thread_title,
+    get_id_from_mention,
+    indefinite_article,
+)
 
 from . import constants
 
@@ -176,6 +180,44 @@ def guests_field_name(count: int, limit: int | None = None) -> str:
     if (limit is None):
         return f"{constants.LFG_FIELD_GUESTS} ({count})"
     return f"{constants.LFG_FIELD_GUESTS} ({count}/{limit})"
+
+
+def embed_title(game_name: str, title: str | None = None) -> str:
+    """The LFG embed title: ``Looking for a(n) <game> game[: <title>]``.
+
+    The ": <title>" suffix is skipped when the game name would break its
+    parsing (see GAME_NAME_INVALID_RE / GAME_NAME_MAX).
+    """
+    composed = ("Looking for " + indefinite_article(game_name)
+                + " " + game_name + " game")
+    if (title and game_name and len(game_name) <= constants.GAME_NAME_MAX
+            and not constants.GAME_NAME_INVALID_RE.search(game_name)):
+        composed += ": " + title
+    if (len(composed) > constants.LFG_EMBED_TITLE_MAX):
+        composed = composed[:constants.LFG_EMBED_TITLE_MAX]
+    return composed
+
+
+def lfg_title_from_embed(embed) -> str | None:
+    """The LFG title from the "game: <title>" suffix, or None for legacy posts."""
+    match = constants.LFG_TITLE_SUFFIX_RE.search(embed.title or "")
+    if (match):
+        return match.group(1)
+    return None
+
+
+def thread_title_from_embed(embed) -> str:
+    """The thread/match title: LFG title, then description (legacy posts),
+    then embed title, then "Game thread". Always fits the 100-char cap."""
+    thread_title = lfg_title_from_embed(embed) or ""
+    if (not thread_title):
+        thread_title = embed.description
+    if (not thread_title):
+        thread_title = embed.title or ""
+    thread_title = clean_thread_title(thread_title)
+    if (not thread_title):
+        thread_title = "Game thread"
+    return thread_title
 
 
 def has_lfg_view(message) -> bool:

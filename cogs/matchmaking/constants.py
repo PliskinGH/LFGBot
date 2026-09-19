@@ -112,7 +112,19 @@ API_DISCORD_USERNAME_FIELD_KEY = API_FIELD_PREFIX + "discord_username_field"
 
 # Compiled once at import time and reused everywhere: naming the pattern
 # is self-documenting and avoids re-parsing it on each invocation.
-LFG_TITLE_RE = re.compile(r"Looking for (?:an? )?(.+?) game$")
+# The optional ": ..." suffix is the LFG title (see create_lfg).
+LFG_TITLE_RE = re.compile(r"Looking for (?:an? )?(.+?) game(?:: .*)?$")
+# The LFG title carried as the "game: <title>" suffix of a full embed title.
+LFG_TITLE_SUFFIX_RE = re.compile(r"^Looking for (?:an? )?.+ game: (.+)$")
+
+# "Looking for an " + name + " game: " + title = 222 chars at the caps below,
+# within Discord's 256-char embed title limit.
+LFG_TITLE_MAX = 100
+LFG_EMBED_TITLE_MAX = 256
+GAME_NAME_MAX = 100
+# A name containing "game:" would break the LFG_TITLE_RE round-trip.
+GAME_NAME_INVALID_RE = re.compile(r"game\s*:", re.IGNORECASE)
+
 GUESTS_FIELD_RE = re.compile(
     re.escape(LFG_FIELD_GUESTS) + r" \((\d+)(?:/(\d+))?\)"
 )

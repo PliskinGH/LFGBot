@@ -6,7 +6,7 @@ from typing import Optional
 import discord
 
 from common import constants as common_constants
-from common.utils import get_default_emoji_url, get_id_from_mention, indefinite_article
+from common.utils import get_default_emoji_url, get_id_from_mention
 
 from . import constants
 from . import utils
@@ -52,10 +52,11 @@ class LFGInteractionMixin:
             ephemeral=True,
         )
 
-    async def _direct_lfg(self, interaction, game_identifier, description,
-                          max_players, nb_games=None, game_settings=None):
-        # Shared LFG-creation tail for the /lfg command (direct mode) and the
-        # dynamically-generated per-game commands.
+    async def _direct_lfg(self, interaction, game_identifier, title,
+                          description, max_players, nb_games=None,
+                          game_settings=None):
+        # Shared LFG-creation tail for the /lfg command (direct mode)
+        # and the dynamically-generated per-game commands.
         game_option = self._resolve_game_option(interaction.guild_id, game_identifier)
         if (game_option is None):
             await self._reject_unknown_game(interaction, game_identifier)
@@ -87,7 +88,7 @@ class LFGInteractionMixin:
         else:
             max_guests = max_players - 1
         await self.create_lfg(
-            interaction, game_option, description or "", max_guests,
+            interaction, game_option, title, description or "", max_guests,
             game_settings=game_settings,
             nb_games=nb_games,
         )
@@ -127,7 +128,8 @@ class LFGInteractionMixin:
             max_guests = game_option.default_max_guests
         else:
             max_guests = max_players - 1
-        await self.create_lfg(interaction, game_option, modal.description_value,
+        await self.create_lfg(interaction, game_option, modal.title_value,
+                              modal.description_value,
                               max_guests,
                               nb_games=modal.nb_games_value)
 
@@ -483,6 +485,7 @@ class LFGInteractionMixin:
 
     async def create_lfg(self, interaction: discord.Interaction,
                          game_option: GameOption,
+                         title: str | None,
                          description: str,
                          max_guests: int | None,
                          game_settings: Optional[dict[str, list[str]]] = None,
@@ -526,9 +529,7 @@ class LFGInteractionMixin:
         embed.set_author(name=host.display_name,
                          icon_url=author_avatar)
         
-        embed.title = "Looking for " 
-        embed.title += indefinite_article(game_option.name)
-        embed.title += " " + game_option.name + " game"
+        embed.title = utils.embed_title(game_option.name, title)
 
         gameIcon = game_option.icon
         if (not(len(gameIcon))):

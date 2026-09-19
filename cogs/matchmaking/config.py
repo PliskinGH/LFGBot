@@ -71,8 +71,18 @@ class LFGConfigMixin:
             # name (server admins manage tokens via /games, not env vars).
             token_env_var = safe_list_get(
                 configdict[constants.CONFIG_GAMES_API_TOKEN_ENV_VARS], index, None)
+            # Names that would break the LFG title parsing are capped or flagged.
+            game_name = safe_list_get(configdict[constants.CONFIG_GAMES_NAMES], index, "")
+            if (game_name):
+                if (constants.GAME_NAME_INVALID_RE.search(game_name)):
+                    print(f"Game '{game}': its name contains \"game:\", so the"
+                          " LFG title parameter will be ignored for it.")
+                elif (len(game_name) > constants.GAME_NAME_MAX):
+                    game_name = game_name[:constants.GAME_NAME_MAX]
+                    print(f"Game '{game}': name capped to"
+                          f" {constants.GAME_NAME_MAX} characters.")
             game_option = GameOption(
-                name=safe_list_get(configdict[constants.CONFIG_GAMES_NAMES], index, ""),
+                name=game_name,
                 command=game,
                 role=safe_list_get(configdict[constants.CONFIG_GAMES_ROLES], index, ""),
                 icon=safe_list_get(configdict[constants.CONFIG_GAMES_ICONS], index, ""),

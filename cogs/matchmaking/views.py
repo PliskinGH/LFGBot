@@ -75,6 +75,7 @@ class GameSettingsModal(discord.ui.Modal):
     rejected with a 400 Invalid Form Body (type must be one of (4,)).
     """
 
+    title_value = None  # The title, as entered in the modal
     description_value = None  # The description, as entered in the modal
     max_players_value = None  # The validated number of players
     nb_games_value = None  # ... and the validated number of games
@@ -99,6 +100,15 @@ class GameSettingsModal(discord.ui.Modal):
             )
             self.add_item(discord.ui.Label(text="Game",
                                            component=self.game_select))
+
+        # The title is the thread/match title, and the embed title suffix.
+        self.title_input = _LabelledTextInput(
+            placeholder="Short title for the game...",
+            max_length=constants.LFG_TITLE_MAX,
+            required=False,
+        )
+        self.add_item(discord.ui.Label(text="Title",
+                                       component=self.title_input))
 
         self.description_input = _LabelledTextInput(
             placeholder="Provide details here...",
@@ -132,6 +142,7 @@ class GameSettingsModal(discord.ui.Modal):
         self.on_confirm = on_confirm
 
     async def on_submit(self, modal_interaction: discord.Interaction):
+        self.title_value = self.title_input.value
         self.description_value = self.description_input.value
         self.game_command_value = (self.game_select.values[0]
                                    if self.game_select is not None else None)

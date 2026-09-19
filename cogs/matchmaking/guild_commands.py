@@ -81,6 +81,13 @@ class LFGGuildCommandsMixin:
                 annotation=discord.Interaction,
             ),
             inspect.Parameter(
+                "title",
+                inspect.Parameter.KEYWORD_ONLY,
+                annotation=Optional[app_commands.Range[
+                    str, 1, constants.LFG_TITLE_MAX]],
+                default=None,
+            ),
+            inspect.Parameter(
                 "description",
                 inspect.Parameter.KEYWORD_ONLY,
                 annotation=Optional[str],
@@ -110,6 +117,7 @@ class LFGGuildCommandsMixin:
             )
 
         descriptions = {
+            "title": "Optional title for the game.",
             "description": "Optional description for the game.",
             "max_players": "Optional maximum number of players (2-100).",
             "nb_games": (
@@ -206,11 +214,12 @@ class LFGGuildCommandsMixin:
             return
 
         description = command_kwargs.pop("description", None)
+        title = command_kwargs.pop("title", None)
         max_players = command_kwargs.pop("max_players", None)
         nb_games = command_kwargs.pop("nb_games", None)
 
         if all(value is None for value in (
-                description, max_players, nb_games,
+                title, description, max_players, nb_games,
                 *command_kwargs.values())):
             # No arguments at all: same guided modal route as /lfg.
             await self._send_game_settings_modal(interaction, game_command)
@@ -233,6 +242,7 @@ class LFGGuildCommandsMixin:
                 return
             parsed_parameters[param_name] = values
 
-        await self._direct_lfg(interaction, game_command, description, max_players,
+        await self._direct_lfg(interaction, game_command, title, description,
+                               max_players,
                                nb_games=nb_games,
                                game_settings=parsed_parameters)

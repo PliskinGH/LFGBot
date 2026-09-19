@@ -11,7 +11,7 @@ code changes.
 
 | Command | Description |
 | --- | --- |
-| `/lfg [game] [description] [max_players] [nb_games]` | Post an LFG. Without `game:`, a guided modal opens (game select + settings). |
+| `/lfg [game] [title] [description] [max_players] [nb_games]` | Post an LFG. Without `game:`, a guided modal opens (game select + settings). The optional title is used as the thread/match title. |
 | `/<game command>` (per server) | LFG shortcut for a configured game, with optional per-game parameters (e.g. `/rdl map:autumn,winter deck:standard`). |
 | `/rename [title]` | Rename a bot-created game thread (host only). |
 | `/random category:<category> [subset:<subset>] [display:<true\|false>]` | Random item from a configured set; subsets accept indices/ranges (e.g. `2,5-9`). |
