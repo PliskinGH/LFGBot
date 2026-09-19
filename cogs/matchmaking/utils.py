@@ -243,14 +243,15 @@ def guests_field_name(count: int, limit: int | None = None) -> str:
 def embed_title(game_name: str, title: str | None = None) -> str:
     """The LFG embed title: ``Looking for a(n) <game> game[: <title>]``.
 
-    The ": <title>" suffix is skipped when the game name would break its
-    parsing (see GAME_NAME_INVALID_RE / GAME_NAME_MAX).
+    The title goes on its own line.
+    The suffix is skipped when the game name would break its parsing (see
+    GAME_NAME_INVALID_RE / GAME_NAME_MAX).
     """
     composed = ("Looking for " + indefinite_article(game_name)
                 + " " + game_name + " game")
     if (title and game_name and len(game_name) <= constants.GAME_NAME_MAX
             and not constants.GAME_NAME_INVALID_RE.search(game_name)):
-        composed += ": " + title
+        composed += ":\n" + title
     if (len(composed) > constants.LFG_EMBED_TITLE_MAX):
         composed = composed[:constants.LFG_EMBED_TITLE_MAX]
     return composed

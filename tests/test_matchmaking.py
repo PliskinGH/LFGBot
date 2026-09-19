@@ -1407,8 +1407,8 @@ class TestGameCommandModal:
         guests = [f.name for f in embed.fields if f.name.startswith("Guests")]
         # Modal max_players=4 -> 3 guests.
         assert guests == ["Guests (0/3)"]
-        # The modal title lands in the embed title suffix.
-        assert embed.title == "Looking for a Game A game: Raid night"
+        # The modal title lands on the embed title's second line.
+        assert embed.title == "Looking for a Game A game:\nRaid night"
 
     def test_game_modal_confirm_uses_default_max_guests(self, matchmaking):
         host = FakeMember(100, "Host")
@@ -3004,11 +3004,11 @@ class TestLfgTitle:
         assert mm_utils.embed_title("Game A") == "Looking for a Game A game"
         assert mm_utils.embed_title("Apple") == "Looking for an Apple game"
 
-    def test_embed_title_appends_the_title_suffix(self):
+    def test_embed_title_puts_the_title_on_its_own_line(self):
         from cogs.matchmaking import utils as mm_utils
 
         assert mm_utils.embed_title("Game A", "Raid night") == (
-            "Looking for a Game A game: Raid night")
+            "Looking for a Game A game:\nRaid night")
 
     def test_embed_title_suffix_is_skipped_for_game_colon_names(self):
         # "Quiz game: Night" would parse back as "Quiz": the suffix must not
@@ -3036,13 +3036,20 @@ class TestLfgTitle:
     def test_game_recovery_round_trips_through_the_title_suffix(self):
         from cogs.matchmaking import constants as mm_constants
 
-        title = "Looking for a Board game game: Friday night"
-        game_name = mm_constants.LFG_TITLE_RE.search(title).group(1)
-        assert game_name == "Board game"
+        # The LFG title sits on its own line (and a client that drops the
+        # break leaves "game:<title>" behind): both must resolve.
+        for title in ("Looking for a Board game game:\nFriday night",
+                      "Looking for a Board game game: Friday night",
+                      "Looking for a Board game game:Friday night"):
+            game_name = mm_constants.LFG_TITLE_RE.search(title).group(1)
+            assert game_name == "Board game"
 
     def test_lfg_title_from_embed(self):
         from cogs.matchmaking import utils as mm_utils
 
+        assert mm_utils.lfg_title_from_embed(
+            self._embed("Looking for a Game A game:\nRaid night")) == "Raid night"
+        # Legacy posts separate the title with a space instead of a line break.
         assert mm_utils.lfg_title_from_embed(
             self._embed("Looking for a Game A game: Raid night")) == "Raid night"
         # Legacy posts carry no suffix.
@@ -3052,7 +3059,7 @@ class TestLfgTitle:
     def test_thread_title_prefers_the_lfg_title_over_the_description(self):
         from cogs.matchmaking import utils as mm_utils
 
-        embed = self._embed("Looking for a Game A game: Raid night",
+        embed = self._embed("Looking for a Game A game:\nRaid night",
                             description="Game A night")
         assert mm_utils.thread_title_from_embed(embed) == "Raid night"
 
@@ -3088,7 +3095,7 @@ class TestLfgTitle:
             interaction, "game_a", "Raid night", "the description", None)
 
         embed = interaction.channel.sent[0][1]
-        assert embed.title == "Looking for a Game A game: Raid night"
+        assert embed.title == "Looking for a Game A game:\nRaid night"
         assert embed.description == "the description"
 
     @pytest.mark.asyncio
@@ -3104,7 +3111,7 @@ class TestLfgTitle:
         assert interaction.response.modals == []
         assert interaction.response.deferred is True
         embed = interaction.channel.sent[0][1]
-        assert embed.title == "Looking for a Game A game: Raid night"
+        assert embed.title == "Looking for a Game A game:\nRaid night"
 
     @pytest.mark.asyncio
     async def test_lfg_title_without_game_is_rejected(self, matchmaking):
@@ -3127,7 +3134,7 @@ class TestLfgTitle:
             interaction, "game_a", {"title": "Raid night"})
 
         embed = interaction.channel.sent[0][1]
-        assert embed.title == "Looking for a Game A game: Raid night"
+        assert embed.title == "Looking for a Game A game:\nRaid night"
 
     @pytest.mark.asyncio
     async def test_started_post_uses_the_title_for_the_thread(
