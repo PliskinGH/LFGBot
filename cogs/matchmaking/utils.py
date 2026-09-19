@@ -3,6 +3,7 @@ value/display handling, and LFG embed/thread helpers.
 """
 
 import configparser
+import random
 
 import discord
 
@@ -122,22 +123,40 @@ def _split_param_entries(raw_value: str) -> list[str]:
     return entries
 
 
+def is_random_value(token: str) -> bool:
+    """Whether ``token`` is the roll sentinel (case-insensitive)."""
+    return str(token).strip().lower() == constants.RANDOM_VALUE
+
+
+def random_token_available(value_display: dict[str, str]) -> bool:
+    """Whether a parameter accepts the roll sentinel (false when a value or
+    display name already uses it)."""
+    for value, display in value_display.items():
+        if (is_random_value(value) or is_random_value(display)):
+            return False
+    return True
+
+
 def normalize_param_values(values: list[str], value_display: dict[str, str]) -> list[str]:
     """Resolve parameter display names back to their raw values.
 
     ``values`` may mix raw values and display names (e.g. when a Discord
     client commits an autocomplete choice by writing its name). Raw values
     and unknown tokens are left unchanged so callers can validate them.
+    The roll sentinel is kept as its canonical RANDOM_VALUE.
     """
     display_to_value = {
         display.lower(): value for value, display in value_display.items()
     }
+    normalize_random = random_token_available(value_display)
     normalized = []
     for value in values:
         if (value in value_display):
             normalized.append(value)
         elif (value.lower() in display_to_value):
             normalized.append(display_to_value[value.lower()])
+        elif (normalize_random and is_random_value(value)):
+            normalized.append(constants.RANDOM_VALUE)
         else:
             normalized.append(value)
     return normalized
@@ -146,20 +165,59 @@ def normalize_param_values(values: list[str], value_display: dict[str, str]) -> 
 def render_param_values(values: list[str], value_display: dict[str, str]) -> list[str]:
     """Map parameter raw values to their display names for user-facing rendering.
 
-    Tokens that are already display names (or unknown) are kept as-is.
+    Tokens that are already display names (or unknown) are kept as-is; the
+    roll sentinel renders as RANDOM_DISPLAY.
     """
     display_to_value = {
         display.lower(): value for value, display in value_display.items()
     }
+    render_random = random_token_available(value_display)
     rendered = []
     for value in values:
         if (value in value_display):
             rendered.append(value_display[value])
         elif (value.lower() in display_to_value):
             rendered.append(value)
+        elif (render_random and is_random_value(value)):
+            rendered.append(constants.RANDOM_DISPLAY)
         else:
             rendered.append(value)
     return rendered
+
+
+def pending_roll(values: list[str], value_display: dict[str, str]) -> bool:
+    """Whether a parameter's values hold a roll it actually accepts."""
+    return (random_token_available(value_display)
+            and any(is_random_value(value) for value in values))
+
+
+def roll_param_values(values: list[str], value_display: dict[str, str],
+                      rng=None) -> list[str]:
+    """Replace each roll sentinel with a distinct value of the parameter.
+
+    A parameter already using the token as a value or display name is never
+    rolled: its values are normalized instead. Explicit values are kept,
+    sentinels draw the remaining ones (never twice, dropped when exhausted);
+    ``rng`` defaults to the ``random`` module.
+    """
+    if (not random_token_available(value_display)):
+        return normalize_param_values(values, value_display)
+    rng = rng or random
+    explicit = [value for value in values if not is_random_value(value)]
+    pool = [value for value in value_display if value not in explicit]
+    nb_random = len(values) - len(explicit)
+    drawn = rng.sample(pool, min(nb_random, len(pool)))
+    rolled = []
+    drawn_index = 0
+    for value in values:
+        if (is_random_value(value)):
+            if (drawn_index >= len(drawn)):
+                continue
+            rolled.append(drawn[drawn_index])
+            drawn_index += 1
+        else:
+            rolled.append(value)
+    return rolled
 
 
 def format_accepted_values(value_display: dict[str, str]) -> str:

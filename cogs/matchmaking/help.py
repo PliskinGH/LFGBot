@@ -6,6 +6,7 @@ from common import constants as common_constants, utils
 
 from . import constants
 from .models import GuildGamesConfig
+from .utils import random_token_available
 
 
 class LFGHelpMixin:
@@ -110,11 +111,20 @@ class LFGHelpMixin:
                      else f"{param_name} ({display_name})")
             parameter_lines.append(
                 f"- `{label}`: {', '.join(parameter['values'].values())}")
+        random_note = ""
+        if any(random_token_available(parameter.get("values", {}))
+               for parameter in accepted_params.values()):
+            random_note = (
+                f"\nAny of them also accepts `{constants.RANDOM_DISPLAY}`, "
+                "rolled when the game is created: each game rolls its own "
+                f"values, and `{constants.RANDOM_DISPLAY},"
+                f"{constants.RANDOM_DISPLAY}` draws several different ones.")
         return (
             f"`/{game_command}` also accepts these arguments "
             "(comma-separate for several values). They are only available "
             "as command arguments, not in the guided menus:\n"
             + "\n".join(parameter_lines)
+            + random_note
         )
 
     async def send_help(self, interaction: discord.Interaction, topic: str):

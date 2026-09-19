@@ -164,6 +164,14 @@ class LFGGuildCommandsMixin:
             }
 
             choices = []
+            if (utils.random_token_available(accepted_values)
+                    and (not last_token
+                         or last_token in constants.RANDOM_VALUE)):
+                # Offered first and never de-duplicated: a parameter may roll
+                # several values.
+                composed = prefix + constants.RANDOM_DISPLAY
+                if (len(composed) <= 100):  # Choice string values cap at 100 chars.
+                    choices.append(app_commands.Choice(name=composed, value=composed))
             for value, display in accepted_values.items():
                 if (last_token
                         and last_token not in value.lower()
@@ -189,6 +197,8 @@ class LFGGuildCommandsMixin:
         Accepts raw values and display names (a client may commit an
         autocomplete choice by writing its name); returns the normalized raw
         values, or (None, invalid_tokens) when something is not acceptable.
+        The roll sentinel is accepted (unless a value or display name already
+        uses it), kept as constants.RANDOM_VALUE, and may be repeated.
         """
         if (raw_value is None):
             return None, None
@@ -196,6 +206,7 @@ class LFGGuildCommandsMixin:
             display.lower(): value
             for value, display in accepted_values.items()
         }
+        accept_random = utils.random_token_available(accepted_values)
         provided = []
         invalid = []
         for token in (part.strip() for part in raw_value.split(",") if part.strip()):
@@ -203,6 +214,8 @@ class LFGGuildCommandsMixin:
                 provided.append(token)
             elif (token.lower() in display_to_value):
                 provided.append(display_to_value[token.lower()])
+            elif (accept_random and utils.is_random_value(token)):
+                provided.append(constants.RANDOM_VALUE)
             else:
                 invalid.append(token)
         if (invalid):
@@ -234,9 +247,13 @@ class LFGGuildCommandsMixin:
                 continue
             values, invalid = self._parse_param_values(raw_value, accepted_values)
             if (invalid is not None):
+                valid_values = utils.format_accepted_values(accepted_values)
+                if (utils.random_token_available(accepted_values)):
+                    valid_values += (f", {constants.RANDOM_DISPLAY}"
+                                     " (rolled when the game starts)")
                 await interaction.response.send_message(
                     f"Invalid value(s) for `{param_name}`: {', '.join(invalid)}.\n"
-                    f"Valid values: {utils.format_accepted_values(accepted_values)}.",
+                    f"Valid values: {valid_values}.",
                     ephemeral=True,
                 )
                 return

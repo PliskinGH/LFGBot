@@ -12,7 +12,8 @@ from common import constants
 from cogs.matchmaking.cog import Matchmaking
 from cogs.matchmaking.constants import (
     DEFAULT_GUILD_ID, DEFAULT_NB_GAMES, EMOJI_START, GAMES_COMMAND,
-    LFG_COMMAND, LFG_FIELD_GAMES, MAX_NB_GAMES, RENAME_COMMAND,
+    LFG_COMMAND, LFG_FIELD_GAMES, LFG_FIELD_GAME_SETTINGS, MAX_NB_GAMES,
+    RANDOM_DISPLAY, RANDOM_ROLL_HEADER, RANDOM_VALUE, RENAME_COMMAND,
 )
 from cogs.matchmaking.models import GameOption, LFGContext
 from cogs.matchmaking.utils import has_lfg_view
@@ -1155,9 +1156,49 @@ class TestParamAutocomplete:
         # to raw values. The already-present value is not suggested again.
         choices = await autocomplete(interaction, "beta,")
 
-        composed = {"beta,Alpha One", "beta,Gamma Three", "beta,Delta Four"}
+        composed = {"beta,Alpha One", "beta,Gamma Three", "beta,Delta Four",
+                    f"beta,{RANDOM_DISPLAY}"}
         assert {c.value for c in choices} == composed
         assert {c.name for c in choices} == composed
+
+    @pytest.mark.asyncio
+    async def test_random_roll_is_offered_first(self, matchmaking):
+        autocomplete = matchmaking._make_param_autocomplete(
+            DEFAULT_GUILD_ID, "game_a", "param1")
+        interaction = FakeInteraction(user=FakeMember(1, "host"), guild_id=1)
+
+        # The roll is offered first and is never de-duplicated.
+        choices = await autocomplete(interaction, "")
+
+        assert choices[0].value == RANDOM_DISPLAY
+
+    @pytest.mark.asyncio
+    async def test_random_roll_is_still_offered_after_a_roll(
+            self, matchmaking):
+        autocomplete = matchmaking._make_param_autocomplete(
+            DEFAULT_GUILD_ID, "game_a", "param1")
+        interaction = FakeInteraction(user=FakeMember(1, "host"), guild_id=1)
+
+        # Unlike the concrete values, the roll is never de-duplicated.
+        choices = await autocomplete(interaction, f"{RANDOM_DISPLAY},")
+
+        assert [choice.value for choice in choices][0] == \
+            f"{RANDOM_DISPLAY},{RANDOM_DISPLAY}"
+
+    @pytest.mark.asyncio
+    async def test_no_roll_for_parameter_using_random_as_a_value(
+            self, matchmaking):
+        matchmaking.game_parameters[DEFAULT_GUILD_ID]["game_a"] = {
+            "param1": {"display_name": "param1",
+                       "values": {"false": "Fixed", "true": RANDOM_DISPLAY}}}
+        autocomplete = matchmaking._make_param_autocomplete(
+            DEFAULT_GUILD_ID, "game_a", "param1")
+        interaction = FakeInteraction(user=FakeMember(1, "host"), guild_id=1)
+
+        # The parameter's own display name wins: no roll is offered for it.
+        choices = await autocomplete(interaction, "")
+
+        assert [choice.value for choice in choices] == ["Fixed", RANDOM_DISPLAY]
 
     @pytest.mark.asyncio
     async def test_prefix_with_trailing_space(self, matchmaking):
@@ -1181,12 +1222,13 @@ class TestParamAutocomplete:
 
         # Without a prefix the 99-char value still fits the 100-char cap.
         choices = await autocomplete(interaction, "")
-        assert {c.value for c in choices} == {long_value, "OK", "OK2"}
+        assert {c.value for c in choices} == {
+            long_value, "OK", "OK2", RANDOM_DISPLAY}
 
         # With a prefix, composing the 99-char value would exceed the cap, so
-        # only the short values are offered.
+        # only the short values (and the roll) are offered.
         choices = await autocomplete(interaction, "ok,")
-        assert {c.value for c in choices} == {"ok,OK2"}
+        assert {c.value for c in choices} == {"ok,OK2", f"ok,{RANDOM_DISPLAY}"}
 
 
 class TestParamParsing:
@@ -1230,6 +1272,88 @@ class TestParamParsing:
             "alpha one", self.ACCEPTED)
         assert invalid is None
         assert values == ["alpha"]
+
+
+class TestParamParsingRandom:
+    """The Random roll sentinel in parsed input."""
+
+    ACCEPTED = {
+        "alpha": "Alpha One",
+        "beta": "Beta Two",
+        "gamma": "Gamma Three",
+        "delta": "Delta Four",
+    }
+
+    def test_sentinel_is_normalized(self, matchmaking):
+        values, invalid = matchmaking._parse_param_values(
+            RANDOM_DISPLAY, self.ACCEPTED)
+        assert invalid is None
+        assert values == [RANDOM_VALUE]
+
+    def test_sentinel_is_case_insensitive(self, matchmaking):
+        values, invalid = matchmaking._parse_param_values(
+            RANDOM_DISPLAY.swapcase(), self.ACCEPTED)
+        assert invalid is None
+        assert values == [RANDOM_VALUE]
+
+    def test_sentinel_can_be_repeated(self, matchmaking):
+        values, invalid = matchmaking._parse_param_values(
+            f"{RANDOM_DISPLAY},{RANDOM_DISPLAY}", self.ACCEPTED)
+        assert invalid is None
+        assert values == [RANDOM_VALUE, RANDOM_VALUE]
+
+    def test_sentinel_mixes_with_explicit_values(self, matchmaking):
+        values, invalid = matchmaking._parse_param_values(
+            f"alpha,{RANDOM_DISPLAY}", self.ACCEPTED)
+        assert invalid is None
+        assert values == ["alpha", RANDOM_VALUE]
+
+    def test_parameter_value_takes_precedence_over_the_sentinel(
+            self, matchmaking):
+        # The parameter's own display name wins.
+        accepted = {"false": "Fixed", "true": RANDOM_DISPLAY}
+        values, invalid = matchmaking._parse_param_values(
+            RANDOM_DISPLAY, accepted)
+        assert invalid is None
+        assert values == ["true"]
+
+    def test_other_invalid_values_are_still_rejected(self, matchmaking):
+        values, invalid = matchmaking._parse_param_values(
+            f"{RANDOM_DISPLAY},epsilon", self.ACCEPTED)
+        assert values is None
+        assert invalid == ["epsilon"]
+
+
+class TestRandomRollCommandMessages:
+    """The roll is advertised when a game-parameter value is rejected."""
+
+    def test_invalid_value_message_mentions_the_roll(self, matchmaking):
+        interaction = FakeInteraction(user=FakeMember(100, "Host"), guild_id=1)
+
+        _run(matchmaking._run_game_command(
+            interaction, "game_a", {"param1": "epsilon"}))
+
+        message = interaction.response.messages[0][0]
+        assert "Invalid value(s) for `param1`: epsilon." in message
+        # The accepted values are listed, plus the roll.
+        assert "Valid values: alpha (Alpha One)" in message
+        assert message.endswith(
+            f"{RANDOM_DISPLAY} (rolled when the game starts).")
+
+    def test_invalid_value_message_omits_the_roll_when_taken(self, matchmaking):
+        # The parameter's own Random display name is listed as a value.
+        matchmaking.game_parameters[DEFAULT_GUILD_ID]["game_a"] = {
+            "param1": {"display_name": "param1",
+                       "values": {"false": "Fixed", "true": RANDOM_DISPLAY}}}
+        interaction = FakeInteraction(user=FakeMember(100, "Host"), guild_id=1)
+
+        _run(matchmaking._run_game_command(
+            interaction, "game_a", {"param1": "epsilon"}))
+
+        message = interaction.response.messages[0][0]
+        assert (f"Valid values: false (Fixed), true ({RANDOM_DISPLAY})."
+                in message)
+        assert "rolled when the game starts" not in message
 
 
 class TestGameCommandModal:
@@ -1951,6 +2075,29 @@ class TestGameParametersHelp:
         for param_name, parameter in matchmaking.game_parameters[DEFAULT_GUILD_ID]["game_a"].items():
             assert f"- `{param_name}`: {', '.join(parameter['values'].values())}" in description
 
+    def test_help_documents_the_random_roll(self, game_parameters_config):
+        matchmaking = self._matchmaking_with_games(game_parameters_config)
+        interaction = FakeInteraction(user=FakeMember(1, "host"), guild_id=1)
+
+        _run(matchmaking.send_help(interaction, "game_a"))
+
+        description = interaction.response.messages[0][1][1].description
+        assert f"also accepts `{RANDOM_DISPLAY}`" in description
+        assert "rolled when the game is created" in description
+
+    def test_help_omits_the_roll_note_when_random_is_taken(
+            self, game_parameters_config):
+        matchmaking = self._matchmaking_with_games(game_parameters_config)
+        matchmaking.game_parameters[DEFAULT_GUILD_ID]["game_a"] = {
+            "param1": {"display_name": "param1",
+                       "values": {"false": "Fixed", "true": RANDOM_DISPLAY}}}
+        interaction = FakeInteraction(user=FakeMember(1, "host"), guild_id=1)
+
+        _run(matchmaking.send_help(interaction, "game_a"))
+
+        description = interaction.response.messages[0][1][1].description
+        assert f"also accepts `{RANDOM_DISPLAY}`" not in description
+
     def test_game_without_parameters_has_no_section(self, game_parameters_config):
         matchmaking = self._matchmaking_with_games(game_parameters_config)
         interaction = FakeInteraction(user=FakeMember(1, "host"), guild_id=1)
@@ -1986,6 +2133,35 @@ class TestCreateLfgSettings:
         # Raw values in the settings dict are rendered with their display names.
         assert "param1: Alpha One, Delta Four" in settings_value
         assert "param2: First Choice" in settings_value
+
+    @pytest.mark.asyncio
+    async def test_renders_a_pending_roll_and_round_trips_it(self, matchmaking):
+        host = FakeMember(100, "Host")
+        guild = FakeGuild(id=1, members={100: host})
+        interaction = FakeInteraction(user=host, guild=guild)
+        game_option = matchmaking.default_guild_config.games["game_a"]
+
+        await matchmaking.create_lfg(
+            interaction, game_option, None, "desc", None,
+            game_settings={"param1": ["alpha", RANDOM_VALUE]},
+        )
+
+        embed = interaction.channel.sent[0][1]
+        settings_value = next(
+            field.value for field in embed.fields
+            if field.name == "Game settings")
+        # The post keeps the pending roll, as it is acted upon at creation.
+        assert settings_value == f"param1: Alpha One, {RANDOM_DISPLAY}"
+
+        # Rebuilding the context from the post (as every button press does)
+        # keeps the pending roll.
+        reopened = FakeInteraction(user=host, guild=guild,
+                                   message=FakeMessage([embed]))
+        context = await LFGContext.from_interaction(matchmaking, reopened)
+
+        assert context.game_settings == {"param1": ["alpha", RANDOM_VALUE]}
+
+
 class TestCreateLfgChannel:
     """GamesChannels: the LFG post goes to the game's configured channel.
 
@@ -2434,6 +2610,383 @@ class TestNumberOfGames:
 
         expected = [f"({index}/3) " + "x" * 94 for index in (1, 2, 3)]
         assert [thread.name for thread in created] == expected
+
+
+class TestRandomGameSettings:
+    """Game parameters set to Random: rolled once per game, at creation."""
+
+    def _game_option(self, matchmaking, match_api=None):
+        game_option = matchmaking.default_guild_config.games["game_a"]
+        game_option.match_api = match_api
+        return game_option
+
+    def _embed(self, host, nb_games=None, settings=None):
+        embed = discord.Embed(title="Looking for a Game A game",
+                              description="Game A night")
+        embed.add_field(name="Host", value=host.mention, inline=True)
+        if (nb_games is not None):
+            embed.add_field(name=LFG_FIELD_GAMES, value=str(nb_games),
+                            inline=True)
+        if (settings is not None):
+            embed.add_field(name=LFG_FIELD_GAME_SETTINGS, value=settings,
+                            inline=False)
+        return embed
+
+    def _lfg_message(self, host, **kwargs):
+        return FakeMessage([self._embed(host, **kwargs)])
+
+    def _thread_factory(self, created):
+        def factory(**kwargs):
+            thread = FakeThread(name=kwargs.get("name"),
+                                id=5000 + len(created))
+            created.append(thread)
+            return thread
+        return factory
+
+    def _games_field(self, embed):
+        return next((field for field in embed.fields
+                     if field.name == LFG_FIELD_GAME_SETTINGS), None)
+
+    def test_rolls_distinct_values_for_each_sentinel(self, matchmaking):
+        rolled, lines = matchmaking._roll_game_settings(
+            DEFAULT_GUILD_ID, "game_a",
+            {"param1": [RANDOM_VALUE, RANDOM_VALUE]})
+
+        assert len(rolled["param1"]) == 2
+        assert len(set(rolled["param1"])) == 2
+        assert set(rolled["param1"]) <= {"alpha", "beta", "gamma", "delta"}
+        # The announcement shows display names, not raw values.
+        (line,) = lines
+        assert line.startswith("param1: ")
+        displays = {"alpha": "Alpha One", "beta": "Beta Two",
+                    "gamma": "Gamma Three", "delta": "Delta Four"}
+        assert line.split(": ", 1)[1].split(", ") == [
+            displays[value] for value in rolled["param1"]]
+
+    def test_explicit_values_are_kept_and_never_drawn(self, matchmaking):
+        rolled, _ = matchmaking._roll_game_settings(
+            DEFAULT_GUILD_ID, "game_a",
+            {"param1": ["alpha", RANDOM_VALUE], "param2": ["first"]})
+
+        assert rolled["param1"][0] == "alpha"
+        # Only the remaining values can be drawn for the roll.
+        assert rolled["param1"][1] in {"beta", "gamma", "delta"}
+        # Settings without a roll are passed through untouched.
+        assert rolled["param2"] == ["first"]
+
+    def test_several_rolls_of_a_parameter_are_independent(self, matchmaking):
+        rolls = [
+            matchmaking._roll_game_settings(
+                DEFAULT_GUILD_ID, "game_a",
+                {"param1": [RANDOM_VALUE]})[0]["param1"][0]
+            for _ in range(50)
+        ]
+
+        # Each game rolls on its own (a cached roll would repeat).
+        assert len(set(rolls)) > 1
+
+    def test_exhausted_pool_drops_the_roll(self, matchmaking):
+        rolled, lines = matchmaking._roll_game_settings(
+            DEFAULT_GUILD_ID, "game_a",
+            {"param2": [RANDOM_VALUE, RANDOM_VALUE],
+             "param1": [RANDOM_VALUE]})
+
+        # param2 holds only two values: the second roll is dropped, not duplicated.
+        assert len(rolled["param2"]) == 2
+        assert len(set(rolled["param2"])) == 2
+        assert len(lines) == 2
+
+    def test_unknown_parameter_with_a_roll_is_dropped(self, matchmaking):
+        rolled, lines = matchmaking._roll_game_settings(
+            DEFAULT_GUILD_ID, "game_a", {"unknown": [RANDOM_VALUE]})
+
+        # No sentinel reaches the match API; nothing is announced.
+        assert rolled == {}
+        assert lines == []
+
+    def test_shadowing_parameter_is_never_rolled(self, matchmaking):
+        # The parameter uses the token as a display name: the stored token is
+        # resolved to the value behind it instead of being rolled.
+        matchmaking.game_parameters[DEFAULT_GUILD_ID]["game_a"]["param1"] = {
+            "display_name": "param1",
+            "values": {"false": "Fixed", "true": RANDOM_DISPLAY}}
+
+        rolled, lines = matchmaking._roll_game_settings(
+            DEFAULT_GUILD_ID, "game_a", {"param1": [RANDOM_VALUE]})
+
+        assert rolled == {"param1": ["true"]}
+        assert lines == []
+
+    def test_without_settings_nothing_is_rolled(self, matchmaking):
+        assert matchmaking._roll_game_settings(
+            DEFAULT_GUILD_ID, "game_a", None) == ({}, [])
+        assert matchmaking._roll_game_settings(
+            DEFAULT_GUILD_ID, "game_a", {}) == ({}, [])
+
+    @pytest.mark.asyncio
+    async def test_start_game_announces_and_registers_each_roll(
+            self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        guild = FakeGuild(id=1, members={100: host})
+        message = self._lfg_message(
+            host, nb_games=2,
+            settings=f"param1: Alpha One, {RANDOM_DISPLAY}")
+        channel = FakeChannel()
+        created = []
+        channel.thread_factory = self._thread_factory(created)
+        interaction = FakeInteraction(
+            user=host, guild=guild, message=message, channel=channel)
+        context = await LFGContext.from_interaction(matchmaking, interaction)
+        # The pending roll survived the context rebuild from the embed.
+        assert context.game_settings == {"param1": ["alpha", RANDOM_VALUE]}
+        registered = []
+
+        async def fake_register(thread, match_api_url, match_url, auth_token,
+                                title, website_name, verified_users, **kwargs):
+            registered.append((thread, kwargs["game_settings"]))
+
+        matchmaking.register_match = fake_register
+        self._game_option(matchmaking, match_api="https://site/api/matches/")
+
+        await matchmaking.start_game_matches(interaction, context)
+
+        # One roll per game: each thread is told its own values before its
+        # registration, never a duplicate and never the prescribed one.
+        assert [thread for thread, _ in registered] == created
+        for thread, settings in registered:
+            assert settings["param1"][0] == "alpha"
+            assert settings["param1"][1] in {"beta", "gamma", "delta"}
+            announcement = [
+                content for content in thread.sent
+                if content and content.startswith(RANDOM_ROLL_HEADER)]
+            assert len(announcement) == 1
+            header, rolled = announcement[0].splitlines()
+            assert header == f"{RANDOM_ROLL_HEADER}:"
+            assert rolled.startswith("param1: ")
+        # The LFG post keeps the requested setting, not one game's roll.
+        assert self._games_field(message.edited["embed"]).value == \
+            f"param1: Alpha One, {RANDOM_DISPLAY}"
+
+    @pytest.mark.asyncio
+    async def test_start_game_announces_without_a_match_api(self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        guild = FakeGuild(id=1, members={100: host})
+        message = self._lfg_message(
+            host, settings=f"param1: {RANDOM_DISPLAY}")
+        channel = FakeChannel()
+        created = []
+        channel.thread_factory = self._thread_factory(created)
+        interaction = FakeInteraction(
+            user=host, guild=guild, message=message, channel=channel)
+        context = await LFGContext.from_interaction(matchmaking, interaction)
+        self._game_option(matchmaking)  # no match API
+
+        await matchmaking.start_game_matches(interaction, context)
+
+        # Announced even without a match to register: the players still need it.
+        (thread,) = created
+        assert any(
+            content and content.startswith(RANDOM_ROLL_HEADER)
+            for content in thread.sent)
+
+    @pytest.mark.asyncio
+    async def test_games_without_rolls_are_not_announced(self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        guild = FakeGuild(id=1, members={100: host})
+        message = self._lfg_message(host, settings="param1: Alpha One")
+        channel = FakeChannel()
+        created = []
+        channel.thread_factory = self._thread_factory(created)
+        interaction = FakeInteraction(
+            user=host, guild=guild, message=message, channel=channel)
+        context = await LFGContext.from_interaction(matchmaking, interaction)
+        self._game_option(matchmaking)
+
+        await matchmaking.start_game_matches(interaction, context)
+
+        (thread,) = created
+        assert not any(
+            content and content.startswith(RANDOM_ROLL_HEADER)
+            for content in thread.sent)
+
+    @pytest.mark.asyncio
+    async def test_registered_match_gets_the_rolled_values(
+            self, matchmaking, monkeypatch):
+        host = FakeMember(100, "Hosty")
+        guild = FakeGuild(id=1, members={100: host})
+        message = self._lfg_message(host, settings=f"param2: {RANDOM_DISPLAY}")
+        channel = FakeChannel()
+        created = []
+        channel.thread_factory = self._thread_factory(created)
+        interaction = FakeInteraction(
+            user=host, guild=guild, message=message, channel=channel)
+        context = await LFGContext.from_interaction(matchmaking, interaction)
+        self._game_option(matchmaking, match_api="https://api/match/")
+        session = FakeMatchApiSession(metadata=METADATA)
+        monkeypatch.setattr(aiohttp, "ClientSession",
+                            lambda headers=None: session)
+
+        await matchmaking.start_game_matches(interaction, context)
+
+        # param2 maps to field_two (multi-value): rolled as a list, no sentinel.
+        rolled = session.posted["field_two"]
+        assert isinstance(rolled, list) and len(rolled) == 1
+        assert rolled[0] in {"first", "second"}
+
+    @pytest.mark.asyncio
+    async def test_shadowing_parameter_neither_rolls_nor_announces(
+            self, matchmaking, monkeypatch):
+        # The parameter started using the token as a display name after the
+        # post was created: the stored token must resolve, not roll.
+        matchmaking.game_parameters[DEFAULT_GUILD_ID]["game_a"]["param1"] = {
+            "display_name": "param1",
+            "values": {"false": "Fixed", "true": RANDOM_DISPLAY}}
+        host = FakeMember(100, "Hosty")
+        guild = FakeGuild(id=1, members={100: host})
+        channel = FakeChannel()
+        created = []
+        channel.thread_factory = self._thread_factory(created)
+        message = self._lfg_message(
+            host, settings=f"param1: {RANDOM_DISPLAY}")
+        interaction = FakeInteraction(
+            user=host, guild=guild, message=message, channel=channel)
+        context = LFGContext(
+            game_option=self._game_option(
+                matchmaking, match_api="https://api/match/"),
+            host=host, game_settings={"param1": [RANDOM_VALUE]})
+        session = FakeMatchApiSession(metadata=METADATA)
+        monkeypatch.setattr(aiohttp, "ClientSession",
+                            lambda headers=None: session)
+
+        await matchmaking.start_game_matches(interaction, context)
+
+        # The shadowing value is registered, and nothing is announced.
+        assert session.posted["field_one"] == "true"
+        (thread,) = created
+        assert not any(
+            content and content.startswith(RANDOM_ROLL_HEADER)
+            for content in thread.sent)
+
+
+    @pytest.mark.asyncio
+    async def test_thread_creation_failure_names_the_game(
+            self, matchmaking, capsys):
+        host = FakeMember(100, "Hosty")
+        guild = FakeGuild(id=1, members={100: host})
+        message = self._lfg_message(
+            host, nb_games=2, settings=f"param1: {RANDOM_DISPLAY}")
+        channel = FakeChannel()
+        created = []
+
+        calls = []
+
+        def factory(**kwargs):
+            calls.append(kwargs)
+            if (len(calls) == 1):
+                raise RuntimeError("creation refused")
+            thread = FakeThread(name=kwargs.get("name"),
+                                id=5000 + len(created))
+            created.append(thread)
+            return thread
+
+        channel.thread_factory = factory
+        interaction = FakeInteraction(
+            user=host, guild=guild, message=message, channel=channel)
+        context = await LFGContext.from_interaction(matchmaking, interaction)
+        registered = []
+
+        async def fake_register(thread, *args, **kwargs):
+            registered.append((thread, kwargs["game_settings"]))
+
+        matchmaking.register_match = fake_register
+        self._game_option(matchmaking, match_api="https://site/api/matches/")
+
+        await matchmaking.start_game_matches(interaction, context)
+
+        assert "Game 1/2: thread creation failed" in capsys.readouterr().out
+        # The surviving game still rolls, is announced and registered.
+        (thread,) = created
+        assert [registered_thread for registered_thread, _ in registered] == \
+            [thread]
+        assert RANDOM_VALUE not in registered[0][1]["param1"]
+        assert any(content and content.startswith(RANDOM_ROLL_HEADER)
+                   for content in thread.sent)
+
+    @pytest.mark.asyncio
+    async def test_announcement_failure_keeps_the_registration(
+            self, matchmaking, capsys):
+        class FailingThread(FakeThread):
+            async def send(self, content=None, **kwargs):
+                raise RuntimeError("send refused")
+
+        host = FakeMember(100, "Hosty")
+        guild = FakeGuild(id=1, members={100: host})
+        message = self._lfg_message(
+            host, nb_games=2, settings=f"param1: {RANDOM_DISPLAY}")
+        channel = FakeChannel()
+        created = []
+
+        def factory(**kwargs):
+            thread = FailingThread(name=kwargs.get("name"),
+                                   id=5000 + len(created))
+            created.append(thread)
+            return thread
+
+        channel.thread_factory = factory
+        interaction = FakeInteraction(
+            user=host, guild=guild, message=message, channel=channel)
+        context = await LFGContext.from_interaction(matchmaking, interaction)
+        registered = []
+
+        async def fake_register(thread, *args, **kwargs):
+            registered.append((thread, kwargs["game_settings"]))
+
+        matchmaking.register_match = fake_register
+        self._game_option(matchmaking, match_api="https://site/api/matches/")
+
+        await matchmaking.start_game_matches(interaction, context)
+
+        # The failed announcement only loses the message: both games still
+        # register with their own rolled settings.
+        assert "roll failed" in capsys.readouterr().out
+        assert [thread for thread, _ in registered] == created
+        for _, settings in registered:
+            assert RANDOM_VALUE not in settings["param1"]
+
+    @pytest.mark.asyncio
+    async def test_roll_failure_registers_the_stored_settings(
+            self, matchmaking, capsys):
+        def boom(*args, **kwargs):
+            raise RuntimeError("roll refused")
+
+        host = FakeMember(100, "Hosty")
+        guild = FakeGuild(id=1, members={100: host})
+        message = self._lfg_message(host, settings=f"param1: {RANDOM_DISPLAY}")
+        channel = FakeChannel()
+        created = []
+        channel.thread_factory = self._thread_factory(created)
+        interaction = FakeInteraction(
+            user=host, guild=guild, message=message, channel=channel)
+        context = await LFGContext.from_interaction(matchmaking, interaction)
+        registered = []
+
+        async def fake_register(thread, *args, **kwargs):
+            registered.append((thread, kwargs["game_settings"]))
+
+        matchmaking.register_match = fake_register
+        matchmaking._roll_game_settings = boom
+        self._game_option(matchmaking, match_api="https://site/api/matches/")
+
+        await matchmaking.start_game_matches(interaction, context)
+
+        # Pre-roll behaviour: the stored settings are registered as-is, and
+        # nothing is announced.
+        assert "roll failed" in capsys.readouterr().out
+        assert [settings for _, settings in registered] == \
+            [context.game_settings]
+        (thread,) = created
+        assert not any(content and content.startswith(RANDOM_ROLL_HEADER)
+                       for content in thread.sent)
 
 
 class TestLfgTitle:

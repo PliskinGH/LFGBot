@@ -102,21 +102,65 @@ class MatchMixin:
                         website_url, registration_url, profile_url)
                 except Exception as error:
                     print(f"League player registration check failed: {error}")
-            if match_api_url:
-                for thread in created_threads:
-                    try:
-                        await self.register_match(
-                            thread, match_api_url, match_url,
-                            auth_token,
-                            getattr(thread, "name", None) or thread_title,
-                            gameName, verified_users,
-                            game_settings=context.game_settings,
-                            game_command=(context.game_option.command
-                                          if context.game_option else None),
-                            guild_id=interaction.guild_id,
-                            website_url=website_url)
-                    except Exception as error:
-                        print(f"League match registration request failed: {error}")
+            for thread in created_threads:
+                # Pre-roll behaviour when the roll cannot be produced.
+                resolved_settings = context.game_settings
+                try:
+                    # One roll per game, announced in the game's thread just
+                    # before its match registration.
+                    resolved_settings, roll_lines = self._roll_game_settings(
+                        interaction.guild_id,
+                        context.game_option.command if context.game_option else None,
+                        context.game_settings)
+                    if (roll_lines):
+                        await thread.send(content="\n".join(
+                            [constants.RANDOM_ROLL_HEADER + ":"] + roll_lines))
+                except Exception as error:
+                    print(f"Game '{getattr(thread, 'name', None) or 'thread'}':"
+                          f" roll failed: {error}")
+                if (not match_api_url):
+                    continue
+                try:
+                    await self.register_match(
+                        thread, match_api_url, match_url,
+                        auth_token,
+                        getattr(thread, "name", None) or thread_title,
+                        gameName, verified_users,
+                        game_settings=resolved_settings,
+                        game_command=(context.game_option.command
+                                      if context.game_option else None),
+                        guild_id=interaction.guild_id,
+                        website_url=website_url)
+                except Exception as error:
+                    print(f"League match registration request failed: {error}")
+
+    def _roll_game_settings(self, guild_id: int, game_command: str | None,
+                            game_settings: dict[str, list[str]] | None
+                            ) -> tuple[dict[str, list[str]], list[str]]:
+        """Resolve one game's pending rolls into concrete settings.
+
+        Returns ``(resolved_settings, announcement_lines)``. Settings whose
+        roll cannot be drawn are dropped, so no sentinel reaches the match API.
+        """
+        resolved_settings = {}
+        announcement_lines = []
+        param_mappings = self.get_game_parameters(guild_id, game_command or "")
+        for param_name, values in (game_settings or {}).items():
+            parameter = param_mappings.get(param_name, {})
+            value_display = parameter.get("values", {})
+            if (not utils.pending_roll(values, value_display)):
+                resolved_settings[param_name] = utils.normalize_param_values(
+                    values, value_display)
+                continue
+            rolled = utils.roll_param_values(values, value_display)
+            if (not rolled):
+                continue
+            resolved_settings[param_name] = rolled
+            display_name = parameter.get("display_name", param_name)
+            announcement_lines.append(
+                f"{display_name}: "
+                f"{', '.join(utils.render_param_values(rolled, value_display))}")
+        return resolved_settings, announcement_lines
 
     async def _create_game_threads(self, interaction, context,
                                    message, embed, forum, thread_title) -> list:
@@ -202,7 +246,8 @@ class MatchMixin:
                 if (thread_in_forum):
                     thread, _ = thread
             except Exception as error:
-                print(error)
+                print(f"Game {game_index + 1}/{nb_games}:"
+                      f" thread creation failed: {error}")
                 continue
             if (thread is None):
                 continue

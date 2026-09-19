@@ -104,6 +104,16 @@ LFG_FIELD_GAME_SETTINGS = "Game settings"
 # /games parameter); the pre-rename label is still parsed, never written.
 LFG_FIELD_GAME_SETTINGS_LEGACY_NAMES = ("Settings",)
 
+# Roll sentinel accepted by every game parameter: rolled at game creation 
+# and persisted as its display form.
+# A parameter already using it as a value or display name keeps its meaning.
+RANDOM_DISPLAY = "Random"
+# Parsing matches the sentinel case-insensitively, so the canonical value is
+# the display's lowercase form by construction.
+RANDOM_VALUE = RANDOM_DISPLAY.lower()
+# Announcement header for a game's rolled settings.
+RANDOM_ROLL_HEADER = f"🎲 {RANDOM_DISPLAY} settings rolled"
+
 # Reserved keys in games_parameters.ini sections mapping the fixed match
 # payload components (title, thread link, participants) to their API field
 # names. Keys starting with API_FIELD_PREFIX are never treated as parameters.

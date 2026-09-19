@@ -37,6 +37,7 @@ An LFG post is an embed with four buttons:
 that players are registered and registers the match.
 - `nb_games` (1-10, default 1) starts several games from the same lobby:
 each game gets its own thread and its own match registration.
+- A game parameter set to `Random` is rolled when the game is created.
 - The bot is not persistent and therefore stores every information about a single LFG
 into the corresponding message embed.
 
