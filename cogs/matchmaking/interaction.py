@@ -230,6 +230,56 @@ class LFGInteractionMixin:
             interaction,
             lambda message: self._join_locked(interaction, context, message))
 
+    def _rebuild_lfg_fields(self, interaction: discord.Interaction,
+                            context: LFGContext, embed: discord.Embed) -> None:
+        """Rebuild all embed fields in the canonical order:
+        Target, Host, Games, Guests, Subscribed, Settings."""
+        # Guest list
+        guests_string = ""
+        for guest in context.guests:
+            previous_size = len(guests_string)
+            new_guest = ""
+            if (previous_size):
+                new_guest += ", "
+            new_guest += guest.display_name + " (" + guest.mention + ")"
+            if (previous_size + len(new_guest) + len(constants.GUESTS_OVER_LIMIT) <= 1024):
+                guests_string += new_guest
+            elif (previous_size):
+                guests_string += constants.GUESTS_OVER_LIMIT
+                break
+        embed.clear_fields()
+        if (context.target_role):
+            embed.add_field(name=constants.LFG_FIELD_TARGET,
+                            value=context.target_role.mention, inline=True)
+        if (context.host):
+            embed.add_field(name=constants.LFG_FIELD_HOST,
+                            value=context.host.mention, inline=True)
+        if (context.nb_games > constants.DEFAULT_NB_GAMES):
+            embed.add_field(name=constants.LFG_FIELD_GAMES,
+                            value=str(context.nb_games), inline=True)
+        nb_guests = len(context.guests)
+        if (nb_guests or context.max_guests is not None):
+            embed.add_field(
+                name=utils.guests_field_name(
+                    nb_guests, context.max_guests),
+                value=guests_string, inline=False,
+            )
+        if (context.users_to_notify):
+            sub_mentions = ",".join(
+                u.mention for u in sorted(list(context.users_to_notify), key=lambda x: x.id)
+            )
+            embed.add_field(name=constants.LFG_FIELD_SUBSCRIBED,
+                            value=sub_mentions, inline=False)
+        if (context.game_settings):
+            embed.add_field(
+                name=constants.LFG_FIELD_SETTINGS,
+                value="\n".join(self._settings_lines(
+                    interaction.guild_id,
+                    context.game_option.command if context.game_option else None,
+                    context.game_settings)),
+                inline=False,
+            )
+
     async def _join_locked(self, interaction: discord.Interaction,
                            context: LFGContext, message) -> bool:
         if (context.host == interaction.user):
@@ -250,52 +300,7 @@ class LFGInteractionMixin:
 
         embed = message.embeds[0] if (message is not None and message.embeds) else None
         if (embed is not None):
-            # Guest list
-            guests_string = ""
-            for guest in context.guests:
-                previous_size = len(guests_string)
-                new_guest = ""
-                if (previous_size):
-                    new_guest += ", "
-                new_guest += guest.display_name + " (" + guest.mention + ")"
-                if (previous_size + len(new_guest) + len(constants.GUESTS_OVER_LIMIT) <= 1024):
-                    guests_string += new_guest
-                elif (previous_size):
-                    guests_string += constants.GUESTS_OVER_LIMIT
-                    break
-            # Update the embed with the new guest list
-            embed.clear_fields()
-            if (context.target_role):
-                embed.add_field(name=constants.LFG_FIELD_TARGET,
-                                value=context.target_role.mention, inline=True)
-            if (context.host):
-                embed.add_field(name=constants.LFG_FIELD_HOST,
-                                value=context.host.mention, inline=True)
-            if (context.nb_games > constants.DEFAULT_NB_GAMES):
-                embed.add_field(name=constants.LFG_FIELD_GAMES,
-                                value=str(context.nb_games), inline=True)
-            nb_guests = len(context.guests)
-            if (nb_guests or context.max_guests is not None):
-                embed.add_field(
-                    name=utils.guests_field_name(
-                        nb_guests, context.max_guests),
-                    value=guests_string, inline=False,
-                )
-            if (context.users_to_notify):
-                sub_mentions = ",".join(
-                    u.mention for u in sorted(list(context.users_to_notify), key=lambda x: x.id)
-                )
-                embed.add_field(name=constants.LFG_FIELD_SUBSCRIBED,
-                                value=sub_mentions, inline=False)
-            if (context.game_settings):
-                embed.add_field(
-                    name=constants.LFG_FIELD_SETTINGS,
-                    value="\n".join(self._settings_lines(
-                        interaction.guild_id,
-                        context.game_option.command if context.game_option else None,
-                        context.game_settings)),
-                    inline=False,
-                )
+            self._rebuild_lfg_fields(interaction, context, embed)
             try:
                 await message.edit(embed=embed)
             except Exception as error:
@@ -346,25 +351,15 @@ class LFGInteractionMixin:
                 ephemeral=True)
             return False
 
-        # Update message to persist users_to_notify in a separate field
-        embed = message.embeds[0]
-        subscribed_field_index = next(
-            (index for index, field in enumerate(embed.fields)
-             if field.name == constants.LFG_FIELD_SUBSCRIBED),
-            None,
-        )
-        if (subscribed_field_index is not None):
-            embed.remove_field(subscribed_field_index)
-        if context.users_to_notify:
-            sub_mentions = ",".join(
-                u.mention for u in sorted(list(context.users_to_notify), key=lambda x: x.id)
-            )
-            embed.add_field(name=constants.LFG_FIELD_SUBSCRIBED,
-                            value=sub_mentions, inline=False)
-        try:
-            await message.edit(embed=embed)
-        except Exception as error:
-            print(error)
+        # Update message to persist users_to_notify in a separate field.
+        # Full rebuild (same as joins) so the field order stays canonical.
+        embed = message.embeds[0] if (message.embeds) else None
+        if (embed is not None):
+            self._rebuild_lfg_fields(interaction, context, embed)
+            try:
+                await message.edit(embed=embed)
+            except Exception as error:
+                print(error)
 
         await interaction.followup.send(
             content=(f"You will be notified when someone joins the game"

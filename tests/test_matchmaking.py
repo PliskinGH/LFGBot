@@ -2670,3 +2670,68 @@ class TestConfigGameNameCaps:
         # Kept (create_lfg skips the suffix for it); only a print warning.
         game = self._load("Quiz game: Night")
         assert game.name == "Quiz game: Night"
+
+
+class TestNotifyEmbedOrder:
+    """Notify rebuilds the fields so the order stays canonical:
+    Target, Host, Games, Guests, Subscribed, Settings."""
+
+    def _embed_with_settings(self, host):
+        embed = discord.Embed(title="Looking for a Game A game")
+        embed.add_field(name="Host", value=host.mention, inline=True)
+        embed.add_field(name="Guests (0/4)", value="", inline=False)
+        embed.add_field(name="Settings", value="param1: Alpha", inline=False)
+        return embed
+
+    @pytest.mark.asyncio
+    async def test_subscribe_puts_subscribed_before_settings(
+            self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        subscriber = FakeMember(101, "Subby")
+        guild = FakeGuild(id=1, members={100: host, 101: subscriber})
+        message = FakeMessage([self._embed_with_settings(host)])
+        interaction = FakeInteraction(
+            user=subscriber, guild=guild, message=message)
+        context = LFGContext(host=host, max_guests=4, users_to_notify=set(),
+                             game_settings={"param1": ["alpha"]})
+
+        await matchmaking.process_notify(interaction, context)
+
+        names = [field.name for field in message.embeds[0].fields]
+        assert names == ["Host", "Guests (0/4)", "Subscribed", "Settings"]
+
+    @pytest.mark.asyncio
+    async def test_unsubscribe_removes_subscribed_and_keeps_settings_last(
+            self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        subscriber = FakeMember(101, "Subby")
+        guild = FakeGuild(id=1, members={100: host, 101: subscriber})
+        message = FakeMessage([self._embed_with_settings(host)])
+        interaction = FakeInteraction(
+            user=subscriber, guild=guild, message=message)
+        context = LFGContext(
+            host=host, max_guests=4, users_to_notify={subscriber},
+            game_settings={"param1": ["alpha"]})
+
+        await matchmaking.process_notify(interaction, context)
+
+        names = [field.name for field in message.embeds[0].fields]
+        assert names == ["Host", "Guests (0/4)", "Settings"]
+
+    @pytest.mark.asyncio
+    async def test_toggle_cycle_keeps_the_canonical_order(self, matchmaking):
+        host = FakeMember(100, "Hosty")
+        subscriber = FakeMember(101, "Subby")
+        guild = FakeGuild(id=1, members={100: host, 101: subscriber})
+        message = FakeMessage([self._embed_with_settings(host)])
+        context = LFGContext(host=host, max_guests=4, users_to_notify=set(),
+                             game_settings={"param1": ["alpha"]})
+
+        for expected in (["Host", "Guests (0/4)", "Subscribed", "Settings"],
+                         ["Host", "Guests (0/4)", "Settings"],
+                         ["Host", "Guests (0/4)", "Subscribed", "Settings"]):
+            interaction = FakeInteraction(
+                user=subscriber, guild=guild, message=message)
+            await matchmaking.process_notify(interaction, context)
+            names = [field.name for field in message.embeds[0].fields]
+            assert names == expected
