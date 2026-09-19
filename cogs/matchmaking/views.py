@@ -1,4 +1,4 @@
-"""UI components for the matchmaking cog: LFGView, GameSettingsModal, ThreadRenameModal."""
+"""UI components for the matchmaking cog: LFGView, LFGSettingsModal, ThreadRenameModal."""
 
 from typing import Any, Callable, Coroutine
 
@@ -67,8 +67,8 @@ class _LabelledTextInput(discord.ui.TextInput):
         return payload
 
 
-class GameSettingsModal(discord.ui.Modal):
-    """The guided modal inputs: game select (guided mode) + LFG arguments.
+class LFGSettingsModal(discord.ui.Modal):
+    """The guided modal inputs: game select (guided mode) + LFG settings.
 
     Every input is wrapped in a Label component: the modal API only accepts
     Label-wrapped components — a bare select as an action-row child is
@@ -83,11 +83,11 @@ class GameSettingsModal(discord.ui.Modal):
 
     def __init__(self,
                  games: list[tuple[str, str]] | None = None,
-                 title: str = "Game Settings",
+                 title: str = "LFG settings",
                  on_confirm: ModalCallback | None = None,):
         super().__init__(title=title, timeout=300)
         # Guided /lfg: the modal itself holds the game select, a required
-        # string select listing the guild's games, ahead of the settings.
+        # string select listing the guild's games, ahead of the LFG settings.
         # When the game is already known (game argument, per-game commands),
         # no select is added.
         self.game_select = None

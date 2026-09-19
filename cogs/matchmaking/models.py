@@ -57,22 +57,22 @@ class GameOption(object):
         self.profile_url = profile_url or ""
         self.default_max_guests = default_max_guests
 
-    def settings_summary(self) -> list[str]:
-        """The game's configured settings, as short text fragments.
+    def config_summary(self) -> list[str]:
+        """The game's configured options, as short text fragments.
 
         Shared by the /help game list and the /games list admin command;
         callers join the fragments with their own separators.
         """
-        settings = []
+        options = []
         if (self.role):
-            settings.append(f"role to ping: {self.role}")
+            options.append(f"role to ping: {self.role}")
         if (self.channel):
-            settings.append(f"LFG channel: {self.channel}")
+            options.append(f"LFG channel: {self.channel}")
         if (self.forum):
-            settings.append(f"target forum: {self.forum}")
+            options.append(f"target forum: {self.forum}")
         if (self.default_max_guests is not None):
-            settings.append(f"players: {self.default_max_guests + 1}")
-        return settings
+            options.append(f"players: {self.default_max_guests + 1}")
+        return options
 
 
 class GuildGamesConfig(object):
@@ -204,21 +204,20 @@ class LFGContext(object):
                     users_to_notify.add(member)
             break
 
-        # Recover Game Settings from the Settings field. The field shows
-        # display names (see LFGInteractionMixin._settings_lines), so normalize
-        # them back to raw values using the game's parameter configuration.
+        # Recover the game settings from the Game settings field. The field
+        # shows display names (see LFGInteractionMixin._game_settings_lines), so
+        # resolve them back to parameter names and normalize their values.
         game_command = game_option.command if game_option else None
         param_mappings = cog.get_game_parameters(interaction.guild_id, game_command)
-        # The Settings field shows the parameters' display names (see
-        # LFGInteractionMixin._settings_lines), so resolve them back to the
-        # parameter names before normalizing the values.
         display_to_param = {
             parameter.get("display_name", param_name).lower(): param_name
             for param_name, parameter in param_mappings.items()
         }
         game_settings = {}
+        accepted_labels = (constants.LFG_FIELD_GAME_SETTINGS,
+                           *constants.LFG_FIELD_GAME_SETTINGS_LEGACY_NAMES)
         for field in embed.fields:
-            if field.name != constants.LFG_FIELD_SETTINGS:
+            if field.name not in accepted_labels:
                 continue
             for line in field.value.splitlines():
                 if (": " in line):

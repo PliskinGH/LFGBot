@@ -222,7 +222,7 @@ class LFGGuildCommandsMixin:
                 title, description, max_players, nb_games,
                 *command_kwargs.values())):
             # No arguments at all: same guided modal route as /lfg.
-            await self._send_game_settings_modal(interaction, game_command)
+            await self._send_lfg_settings_modal(interaction, game_command)
             return
 
         parsed_parameters = {}

@@ -155,9 +155,9 @@ class LFGCommandsMixin:
         if (game is not None):
             if (title is None and description is None and max_players is None
                     and nb_games is None):
-                # Modal route: a game without settings, same guided modal as
-                # the per-game slash commands.
-                await self._send_game_settings_modal(interaction, game)
+                # Modal route: a game without LFG settings, same guided modal
+                # as the per-game slash commands.
+                await self._send_lfg_settings_modal(interaction, game)
                 return
 
             # Direct mode: same creation path as the per-game slash commands.
@@ -168,11 +168,11 @@ class LFGCommandsMixin:
         if (title is not None or description is not None
                 or max_players is not None or nb_games is not None):
             await interaction.response.send_message(
-                "The `game` argument is required when using direct settings.",
+                "The `game` argument is required when using direct LFG settings.",
                 ephemeral=True,
             )
             return
 
         # Guided route: no game argument, so the modal itself holds the
-        # game select next to the settings inputs.
+        # game select next to the LFG settings inputs.
         await self._send_guided_lfg_modal(interaction)

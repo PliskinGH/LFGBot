@@ -11,7 +11,7 @@ from common.utils import get_default_emoji_url, get_id_from_mention
 from . import constants
 from . import utils
 from .models import GameOption, LFGContext
-from .views import GameSettingsModal, LFGView
+from .views import LFGSettingsModal, LFGView
 
 
 class LFGInteractionMixin:
@@ -95,18 +95,18 @@ class LFGInteractionMixin:
 
     async def _send_guided_lfg_modal(self, interaction: discord.Interaction):
         # Guided /lfg: no game argument, so the modal itself holds the game
-        # select (listing the guild's games) next to the LFG arguments;
-        # process_game_settings then reads the selected game from the modal.
+        # select (listing the guild's games) next to the LFG settings;
+        # process_lfg_settings then reads the selected game from the modal.
         choices = [(game_option.name, game_option.command)
                    for game_option in self.get_guild_config(
                        interaction.guild_id).games.values()]
         await interaction.response.send_modal(
-            GameSettingsModal(on_confirm=self.process_game_settings,
-                              games=choices))
+            LFGSettingsModal(on_confirm=self.process_lfg_settings,
+                             games=choices))
 
-    async def process_game_settings(self,
-                                    interaction: discord.Interaction,
-                                    modal: discord.ui.Modal
+    async def process_lfg_settings(self,
+                                   interaction: discord.Interaction,
+                                   modal: discord.ui.Modal
     ):
         game_command = modal.game_command_value
         await self._create_lfg_from_modal(interaction, modal, game_command)
@@ -133,13 +133,13 @@ class LFGInteractionMixin:
                               max_guests,
                               nb_games=modal.nb_games_value)
 
-    async def _send_game_settings_modal(self, interaction: discord.Interaction,
-                                        game_identifier: str):
+    async def _send_lfg_settings_modal(self, interaction: discord.Interaction,
+                                       game_identifier: str):
         # Shared modal route: the game is already known (per-game slash
         # commands, or /lfg with only the game argument), so the modal opens
         # without the game select.
-        # The modal holds the LFG arguments (description, max players, nb_games);
-        # the per-game settings (games_parameters.ini) are
+        # The modal holds the LFG settings (game select, title, description,
+        # max players, nb_games); the game settings (games_parameters.ini) are
         # direct-arguments-only, since Discord caps modals at 5 components.
         game_option = self._resolve_game_option(interaction.guild_id, game_identifier)
         if (game_option is None):
@@ -153,7 +153,7 @@ class LFGInteractionMixin:
                 modal_interaction, modal, game_command)
 
         await interaction.response.send_modal(
-            GameSettingsModal(on_confirm=on_confirm))
+            LFGSettingsModal(on_confirm=on_confirm))
 
     def _lfg_lock(self, message_id: int) -> asyncio.Lock:
         """The lock serializing button actions on one LFG post.
@@ -233,7 +233,7 @@ class LFGInteractionMixin:
     def _rebuild_lfg_fields(self, interaction: discord.Interaction,
                             context: LFGContext, embed: discord.Embed) -> None:
         """Rebuild all embed fields in the canonical order:
-        Target, Host, Games, Guests, Subscribed, Settings."""
+        Target, Host, Games, Guests, Subscribed, Game settings."""
         # Guest list
         guests_string = ""
         for guest in context.guests:
@@ -272,8 +272,8 @@ class LFGInteractionMixin:
                             value=sub_mentions, inline=False)
         if (context.game_settings):
             embed.add_field(
-                name=constants.LFG_FIELD_SETTINGS,
-                value="\n".join(self._settings_lines(
+                name=constants.LFG_FIELD_GAME_SETTINGS,
+                value="\n".join(self._game_settings_lines(
                     interaction.guild_id,
                     context.game_option.command if context.game_option else None,
                     context.game_settings)),
@@ -462,9 +462,9 @@ class LFGInteractionMixin:
             return False
         return True
 
-    def _settings_lines(self, guild_id: int,
-                        game_command: str | None,
-                        game_settings: dict[str, list[str]]) -> list[str]:
+    def _game_settings_lines(self, guild_id: int,
+                             game_command: str | None,
+                             game_settings: dict[str, list[str]]) -> list[str]:
         """Render a game settings dict as display lines, mapping raw values to
         their display names from the game's parameter configuration. Unknown
         or already-displayed tokens are kept as-is."""
@@ -514,8 +514,8 @@ class LFGInteractionMixin:
                             value="", inline=False)
         
         if (game_settings):
-            embed.add_field(name=constants.LFG_FIELD_SETTINGS,
-                            value="\n".join(self._settings_lines(interaction.guild_id, game_option.command, game_settings)), inline=False)
+            embed.add_field(name=constants.LFG_FIELD_GAME_SETTINGS,
+                            value="\n".join(self._game_settings_lines(interaction.guild_id, game_option.command, game_settings)), inline=False)
         
         author_avatar = common_constants.DEFAULT_AVATAR_URL
         display_avatar = host.display_avatar

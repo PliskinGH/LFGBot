@@ -11,7 +11,7 @@ code changes.
 
 | Command | Description |
 | --- | --- |
-| `/lfg [game] [title] [description] [max_players] [nb_games]` | Post an LFG. Without `game:`, a guided modal opens (game select + settings). The optional title is used as the thread/match title. |
+| `/lfg [game] [title] [description] [max_players] [nb_games]` | Post an LFG. Without `game:`, a guided modal opens (game select + LFG settings). The optional title is used as the thread/match title. |
 | `/<game command>` (per server) | LFG shortcut for a configured game, with optional per-game parameters (e.g. `/rdl map:autumn,winter deck:standard`). |
 | `/rename [title]` | Rename a bot-created game thread (host only). |
 | `/random category:<category> [subset:<subset>] [display:<true\|false>]` | Random item from a configured set; subsets accept indices/ranges (e.g. `2,5-9`). |
@@ -181,7 +181,7 @@ Parameters manage each game's slash-command options at runtime, like the
 `games_parameters.ini` sections. The parameter `name` becomes the slash
 option, so it cannot contain spaces or upper case;
 the optional `display_name` is the friendlier label shown in
-the option description, help and Settings field, and defaults to the name.
+the option description, help and Game settings field, and defaults to the name.
 `values` accepts the same `(value, Display)` syntax as the config file.
 `api_field` (letters/digits/`_`) maps the parameter to a match API field.
 

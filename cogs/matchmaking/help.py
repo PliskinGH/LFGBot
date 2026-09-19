@@ -69,9 +69,9 @@ class LFGHelpMixin:
                     " - "
                     f"{utils.indefinite_article(game.name)} **{game.name}** game"
                 )
-            settings = game.settings_summary()
-            if (settings):
-                line += " (" + ", ".join(settings) + ")"
+            configuration = game.config_summary()
+            if (configuration):
+                line += " (" + ", ".join(configuration) + ")"
             line += "."
             game_lines.append(line)
         return "\n".join(game_lines)
@@ -97,8 +97,8 @@ class LFGHelpMixin:
 
         Returns None when the game has no configured parameters, otherwise
         the embed description listing each parameter with its display names
-        only (the raw values are internal codes). Parameters are
-        direct-arguments-only (see _send_game_settings_modal).
+        only (the raw values are internal codes). Game settings are
+        direct-arguments-only (see _send_lfg_settings_modal).
         """
         accepted_params = self.get_game_parameters(guild_id, game_command)
         if (not accepted_params):

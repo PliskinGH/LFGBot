@@ -16,7 +16,7 @@ from cogs.matchmaking.constants import (
 )
 from cogs.matchmaking.models import GameOption, LFGContext
 from cogs.matchmaking.utils import has_lfg_view
-from cogs.matchmaking.views import GameSettingsModal, ThreadRenameModal
+from cogs.matchmaking.views import LFGSettingsModal, ThreadRenameModal
 
 from tests.conftest import (
     FakeBot,
@@ -207,7 +207,7 @@ class TestMinimalDynamicGame:
         assert game.profile_url == ""
         assert game.default_max_guests is None
         assert game.command == "minimal"
-        assert game.settings_summary() == []
+        assert game.config_summary() == []
 
     @pytest.mark.asyncio
     async def test_create_lfg_does_not_crash_on_unset_fields(self, matchmaking):
@@ -770,7 +770,7 @@ class TestSettingsPersistence:
         embed.add_field(name="Target", value="<@&111>", inline=True)
         embed.add_field(name="Host", value=host.mention, inline=True)
         embed.add_field(name="Guests (0/4)", value="", inline=False)
-        embed.add_field(name="Settings", value="param1: Alpha One, Delta Four\nparam2: First Choice", inline=False)
+        embed.add_field(name="Game settings", value="param1: Alpha One, Delta Four\nparam2: First Choice", inline=False)
 
         message = FakeMessage([embed])
         interaction = FakeInteraction(
@@ -778,8 +778,8 @@ class TestSettingsPersistence:
         )
 
         # Reconstruct the context exactly as a button press would, then join.
-        # The Settings field shows display names; they normalize back to the
-        # raw values stored in the context.
+        # The Game settings field shows display names; they normalize back to
+        # the raw values stored in the context.
         context = await LFGContext.from_interaction(matchmaking, interaction)
         assert context.game_settings == {"param1": ["alpha", "delta"], "param2": ["first"]}
 
@@ -787,12 +787,44 @@ class TestSettingsPersistence:
 
         updated_embed = message.edited["embed"]
         field_names = [field.name for field in updated_embed.fields]
-        assert "Settings" in field_names
+        assert "Game settings" in field_names
         settings_field = next(
-            field for field in updated_embed.fields if field.name == "Settings"
+            field for field in updated_embed.fields if field.name == "Game settings"
         )
         assert "param1: Alpha One, Delta Four" in settings_field.value
         assert "param2: First Choice" in settings_field.value
+
+    @pytest.mark.asyncio
+    async def test_legacy_settings_field_is_migrated(self, matchmaking):
+        """A post created before the rename keeps its settings and is
+        rewritten with the new label."""
+        host = FakeMember(100, "Hosty")
+        guest = FakeMember(101, "Guesty")
+        guild = FakeGuild(id=1, members={host.id: host, guest.id: guest})
+
+        embed = discord.Embed(title="Looking for a Game A game")
+        embed.add_field(name="Host", value=host.mention, inline=True)
+        embed.add_field(name="Guests (0/4)", value="", inline=False)
+        embed.add_field(name="Settings", value="param1: Alpha One", inline=False)
+
+        message = FakeMessage([embed])
+        interaction = FakeInteraction(
+            user=guest, guild=guild, message=message, channel=FakeChannel()
+        )
+
+        context = await LFGContext.from_interaction(matchmaking, interaction)
+        assert context.game_settings == {"param1": ["alpha"]}
+
+        await matchmaking.process_join(interaction, context)
+
+        field_names = [field.name for field in message.edited["embed"].fields]
+        assert "Game settings" in field_names
+        assert "Settings" not in field_names
+        settings_field = next(
+            field for field in message.edited["embed"].fields
+            if field.name == "Game settings"
+        )
+        assert "param1: Alpha One" in settings_field.value
 
 
 class TestLfgConcurrency:
@@ -1221,7 +1253,7 @@ class TestGameCommandModal:
         _run(matchmaking._run_game_command(interaction, "game_a", {}))
 
         assert len(interaction.response.modals) == 1
-        assert isinstance(interaction.response.modals[0], GameSettingsModal)
+        assert isinstance(interaction.response.modals[0], LFGSettingsModal)
         # The modal is the response; nothing else was sent.
         assert interaction.response.messages == []
 
@@ -1272,7 +1304,7 @@ class TestGameCommandModal:
     def test_guided_lfg_selection_still_shares_modal_tail(self, matchmaking):
         interaction = FakeInteraction(user=FakeMember(100, "Host"), guild_id=1)
 
-        _run(matchmaking.process_game_settings(
+        _run(matchmaking.process_lfg_settings(
             interaction,
             self._modal_stub(max_players_value=2,
                              game_command_value="game_a")))
@@ -1804,7 +1836,7 @@ class TestLfgGameOnlyModal:
         _run(Matchmaking.lfg.callback(matchmaking, interaction, game="game_a"))
 
         assert len(interaction.response.modals) == 1
-        assert isinstance(interaction.response.modals[0], GameSettingsModal)
+        assert isinstance(interaction.response.modals[0], LFGSettingsModal)
         # The modal is the response; nothing else was sent.
         assert interaction.response.messages == []
         # The game is already known: no select, just the four inputs.
@@ -1947,9 +1979,9 @@ class TestCreateLfgSettings:
 
         embed = interaction.channel.sent[0][1]
         field_names = [field.name for field in embed.fields]
-        assert "Settings" in field_names
+        assert "Game settings" in field_names
         settings_value = [
-            field.value for field in embed.fields if field.name == "Settings"
+            field.value for field in embed.fields if field.name == "Game settings"
         ][0]
         # Raw values in the settings dict are rendered with their display names.
         assert "param1: Alpha One, Delta Four" in settings_value
@@ -2312,7 +2344,7 @@ class TestNumberOfGames:
         # The modal holds the LFG arguments (well within Discord's 5-component
         # cap); the per-game settings stay command-argument only, since their
         # number is not bounded.
-        modal = GameSettingsModal()
+        modal = LFGSettingsModal()
         labels = [child.to_component_dict()["label"]
                   for child in modal.children]
 
@@ -2322,7 +2354,7 @@ class TestNumberOfGames:
         assert len(modal.children) <= 5
 
     def test_modal_accepts_the_nb_games(self):
-        modal = GameSettingsModal()
+        modal = LFGSettingsModal()
         modal.nb_games_input._value = "3"
 
         _run(modal.on_submit(FakeInteraction(user=FakeMember(1, "Hosty"))))
@@ -2333,7 +2365,7 @@ class TestNumberOfGames:
         async def on_confirm(*args):
             raise AssertionError("an invalid modal must not confirm")
 
-        modal = GameSettingsModal(on_confirm=on_confirm)
+        modal = LFGSettingsModal(on_confirm=on_confirm)
         modal.nb_games_input._value = "99"
         interaction = FakeInteraction(user=FakeMember(1, "Hosty"))
 
@@ -2680,7 +2712,7 @@ class TestNotifyEmbedOrder:
         embed = discord.Embed(title="Looking for a Game A game")
         embed.add_field(name="Host", value=host.mention, inline=True)
         embed.add_field(name="Guests (0/4)", value="", inline=False)
-        embed.add_field(name="Settings", value="param1: Alpha", inline=False)
+        embed.add_field(name="Game settings", value="param1: Alpha", inline=False)
         return embed
 
     @pytest.mark.asyncio
@@ -2698,7 +2730,7 @@ class TestNotifyEmbedOrder:
         await matchmaking.process_notify(interaction, context)
 
         names = [field.name for field in message.embeds[0].fields]
-        assert names == ["Host", "Guests (0/4)", "Subscribed", "Settings"]
+        assert names == ["Host", "Guests (0/4)", "Subscribed", "Game settings"]
 
     @pytest.mark.asyncio
     async def test_unsubscribe_removes_subscribed_and_keeps_settings_last(
@@ -2716,7 +2748,7 @@ class TestNotifyEmbedOrder:
         await matchmaking.process_notify(interaction, context)
 
         names = [field.name for field in message.embeds[0].fields]
-        assert names == ["Host", "Guests (0/4)", "Settings"]
+        assert names == ["Host", "Guests (0/4)", "Game settings"]
 
     @pytest.mark.asyncio
     async def test_toggle_cycle_keeps_the_canonical_order(self, matchmaking):
@@ -2727,9 +2759,9 @@ class TestNotifyEmbedOrder:
         context = LFGContext(host=host, max_guests=4, users_to_notify=set(),
                              game_settings={"param1": ["alpha"]})
 
-        for expected in (["Host", "Guests (0/4)", "Subscribed", "Settings"],
-                         ["Host", "Guests (0/4)", "Settings"],
-                         ["Host", "Guests (0/4)", "Subscribed", "Settings"]):
+        for expected in (["Host", "Guests (0/4)", "Subscribed", "Game settings"],
+                         ["Host", "Guests (0/4)", "Game settings"],
+                         ["Host", "Guests (0/4)", "Subscribed", "Game settings"]):
             interaction = FakeInteraction(
                 user=subscriber, guild=guild, message=message)
             await matchmaking.process_notify(interaction, context)

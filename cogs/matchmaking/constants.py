@@ -99,7 +99,10 @@ LFG_FIELD_HOST = "Host"
 LFG_FIELD_GAMES = "Games"
 LFG_FIELD_GUESTS = "Guests"
 LFG_FIELD_SUBSCRIBED = "Subscribed"
-LFG_FIELD_SETTINGS = "Settings"
+LFG_FIELD_GAME_SETTINGS = "Game settings"
+# The config/DB layer calls these "parameters" (games_parameters.ini,
+# /games parameter); the pre-rename label is still parsed, never written.
+LFG_FIELD_GAME_SETTINGS_LEGACY_NAMES = ("Settings",)
 
 # Reserved keys in games_parameters.ini sections mapping the fixed match
 # payload components (title, thread link, participants) to their API field

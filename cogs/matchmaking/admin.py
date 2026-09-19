@@ -490,7 +490,7 @@ class LFGAdminMixin:
     @games.command(name="list", description="List the games configured for this server.")
     async def games_list(self, interaction: discord.Interaction):
         # Gated like the rest of the /games group: it exposes api_fields and
-        # other league settings that should not be visible to regular members.
+        # other league configuration that should not be visible to members.
         if (not await self._guard_admin(interaction)):
             return
         games = self.get_guild_config(interaction.guild_id).games
@@ -503,7 +503,7 @@ class LFGAdminMixin:
             details = []
             if (option.name):
                 details.append(f"**{option.name}**")
-            details.extend(option.settings_summary())
+            details.extend(option.config_summary())
             if (details):
                 lines.append(f"`{command}` — " + " · ".join(details))
             else:
@@ -516,10 +516,10 @@ class LFGAdminMixin:
         """The /games show reply: a text summary plus detail embeds.
 
         The message content carries the game identity and its LFG post
-        settings (role, forum, thread visibility...), kept within Discord's
-        2000-character message limit. The "Match submission" embed holds
-        the league endpoints and payload fields; the parameters get their
-        own embed (chunked: an embed holds at most 25 fields). Secrets
+        configuration (role, forum, thread visibility...), kept within
+        Discord's 2000-character message limit. The "Match submission" embed
+        holds the league endpoints and payload fields; the game settings get
+        their own embed (chunked: an embed holds at most 25 fields). Secrets
         (the api token) are only ever indicated, never included.
         """
         if (option.name):
@@ -609,8 +609,8 @@ class LFGAdminMixin:
                    description="Show everything configured for a game.")
     @app_commands.describe(game="The game's slash command name.")
     async def games_show(self, interaction: discord.Interaction, game: str):
-        # Like /games list, this exposes api_fields and other league settings
-        # that should not be visible to regular members.
+        # Like /games list, this exposes api_fields and other league configuration
+        # that should not be visible to members.
         if (not await self._guard_admin(interaction)):
             return
         option = self.get_guild_config(interaction.guild_id).games.get(game)
