@@ -296,6 +296,72 @@ class TestTokenMigrationBackfill:
             await database.close()
 
 
+class TestCopyGame:
+    """copy_game duplicates a game's config, parameters and api_* overrides."""
+
+    async def test_copies_config_and_parameters(
+            self, db, games_config, game_parameters_config):
+        await db_config.seed_db_from_config(games_config, game_parameters_config)
+        await db_config.ensure_guild_config(42424)
+        assert await db_config.copy_game(
+            42424, "game_a", "game_clone", name="Game A Clone") is True
+        loaded = await db_config.load_config_from_db()
+        source = loaded.guilds[42424].games["game_a"]
+        clone = loaded.guilds[42424].games["game_clone"]
+        # Every config field is copied except the command and display name.
+        assert clone.name == "Game A Clone"
+        for field in ("role", "icon", "color", "channel", "forum", "tag",
+                      "visibility", "message", "registration_api", "match_api",
+                      "match_url", "api_token", "website_url",
+                      "registration_url", "profile_url", "default_max_guests"):
+            assert getattr(clone, field) == getattr(source, field)
+        # Parameters (values and API field mappings) are copied too.
+        assert (loaded.game_parameters[42424]["game_clone"]
+                == loaded.game_parameters[42424]["game_a"])
+        assert (loaded.game_api_fields[42424]["game_clone"]
+                == loaded.game_api_fields[42424]["game_a"])
+
+    async def test_missing_source_returns_false(
+            self, db, games_config, game_parameters_config):
+        await db_config.seed_db_from_config(games_config, game_parameters_config)
+        await db_config.ensure_guild_config(42424)
+        assert await db_config.copy_game(
+            42424, "missing", "game_clone", name="Clone") is False
+
+    async def test_duplicate_command_returns_false(
+            self, db, games_config, game_parameters_config):
+        await db_config.seed_db_from_config(games_config, game_parameters_config)
+        await db_config.ensure_guild_config(42424)
+        assert await db_config.copy_game(
+            42424, "game_a", "game_b", name="Clone") is False
+
+    async def test_overrides_replace_copied_fields(
+            self, db, games_config, game_parameters_config):
+        await db_config.seed_db_from_config(games_config, game_parameters_config)
+        await db_config.ensure_guild_config(42424)
+        assert await db_config.copy_game(
+            42424, "game_a", "game_clone", name="Clone",
+            role="<@&999>") is True
+        loaded = await db_config.load_config_from_db()
+        clone = loaded.guilds[42424].games["game_clone"]
+        assert clone.role == "<@&999>"
+        # Unspecified fields keep the copied value.
+        assert clone.icon == loaded.guilds[42424].games["game_a"].icon
+
+    async def test_api_fields_applied_on_top(
+            self, db, games_config, game_parameters_config):
+        await db_config.seed_db_from_config(games_config, game_parameters_config)
+        await db_config.ensure_guild_config(42424)
+        assert await db_config.copy_game(
+            42424, "game_a", "game_clone", name="Clone",
+            api_fields={constants.API_TITLE_FIELD_KEY: "other_title"}) is True
+        loaded = await db_config.load_config_from_db()
+        fields = loaded.game_api_fields[42424]["game_clone"]
+        assert fields[constants.API_TITLE_FIELD_KEY] == "other_title"
+        # The copied overrides that were not replaced persist.
+        assert fields[constants.API_PARTICIPANTS_FIELD_KEY] == "players"
+
+
 class TestGameApiFields:
     """Reserved api_* payload field overrides via add_game/update_game."""
 

@@ -373,6 +373,110 @@ class LFGAdminMixin:
         await interaction.followup.send(
             f"Game `{command}` added.", ephemeral=True)
 
+    @games.command(
+        name="copy",
+        description="Copy a game, with its parameters, to a new command.")
+    @app_commands.describe(
+        game="The preset's slash command name to copy.",
+        command="The new slash command name (1-32 lowercase letters, digits or _).",
+        **{**_GAME_OPTION_DESCRIPTIONS,
+           "name": "New display name (must differ from the copied game's)."},
+    )
+    async def games_copy(
+        self,
+        interaction: discord.Interaction,
+        game: str,
+        command: str,
+        name: app_commands.Range[str, 1, constants.GAME_NAME_MAX],
+        role: Optional[str] = None,
+        icon: Optional[str] = None,
+        color: Optional[str] = None,
+        channel: Optional[str] = None,
+        forum: Optional[str] = None,
+        tag: Optional[str] = None,
+        visibility: Optional[str] = None,
+        message: Optional[str] = None,
+        registration_api: Optional[str] = None,
+        match_api: Optional[str] = None,
+        match_url: Optional[str] = None,
+        api_token: Optional[str] = None,
+        website_url: Optional[str] = None,
+        registration_url: Optional[str] = None,
+        profile_url: Optional[str] = None,
+        max_players: Optional[int] = None,
+        title_field: Optional[str] = None,
+        table_talk_url_field: Optional[str] = None,
+        participants_field: Optional[str] = None,
+        discord_username_field: Optional[str] = None,
+    ):
+        if (not await self._guard_admin(interaction)
+                or not await self._guard_database(interaction)):
+            return
+        if (not self.is_valid_command_name(command)):
+            await interaction.response.send_message(
+                f"`{command}` is not a valid slash command name: use 1-32 "
+                "lowercase letters, digits or underscores.",
+                ephemeral=True)
+            return
+        guild_id = interaction.guild_id
+        source_option = self.get_guild_config(guild_id).games.get(game)
+        if (source_option is None):
+            await interaction.response.send_message(
+                f"`{game}` is not configured for this server.", ephemeral=True)
+            return
+        if (command == game):
+            await interaction.response.send_message(
+                f"`command` must differ from the copied game `{game}`.",
+                ephemeral=True)
+            return
+        if (name == source_option.name):
+            await interaction.response.send_message(
+                "`name` must differ from the copied game's display name.",
+                ephemeral=True)
+            return
+        overrides, error = self._updated_fields(
+            name=name, role=role, icon=icon, color=color,
+            channel=channel, forum=forum, tag=tag, visibility=visibility,
+            message=message,
+            registration_api=registration_api, match_api=match_api,
+            match_url=match_url, api_token=api_token,
+            website_url=website_url, registration_url=registration_url,
+            profile_url=profile_url, max_players=max_players)
+        if (error is not None):
+            await interaction.response.send_message(error, ephemeral=True)
+            return
+        api_fields, error = self._api_fields_error({
+            "title_field": title_field,
+            "table_talk_url_field": table_talk_url_field,
+            "participants_field": participants_field,
+            "discord_username_field": discord_username_field,
+        })
+        if (error is not None):
+            await interaction.response.send_message(error, ephemeral=True)
+            return
+
+        # Defer to avoid the 3s timeout.
+        await interaction.response.defer(ephemeral=True)
+
+        await db_config.ensure_guild_config(guild_id)
+        copied = await db_config.copy_game(
+            guild_id, game, command, name=overrides.pop("name"),
+            api_fields=api_fields or None, **overrides)
+        if (not copied):
+            await interaction.followup.send(
+                f"`{command}` is already configured; use `/games update` "
+                "to change it.", ephemeral=True)
+            return
+        await self._refresh_config()
+        await self._sync_guild(interaction)
+        await interaction.followup.send(
+            f"Game `{command}` copied from `{game}`.", ephemeral=True)
+
+    @games_copy.autocomplete("game")
+    async def games_copy_game_autocomplete(
+        self, interaction: discord.Interaction, current: str):
+        return await self._games_autocomplete(interaction, current)
+
     @games.command(name="update", description="Update an existing game on this server.")
     @app_commands.describe(
         command="The game's slash command name.",

@@ -256,6 +256,203 @@ class TestGamesAdd:
         assert cog.bot.tree.get_commands(guild=discord.Object(id=42424))
 
 
+class TestGamesCopy:
+    @pytest.mark.asyncio
+    async def test_requires_manage_guild(self, monkeypatch):
+        cog = _cog(monkeypatch)
+        interaction = FakeInteraction(user=FakeMember(1, "Rando"), guild_id=42424)
+        calls = []
+        monkeypatch.setattr(db_config, "copy_game", lambda *a, **k: calls.append(1))
+        await Matchmaking.games_copy.callback(
+            cog, interaction, game="game_a", command="game_x", name="Game X")
+        assert calls == []
+        assert (interaction.response.messages[0][0]
+                == "Only server managers can change the game configuration.")
+
+    @pytest.mark.asyncio
+    async def test_config_file_mode_is_read_only(self, monkeypatch):
+        cog = _cog(monkeypatch, with_db=False)
+        interaction = FakeInteraction(user=_manager(), guild_id=42424)
+        calls = []
+        monkeypatch.setattr(db_config, "copy_game", lambda *a, **k: calls.append(1))
+        await Matchmaking.games_copy.callback(
+            cog, interaction, game="game_a", command="game_x", name="Game X")
+        assert calls == []
+        assert "config-file mode" in interaction.response.messages[0][0]
+
+    @pytest.mark.asyncio
+    async def test_copies_game(self, monkeypatch):
+        cog = _cog(monkeypatch)
+        interaction = FakeInteraction(user=_manager(), guild_id=42424)
+        written = {}
+
+        async def fake_ensure(guild_id):
+            return None
+
+        async def fake_copy(guild_id, source, command, **kwargs):
+            written["copy"] = (guild_id, source, command, kwargs)
+            return True
+
+        monkeypatch.setattr(db_config, "ensure_guild_config", fake_ensure)
+        monkeypatch.setattr(db_config, "copy_game", fake_copy)
+        await Matchmaking.games_copy.callback(
+            cog, interaction, game="game_a", command="game_x", name="Game X")
+        guild_id, source, command, kwargs = written["copy"]
+        assert (guild_id, source, command) == (42424, "game_a", "game_x")
+        assert kwargs["name"] == "Game X"
+        # The guild's commands are synced so the copied game works right away.
+        assert interaction.response.deferred is True
+        assert cog.bot.tree.sync_calls == [42424]
+        assert interaction.followup.sent[0][0] == "Game `game_x` copied from `game_a`."
+
+    @pytest.mark.asyncio
+    async def test_overrides_are_forwarded(self, monkeypatch):
+        cog = _cog(monkeypatch)
+        interaction = FakeInteraction(user=_manager(), guild_id=42424)
+        written = {}
+
+        async def fake_ensure(guild_id):
+            return None
+
+        async def fake_copy(guild_id, source, command, **kwargs):
+            written["copy"] = kwargs
+            return True
+
+        monkeypatch.setattr(db_config, "ensure_guild_config", fake_ensure)
+        monkeypatch.setattr(db_config, "copy_game", fake_copy)
+        await Matchmaking.games_copy.callback(
+            cog, interaction, game="game_a", command="game_x", name="Game X",
+            role="<@&954741722846490624>", max_players=4)
+        # Only the provided options override the copied values; the display
+        # name is always present.
+        assert written["copy"]["name"] == "Game X"
+        assert written["copy"]["role"] == "<@&954741722846490624>"
+        assert written["copy"]["default_max_guests"] == 3
+
+    @pytest.mark.asyncio
+    async def test_missing_source_game(self, monkeypatch):
+        cog = _cog(monkeypatch)
+        interaction = FakeInteraction(user=_manager(), guild_id=42424)
+        calls = []
+        monkeypatch.setattr(db_config, "copy_game", lambda *a, **k: calls.append(1))
+        await Matchmaking.games_copy.callback(
+            cog, interaction, game="nope", command="game_x", name="Game X")
+        assert calls == []
+        assert "not configured" in interaction.response.messages[0][0]
+
+
+    @pytest.mark.asyncio
+    async def test_self_copy_rejected(self, monkeypatch):
+        cog = _cog(monkeypatch)
+        interaction = FakeInteraction(user=_manager(), guild_id=42424)
+        calls = []
+        monkeypatch.setattr(db_config, "copy_game", lambda *a, **k: calls.append(1))
+        await Matchmaking.games_copy.callback(
+            cog, interaction, game="game_a", command="game_a", name="Game X")
+        assert calls == []
+        assert "must differ" in interaction.response.messages[0][0]
+
+    @pytest.mark.asyncio
+    async def test_identical_display_name_rejected(self, monkeypatch):
+        cog = _cog(monkeypatch)
+        interaction = FakeInteraction(user=_manager(), guild_id=42424)
+        calls = []
+        monkeypatch.setattr(db_config, "copy_game", lambda *a, **k: calls.append(1))
+        await Matchmaking.games_copy.callback(
+            cog, interaction, game="game_a", command="game_x", name="Game A")
+        assert calls == []
+        assert "must differ" in interaction.response.messages[0][0]
+
+    @pytest.mark.asyncio
+    async def test_rejects_invalid_command_name(self, monkeypatch):
+        cog = _cog(monkeypatch)
+        interaction = FakeInteraction(user=_manager(), guild_id=42424)
+        calls = []
+        monkeypatch.setattr(db_config, "copy_game", lambda *a, **k: calls.append(1))
+        await Matchmaking.games_copy.callback(
+            cog, interaction, game="game_a", command="Not Valid", name="Game X")
+        assert calls == []
+        assert "not a valid slash command name" in interaction.response.messages[0][0]
+
+    @pytest.mark.asyncio
+    async def test_rejects_invalid_name(self, monkeypatch):
+        cog = _cog(monkeypatch)
+        interaction = FakeInteraction(user=_manager(), guild_id=42424)
+        calls = []
+        monkeypatch.setattr(db_config, "copy_game", lambda *a, **k: calls.append(1))
+        await Matchmaking.games_copy.callback(
+            cog, interaction, game="game_a", command="game_x", name="game:x")
+        assert calls == []
+        assert "game:" in interaction.response.messages[0][0]
+
+    @pytest.mark.asyncio
+    async def test_passes_api_field_overrides(self, monkeypatch):
+        cog = _cog(monkeypatch)
+        interaction = FakeInteraction(user=_manager(), guild_id=42424)
+        written = {}
+
+        async def fake_ensure(guild_id):
+            return None
+
+        async def fake_copy(guild_id, source, command, **kwargs):
+            written["copy"] = kwargs
+            return True
+
+        monkeypatch.setattr(db_config, "ensure_guild_config", fake_ensure)
+        monkeypatch.setattr(db_config, "copy_game", fake_copy)
+        await Matchmaking.games_copy.callback(
+            cog, interaction, game="game_a", command="game_x", name="Game X",
+            title_field="match_title", participants_field="players")
+        assert written["copy"]["api_fields"] == {
+            constants.API_TITLE_FIELD_KEY: "match_title",
+            constants.API_PARTICIPANTS_FIELD_KEY: "players",
+        }
+
+    @pytest.mark.asyncio
+    async def test_duplicate_command_rejected(self, monkeypatch):
+        cog = _cog(monkeypatch)
+        interaction = FakeInteraction(user=_manager(), guild_id=42424)
+
+        async def fake_ensure(guild_id):
+            return None
+
+        async def fake_copy(*args, **kwargs):
+            return False
+
+        monkeypatch.setattr(db_config, "ensure_guild_config", fake_ensure)
+        monkeypatch.setattr(db_config, "copy_game", fake_copy)
+        await Matchmaking.games_copy.callback(
+            cog, interaction, game="game_a", command="game_x", name="Game X")
+        assert "already configured" in interaction.followup.sent[0][0]
+
+    @pytest.mark.asyncio
+    async def test_refreshes_config_after_write(self, monkeypatch):
+        cog = _cog(monkeypatch)
+        interaction = FakeInteraction(user=_manager(), guild_id=42424)
+
+        async def fake_ensure(guild_id):
+            return None
+
+        async def fake_copy(*args, **kwargs):
+            return True
+
+        monkeypatch.setattr(db_config, "ensure_guild_config", fake_ensure)
+        monkeypatch.setattr(db_config, "copy_game", fake_copy)
+        await Matchmaking.games_copy.callback(
+            cog, interaction, game="game_a", command="game_x", name="Game X")
+        assert 42424 in cog.guilds
+        assert "game_a" in cog.guilds[42424].games
+        assert cog.bot.tree.get_commands(guild=discord.Object(id=42424))
+
+    @pytest.mark.asyncio
+    async def test_game_autocomplete(self, monkeypatch):
+        cog = _cog(monkeypatch)
+        interaction = FakeInteraction(user=_manager(), guild_id=42424)
+        choices = await cog.games_copy_game_autocomplete(interaction, "game_a")
+        assert [(choice.name, choice.value) for choice in choices] == [
+            ("game_a", "game_a")]
+
+
 class TestGamesUpdate:
     @pytest.mark.asyncio
     async def test_updates_game(self, monkeypatch):

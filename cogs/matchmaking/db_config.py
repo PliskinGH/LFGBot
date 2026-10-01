@@ -326,6 +326,48 @@ async def add_game(guild_id: int, command: str, *,
     return created
 
 
+async def copy_game(guild_id: int, source_command: str, new_command: str, *,
+                    name: str, api_fields: dict[str, str] | None = None,
+                    **overrides) -> bool:
+    """Duplicate a game (config, parameters and api_* overrides); whether it was created.
+
+    ``overrides`` replace the copied Game fields (only the provided ones);
+    ``api_fields`` is applied on top of the copied reserved api_* overrides.
+    Returns False when the source is missing or the new command exists.
+    """
+    source = await models.Game.get_or_none(
+        guild_id=guild_id, command=source_command)
+    if (source is None):
+        return False
+    if (await models.Game.get_or_none(
+            guild_id=guild_id, command=new_command) is not None):
+        return False
+    fields = _game_fields(source)
+    fields.update(overrides)
+    fields["name"] = name
+    async with in_transaction():
+        new_game = await models.Game.create(
+            guild_id=guild_id, command=new_command, **fields)
+        for parameter in await models.GameParameter.filter(
+                game_id=source.id).order_by("id"):
+            new_parameter = await models.GameParameter.create(
+                game=new_game, name=parameter.name,
+                display_name=parameter.display_name or parameter.name,
+                api_field=parameter.api_field)
+            for value in await models.ParameterValue.filter(
+                    parameter_id=parameter.id).order_by("id"):
+                await models.ParameterValue.create(
+                    parameter=new_parameter,
+                    value=value.value, display_name=value.display_name)
+        for override in await models.GameApiFieldOverride.filter(
+                game_id=source.id):
+            await models.GameApiFieldOverride.create(
+                game=new_game, key=override.key, field_name=override.field_name)
+        if (api_fields):
+            await _write_api_field_overrides(new_game, api_fields)
+    return True
+
+
 async def update_game(guild_id: int, command: str, *,
                       api_fields: dict[str, str | None] | None = None,
                       **fields) -> bool:
@@ -343,7 +385,6 @@ async def update_game(guild_id: int, command: str, *,
         await game.save(update_fields=list(fields.keys()))
     if (api_fields):
         await _write_api_field_overrides(game, api_fields)
-    return True
     return True
 
 

@@ -16,7 +16,7 @@ code changes.
 | `/rename [title]` | Rename a bot-created game thread (host only). |
 | `/random category:<category> [subset:<subset>] [display:<true\|false>]` | Random item from a configured set; subsets accept indices/ranges (e.g. `2,5-9`). |
 | `/help [topic]` | Help for a command. |
-| `/games add \| update \| remove \| list` | Server managers: edit the server's games dynamically (database mode only). |
+| `/games add \| update \| copy \| remove \| list \| show` | Server managers: edit the server's games dynamically (database mode only). |
 | `/rollsets add \| update \| remove \| show \| list \| description` | Server managers: edit the server's roll sets dynamically (database mode only). |
 
 ### LFG posts
@@ -162,6 +162,7 @@ commands write to the database and take effect immediately.
 | --- | --- |
 | `/games add <command> [options...]` | Add a game (`command` must be 1–32 lowercase letters/digits/`_`). |
 | `/games update <command> [options...]` | Change an existing game's options (only the provided ones). |
+| `/games copy <game> <command> <name> [options...]` | Duplicate an existing game (config and parameters) under a new command name and display name. |
 | `/games remove <command>` | Remove a game. |
 | `/games list` | Show the server's configured games. |
 | `/games show <game>` | Show the detailed configuration for a game. |
@@ -177,6 +178,12 @@ URLs).
 The reserved match-payload field names can also be overridden per game with
 `title_field`, `table_talk_url_field`, `participants_field` and
 `discord_username_field` (`-` resets them to the default).
+
+`/games copy` duplicates an existing game's config and its parameters (values,
+display names and API field mappings), so the new command accepts the same
+arguments as the preset. The new `command` must not already exist and `name`
+must differ from the copied game's display name; any other option overrides the
+copied value. The copied `api_token` is carried over (`api_token:-` clears it).
 
 Parameters manage each game's slash-command options at runtime, like the
 `games_parameters.ini` sections. The parameter `name` becomes the slash
