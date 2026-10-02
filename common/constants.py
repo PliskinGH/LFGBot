@@ -20,6 +20,8 @@ AUTOCOMPLETE_LIMIT = 25
 # description at 4096, so anything longer must be truncated to stay valid.
 MESSAGE_CONTENT_LIMIT = 2000
 EMBED_DESCRIPTION_LIMIT = 4096
+# Discord caps a slash command description at 100 characters.
+COMMAND_DESCRIPTION_LIMIT = 100
 
 # Compiled once at import time and reused everywhere: naming the pattern
 # is self-documenting and avoids re-parsing it on each invocation.

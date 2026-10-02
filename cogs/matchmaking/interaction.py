@@ -97,9 +97,13 @@ class LFGInteractionMixin:
         # Guided /lfg: no game argument, so the modal itself holds the game
         # select (listing the guild's games) next to the LFG settings;
         # process_lfg_settings then reads the selected game from the modal.
-        choices = [(game_option.name, game_option.command)
-                   for game_option in self.get_guild_config(
-                       interaction.guild_id).games.values()]
+        # Sorted by display name: the stored order is the insertion order
+        # (config file or database), which is arbitrary.
+        choices = sorted(
+            [(game_option.name, game_option.command)
+             for game_option in self.get_guild_config(
+                 interaction.guild_id).games.values()],
+            key=lambda choice: (choice[0] or choice[1]).lower())
         await interaction.response.send_modal(
             LFGSettingsModal(on_confirm=self.process_lfg_settings,
                              games=choices))

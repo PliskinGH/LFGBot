@@ -120,9 +120,12 @@ class LFGCommandsMixin:
     ) -> list[app_commands.Choice[str]]:
         guild_config = self.get_guild_config(interaction.guild_id)
 
+        # Sorted by display name: the stored order is the insertion order.
         return [
             app_commands.Choice(name=game.name, value=game.command)
-            for game in guild_config.games.values()
+            for game in sorted(
+                guild_config.games.values(),
+                key=lambda game: (game.name or game.command).lower())
             if current.lower() in game.command.lower()
         ][:common_constants.AUTOCOMPLETE_LIMIT]
 

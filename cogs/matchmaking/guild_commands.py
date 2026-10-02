@@ -60,10 +60,26 @@ class LFGGuildCommandsMixin:
         # command find this command's owning cog without hardcoding cog names.
         return app_commands.Command(
             name=game_command,
-            description=constants.LFG_DESCRIPTION,
+            description=self._game_command_description(guild_id, game_command),
             callback=self._make_game_callback(game_command, guild_id),
             extras={"help_cog": self},
         )
+
+    def _game_command_description(self, guild_id: int,
+                                  game_command: str) -> str:
+        """The command's description, naming the game when it has a display name.
+
+        Without a display name every per-game command would show the same
+        generic text; with one it is what tells them apart in Discord's
+        command picker. The wording is the LFG embed title's, so both read
+        the same way.
+        """
+        option = self.get_guild_config(guild_id).games.get(game_command)
+        game_name = option.name if (option is not None) else ""
+        if (not game_name):
+            return constants.LFG_DESCRIPTION
+        return utils.embed_title(game_name)[
+            :common_constants.COMMAND_DESCRIPTION_LIMIT]
 
     def _make_game_callback(self, game_command: str, guild_id: int):
         # Parameters are per guild: the same game command may be configured

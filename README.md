@@ -161,7 +161,7 @@ commands write to the database and take effect immediately.
 | Command | Description |
 | --- | --- |
 | `/games add <command> [options...]` | Add a game (`command` must be 1–32 lowercase letters/digits/`_`). |
-| `/games update <command> [options...]` | Change an existing game's options (only the provided ones). |
+| `/games update <command> [new_command] [options...]` | Change an existing game's options (only the provided ones). |
 | `/games copy <game> <command> <name> [options...]` | Duplicate an existing game (config and parameters) under a new command name and display name. |
 | `/games remove <command>` | Remove a game. |
 | `/games list` | Show the server's configured games. |
@@ -178,6 +178,9 @@ URLs).
 The reserved match-payload field names can also be overridden per game with
 `title_field`, `table_talk_url_field`, `participants_field` and
 `discord_username_field` (`-` resets them to the default).
+
+`/games update` allows to change a game's parameters, but can also rename a game with `new_command` if provided, but it must not already be
+taken. Renaming keeps the game's parameters, so they follow the new command name.
 
 `/games copy` duplicates an existing game's config and its parameters (values,
 display names and API field mappings), so the new command accepts the same

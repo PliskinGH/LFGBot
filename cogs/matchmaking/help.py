@@ -58,7 +58,10 @@ class LFGHelpMixin:
         than the message content (capped at 2000). The embed's title is
         "Available games", so the description is only the game lines.
         """
-        games = list(guild_config.games.values())
+        # Sorted by display name: the stored order is the insertion order
+        # (config file or database), which is arbitrary.
+        games = sorted(guild_config.games.values(),
+                       key=lambda game: (game.name or game.command).lower())
         if (not games):
             return "No games are configured for this server."
         alignment = len(max((game.command for game in games), key=len))
@@ -146,9 +149,17 @@ class LFGHelpMixin:
                 "## Subcommands\n"
                 f"- `/{constants.GAMES_COMMAND} add command:<command> [options...]`: "
                 "add a game.\n"
-                f"- `/{constants.GAMES_COMMAND} update command:<command> [options...]`: "
-                "change an existing game (only the provided options).\n"
+                f"- `/{constants.GAMES_COMMAND} update command:<command> "
+                "[new_command] [options...]`: "
+                "change an existing game (only the provided options); "
+                "`new_command` renames its slash command.\n"
+                f"- `/{constants.GAMES_COMMAND} copy game:<game> command:<command> "
+                "name:<name> [options...]`: "
+                "duplicate a game, with its parameters, under a new command name "
+                "and display name.\n"
                 f"- `/{constants.GAMES_COMMAND} remove command:<command>`: remove a game.\n"
+                f"- `/{constants.GAMES_COMMAND} show game:<game>`: show a game's "
+                "detailed configuration.\n"
                 f"- `/{constants.GAMES_COMMAND} list`: show the games configured "
                 "for this server.\n"
                 "## Options\n"
@@ -161,6 +172,9 @@ class LFGHelpMixin:
                 "or underscores.\n"
                 "### name\n"
                 "The game's display name.\n"
+                "### new_command\n"
+                "New slash command name, renaming the game; its parameters are "
+                "kept.\n"
                 "### role\n"
                 "The role mention to ping on each LFG for the game.\n"
                 "### channel\n"
@@ -176,9 +190,12 @@ class LFGHelpMixin:
             # Server-specific per-game command: an alias for /lfg game:<topic>,
             # so its help is the /lfg usage preceded by an alias note; the
             # server's games and the game's parameters go in embeds.
+            game_name = guild_config.games[topic].name
+            name_note = f", the **{game_name}** game" if (game_name) else ""
             content = (
                 f"# Help: /{topic}\n\n"
-                f"`/{topic}` is a shortcut for `/{constants.LFG_COMMAND} game:{topic}` — "
+                f"`/{topic}` is a shortcut for `/{constants.LFG_COMMAND} game:{topic}`"
+                f"{name_note}; "
                 f"the help for `/{constants.LFG_COMMAND}` below applies to it as well.\n\n"
                 + self._lfg_help_intro()
             )

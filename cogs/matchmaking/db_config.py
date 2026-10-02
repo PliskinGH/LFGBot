@@ -369,16 +369,25 @@ async def copy_game(guild_id: int, source_command: str, new_command: str, *,
 
 
 async def update_game(guild_id: int, command: str, *,
+                      new_command: str | None = None,
                       api_fields: dict[str, str | None] | None = None,
                       **fields) -> bool:
     """Update an existing game row (+ reserved api_* overrides); whether it existed.
 
+    ``new_command`` renames the game's slash command; it fails (False) when
+    the target command is already taken. The parameters and the api_* overrides
+    belong to the game row, so they follow the rename.
     ``api_fields`` maps canonical api_* keys to the new field name; a None
     value removes the override so the default applies again.
     """
     game = await models.Game.get_or_none(guild_id=guild_id, command=command)
     if (game is None):
         return False
+    if (new_command is not None and new_command != command):
+        if (await models.Game.get_or_none(
+                guild_id=guild_id, command=new_command) is not None):
+            return False
+        fields["command"] = new_command
     if (fields):
         for key, value in fields.items():
             setattr(game, key, value)

@@ -436,6 +436,42 @@ class TestAdminPersistence:
         assert loaded.guilds[42424].games["game_a"].name == "Renamed"
         assert await db_config.update_game(42424, "missing", name="X") is False
 
+    async def test_update_game_renames_the_command(self, db, games_config,
+                                                   game_parameters_config):
+        await db_config.seed_db_from_config(games_config, game_parameters_config)
+        await db_config.ensure_guild_config(42424)
+        before = await db_config.load_config_from_db()
+        parameters = before.game_parameters[42424]["game_a"]
+        api_fields = before.game_api_fields[42424]["game_a"]
+        assert await db_config.update_game(
+            42424, "game_a", new_command="game_renamed") is True
+        loaded = await db_config.load_config_from_db()
+        assert "game_renamed" in loaded.guilds[42424].games
+        assert "game_a" not in loaded.guilds[42424].games
+        # The parameters and their API fields follow the rename.
+        assert loaded.game_parameters[42424]["game_renamed"] == parameters
+        assert loaded.game_api_fields[42424]["game_renamed"] == api_fields
+
+    async def test_update_game_rename_rejects_a_taken_command(self, db,
+                                                              games_config,
+                                                              game_parameters_config):
+        await db_config.seed_db_from_config(games_config, game_parameters_config)
+        await db_config.ensure_guild_config(42424)
+        # game_b already exists for this guild: the rename must not happen.
+        assert await db_config.update_game(
+            42424, "game_a", new_command="game_b") is False
+        loaded = await db_config.load_config_from_db()
+        assert "game_a" in loaded.guilds[42424].games
+        assert loaded.guilds[42424].games["game_b"].name == "Game B"
+
+    async def test_update_game_rename_of_a_missing_game_returns_false(self, db,
+                                                                      games_config,
+                                                                      game_parameters_config):
+        await db_config.seed_db_from_config(games_config, game_parameters_config)
+        await db_config.ensure_guild_config(42424)
+        assert await db_config.update_game(
+            42424, "missing", new_command="game_renamed") is False
+
     async def test_delete_game_removes_row(self, db, games_config,
                                            game_parameters_config):
         await db_config.seed_db_from_config(games_config, game_parameters_config)

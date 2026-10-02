@@ -480,12 +480,14 @@ class LFGAdminMixin:
     @games.command(name="update", description="Update an existing game on this server.")
     @app_commands.describe(
         command="The game's slash command name.",
+        new_command="New slash command name, renaming the game (its parameters are kept).",
         **_GAME_OPTION_DESCRIPTIONS,
     )
     async def games_update(
         self,
         interaction: discord.Interaction,
         command: str,
+        new_command: Optional[str] = None,
         name: Optional[app_commands.Range[str, 1, constants.GAME_NAME_MAX]] = None,
         role: Optional[str] = None,
         icon: Optional[str] = None,
@@ -511,6 +513,11 @@ class LFGAdminMixin:
         if (not await self._guard_admin(interaction)
                 or not await self._guard_database(interaction)):
             return
+        if (new_command is not None):
+            error = self._rename_error(interaction, command, new_command)
+            if (error is not None):
+                await interaction.response.send_message(error, ephemeral=True)
+                return
         fields, error = self._updated_fields(
             name=name, role=role, icon=icon, color=color,
             channel=channel, forum=forum, tag=tag, visibility=visibility,
@@ -531,7 +538,7 @@ class LFGAdminMixin:
         if (error is not None):
             await interaction.response.send_message(error, ephemeral=True)
             return
-        if (not fields and not api_fields):
+        if (not fields and not api_fields and new_command is None):
             await interaction.response.send_message(
                 "Nothing to update: provide at least one option.", ephemeral=True)
             return
@@ -543,14 +550,34 @@ class LFGAdminMixin:
         update_kwargs = dict(fields)
         if (api_fields):
             update_kwargs["api_fields"] = api_fields
+        if (new_command is not None):
+            update_kwargs["new_command"] = new_command
         if (not await db_config.update_game(guild_id, command, **update_kwargs)):
             await interaction.followup.send(
                 f"`{command}` is not configured for this server.", ephemeral=True)
             return
         await self._refresh_config()
         await self._sync_guild(interaction)
-        await interaction.followup.send(
-            f"Game `{command}` updated.", ephemeral=True)
+        if (new_command is not None):
+            await interaction.followup.send(
+                f"Game `{command}` renamed to `{new_command}`.", ephemeral=True)
+        else:
+            await interaction.followup.send(
+                f"Game `{command}` updated.", ephemeral=True)
+
+    def _rename_error(self, interaction: discord.Interaction,
+                      command: str, new_command: str) -> str | None:
+        """Reject an invalid or unusable `new_command`; an error message, or None."""
+        if (not self.is_valid_command_name(new_command)):
+            return (f"`{new_command}` is not a valid slash command name: use "
+                    "1-32 lowercase letters, digits or underscores.")
+        if (new_command == command):
+            return "`new_command` must differ from `command`."
+        if (new_command in self.get_guild_config(
+                interaction.guild_id).games):
+            return (f"`{new_command}` is already configured for this server; "
+                    "use `/games update` to change it instead.")
+        return None
 
     @games_update.autocomplete("command")
     async def games_update_command_autocomplete(
@@ -585,9 +612,10 @@ class LFGAdminMixin:
     async def _games_autocomplete(
         self, interaction: discord.Interaction, current: str):
         guild_config = self.get_guild_config(interaction.guild_id)
+        # Sorted: the stored order is the insertion order.
         return [
             app_commands.Choice(name=command, value=command)
-            for command in guild_config.games
+            for command in sorted(guild_config.games, key=str.lower)
             if current.lower() in command.lower()
         ][:common_constants.AUTOCOMPLETE_LIMIT]
 
@@ -603,7 +631,9 @@ class LFGAdminMixin:
                 "No games are configured for this server.", ephemeral=True)
             return
         lines = []
-        for command, option in games.items():
+        for command, option in sorted(
+                games.items(),
+                key=lambda item: (item[1].name or item[0]).lower()):
             details = []
             if (option.name):
                 details.append(f"**{option.name}**")

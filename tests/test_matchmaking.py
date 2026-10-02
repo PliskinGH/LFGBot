@@ -12,8 +12,9 @@ from common import constants
 from cogs.matchmaking.cog import Matchmaking
 from cogs.matchmaking.constants import (
     DEFAULT_GUILD_ID, DEFAULT_NB_GAMES, EMOJI_START, GAMES_COMMAND,
-    LFG_COMMAND, LFG_FIELD_GAMES, LFG_FIELD_GAME_SETTINGS, MAX_NB_GAMES,
-    RANDOM_DISPLAY, RANDOM_ROLL_HEADER, RANDOM_VALUE, RENAME_COMMAND,
+    LFG_COMMAND, LFG_DESCRIPTION, LFG_FIELD_GAMES, LFG_FIELD_GAME_SETTINGS,
+    MAX_NB_GAMES, RANDOM_DISPLAY, RANDOM_ROLL_HEADER, RANDOM_VALUE,
+    RENAME_COMMAND,
 )
 from cogs.matchmaking.models import GameOption, LFGContext
 from cogs.matchmaking.utils import has_lfg_view
@@ -113,6 +114,9 @@ class TestSendHelp:
         games_embed = embeds[0]
         assert games_embed.title == "Available games"
         assert "- `game_a`" in games_embed.description
+        # The embed lists games alphabetically, not in insertion order.
+        assert (games_embed.description.index("`game_a`")
+                < games_embed.description.index("`game_b`"))
         assert "<@&111>" in games_embed.description
         assert "No games are configured" not in games_embed.description
 
@@ -136,9 +140,14 @@ class TestSendHelp:
         assert interaction.response.messages[0][1] is None
         assert f"# Help: /{GAMES_COMMAND}" in content
         assert f"`/{GAMES_COMMAND} add command:<command> [options...]`" in content
-        assert f"`/{GAMES_COMMAND} update command:<command> [options...]`" in content
+        assert f"`/{GAMES_COMMAND} update command:<command> [new_command] [options...]`" in content
+        assert f"`/{GAMES_COMMAND} copy game:<game> command:<command>" in content
         assert f"`/{GAMES_COMMAND} remove command:<command>`" in content
+        assert f"`/{GAMES_COMMAND} show game:<game>`" in content
         assert f"`/{GAMES_COMMAND} list`" in content
+        # The rename option and its rules are documented.
+        assert "### new_command" in content
+        assert "renaming the game" in content
         # The option rules and guard conditions are documented.
         assert "role mention" in content
         assert "forum channel mention" in content
@@ -157,6 +166,8 @@ class TestSendHelp:
         content, embeds = interaction.response.messages[0][0], interaction.response.messages[0][1]
         assert "# Help: /game_b" in content
         assert f"`/game_b` is a shortcut for `/{LFG_COMMAND} game:game_b`" in content
+        # The alias note names the game, so a bare command is still recognizable.
+        assert "the **Game B** game" in content
         # One embed: the games list.
         assert [embed.title for embed in embeds] == ["Available games"]
 
@@ -661,6 +672,22 @@ class TestGameAutocomplete:
         choices = await matchmaking.game_autocomplete(interaction, "")
         assert [choice.value for choice in choices] == ["game_c"]
 
+    @pytest.mark.asyncio
+    async def test_choices_are_sorted_by_display_name(self):
+        config = configparser.ConfigParser()
+        config.read_string(
+            "[DEFAULT]\n"
+            "GamesCommands = zeta, alpha\n"
+            "GamesFullNames = Zeta, Alpha\n"
+            "\n"
+        )
+        cog = Matchmaking(bot=FakeBot(), config=config)
+        interaction = FakeInteraction(user=FakeMember(1, "host"), guild_id=1)
+
+        choices = await cog.game_autocomplete(interaction, "")
+
+        assert [choice.name for choice in choices] == ["Alpha", "Zeta"]
+
 
 class TestProcessJoin:
     def _context(self, host, **kwargs):
@@ -1094,6 +1121,52 @@ class TestGuildCommandRegistration:
             {"interaction", "title", "description", "max_players", "nb_games"}
             | set(matchmaking.game_parameters[DEFAULT_GUILD_ID]["game_a"])
         )
+
+    def test_command_description_names_the_game(self, matchmaking):
+        # Every per-game command would otherwise show the same generic text;
+        # the display name is what tells them apart in the command picker.
+        command = matchmaking._make_game_command("game_a", DEFAULT_GUILD_ID)
+        # Same wording as the LFG embed title.
+        assert command.description == "Looking for a Game A game"
+
+    def test_command_description_uses_the_indefinite_article(self):
+        config = configparser.ConfigParser()
+        config.read_string(
+            "[DEFAULT]\n"
+            "GamesCommands = arena, battle\n"
+            "GamesFullNames = Arena, Battle\n"
+            "\n"
+        )
+        cog = Matchmaking(bot=FakeBot(), config=config)
+        assert (cog._make_game_command("arena", DEFAULT_GUILD_ID).description
+                == "Looking for an Arena game")
+        assert (cog._make_game_command("battle", DEFAULT_GUILD_ID).description
+                == "Looking for a Battle game")
+
+    def test_command_description_without_a_display_name(self):
+        # A game with no display name keeps the generic description.
+        config = configparser.ConfigParser()
+        config.read_string(
+            "[DEFAULT]\n"
+            "GamesCommands = plain\n"
+            "\n"
+        )
+        cog = Matchmaking(bot=FakeBot(), config=config)
+        command = cog._make_game_command("plain", DEFAULT_GUILD_ID)
+        assert command.description == LFG_DESCRIPTION
+
+    def test_command_description_is_truncated(self):
+        config = configparser.ConfigParser()
+        config.read_string(
+            "[DEFAULT]\n"
+            "GamesCommands = long_name\n"
+            f"GamesFullNames = {'x' * 200}\n"
+            "\n"
+        )
+        cog = Matchmaking(bot=FakeBot(), config=config)
+        command = cog._make_game_command("long_name", DEFAULT_GUILD_ID)
+        # Discord rejects a command description over 100 characters.
+        assert len(command.description) == 100
 
     def test_skips_invalid_command_names(self):
         # "c&c" (illegal characters) and "GAME_A" (upper-case) stay usable through
@@ -2034,9 +2107,29 @@ class TestLfgGuidedModal:
         assert select.required is True
         assert select.placeholder == "Select a game option..."
         expected = [(option.name, option.command) for option
-                    in matchmaking.default_guild_config.games.values()]
+                    in sorted(matchmaking.default_guild_config.games.values(),
+                              key=lambda game: (game.name or game.command).lower())]
         assert [(option.label, option.value)
                 for option in select.options] == expected
+
+    def test_game_select_is_sorted_by_display_name(self):
+        # Stored order (the config file order) is zeta, alpha, mid: the select
+        # must list them alphabetically, since that is what the user reads.
+        config = configparser.ConfigParser()
+        config.read_string(
+            "[DEFAULT]\n"
+            "GamesCommands = zeta, alpha, mid\n"
+            "GamesFullNames = Zeta, Alpha, Mid\n"
+            "\n"
+        )
+        cog = Matchmaking(bot=FakeBot(), config=config)
+        interaction = FakeInteraction(user=FakeMember(1, "host"), guild_id=1)
+
+        _run(Matchmaking.lfg.callback(cog, interaction))
+
+        select = interaction.response.modals[0].game_select
+        assert [option.label for option in select.options] == [
+            "Alpha", "Mid", "Zeta"]
 
 
 class TestGameParametersHelp:

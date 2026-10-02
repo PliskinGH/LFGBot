@@ -6,6 +6,7 @@ import discord
 import pytest
 
 from cogs.matchmaking import constants, db_config
+from cogs.matchmaking.admin import LFGAdminMixin
 from cogs.matchmaking.cog import Matchmaking
 from cogs.matchmaking.constants import DEFAULT_GUILD_ID
 from cogs.matchmaking.models import GameOption, GuildGamesConfig
@@ -556,6 +557,217 @@ class TestGamesUpdate:
         choices = await cog.games_update_command_autocomplete(interaction, "game_a")
         assert [(choice.name, choice.value) for choice in choices] == [("game_a", "game_a")]
 
+    @pytest.mark.asyncio
+    async def test_renames_game(self, monkeypatch):
+        cog = _cog(monkeypatch)
+        interaction = FakeInteraction(user=_manager(), guild_id=42424)
+        written = {}
+
+        async def fake_update(guild_id, command, **fields):
+            written["update"] = (guild_id, command, fields)
+            return True
+
+        monkeypatch.setattr(db_config, "update_game", fake_update)
+        await Matchmaking.games_update.callback(
+            cog, interaction, command="game_a", new_command="game_renamed")
+        guild_id, command, fields = written["update"]
+        assert (guild_id, command) == (42424, "game_a")
+        assert fields == {"new_command": "game_renamed"}
+        # The renamed command is re-registered for the guild right away.
+        assert cog.bot.tree.sync_calls == [42424]
+        assert interaction.followup.sent[0][0] == (
+            "Game `game_a` renamed to `game_renamed`.")
+
+    @pytest.mark.asyncio
+    async def test_rename_alone_is_enough_to_proceed(self, monkeypatch):
+        # No other option is required: the rename is the update.
+        cog = _cog(monkeypatch)
+        interaction = FakeInteraction(user=_manager(), guild_id=42424)
+        calls = []
+
+        async def fake_update(*args, **kwargs):
+            calls.append(1)
+            return True
+
+        monkeypatch.setattr(db_config, "update_game", fake_update)
+        await Matchmaking.games_update.callback(
+            cog, interaction, command="game_a", new_command="game_renamed")
+        assert len(calls) == 1
+        assert "renamed to" in interaction.followup.sent[0][0]
+
+    @pytest.mark.asyncio
+    async def test_rejects_invalid_new_command(self, monkeypatch):
+        cog = _cog(monkeypatch)
+        interaction = FakeInteraction(user=_manager(), guild_id=42424)
+        calls = []
+        monkeypatch.setattr(db_config, "update_game", lambda *a, **k: calls.append(1))
+        await Matchmaking.games_update.callback(
+            cog, interaction, command="game_a", new_command="Not Valid")
+        assert calls == []
+        assert "not a valid slash command name" in interaction.response.messages[0][0]
+
+    @pytest.mark.asyncio
+    async def test_rejects_new_command_equal_to_command(self, monkeypatch):
+        cog = _cog(monkeypatch)
+        interaction = FakeInteraction(user=_manager(), guild_id=42424)
+        calls = []
+        monkeypatch.setattr(db_config, "update_game", lambda *a, **k: calls.append(1))
+        await Matchmaking.games_update.callback(
+            cog, interaction, command="game_a", new_command="game_a")
+        assert calls == []
+        assert "must differ" in interaction.response.messages[0][0]
+
+    @pytest.mark.asyncio
+    async def test_rejects_taken_new_command(self, monkeypatch):
+        cog = _cog(monkeypatch)
+        interaction = FakeInteraction(user=_manager(), guild_id=42424)
+        cog.get_guild_config(42424).games["game_b"] = GameOption(
+            name="Game B", command="game_b", role="", icon="", color="",
+            forum=None, channel=None, tag=None, visibility=None, message=None,
+            registration_api=None, match_api=None, match_url=None,
+            api_token=None, website_url=None, registration_url=None,
+            profile_url=None, default_max_guests=None)
+        calls = []
+        monkeypatch.setattr(db_config, "update_game", lambda *a, **k: calls.append(1))
+        await Matchmaking.games_update.callback(
+            cog, interaction, command="game_a", new_command="game_b")
+        assert calls == []
+        assert "already configured" in interaction.response.messages[0][0]
+
+    @pytest.mark.asyncio
+    async def test_rename_keeps_other_options(self, monkeypatch):
+        cog = _cog(monkeypatch)
+        interaction = FakeInteraction(user=_manager(), guild_id=42424)
+        written = {}
+
+        async def fake_update(guild_id, command, **fields):
+            written["update"] = fields
+            return True
+
+        monkeypatch.setattr(db_config, "update_game", fake_update)
+        await Matchmaking.games_update.callback(
+            cog, interaction, command="game_a", new_command="game_renamed",
+            name="New Name", max_players=4)
+        assert written["update"] == {
+            "name": "New Name", "default_max_guests": 3,
+            "new_command": "game_renamed"}
+
+
+class TestPreDeferHasNoDatabaseCalls:
+    """Validation runs before the defer, so it must stay free of I/O.
+
+    Every db_config entry point is replaced by a stub that records whether
+    the interaction had been deferred by the time it was reached: a stub
+    called pre-defer would mean a database round trip burns part of the 3s
+    interaction budget before the ack, which can time out the command.
+    """
+
+    @staticmethod
+    def _forbid_db_before_defer(monkeypatch, interaction, **results):
+        """Make each db_config function assert it runs after the defer."""
+        early = []
+
+        def stub(name, result):
+            async def call(*args, **kwargs):
+                if (not interaction.response.deferred):
+                    early.append(name)
+                return result
+            return call
+
+        for name, result in results.items():
+            monkeypatch.setattr(db_config, name, stub(name, result))
+
+        async def refresh(_self):
+            if (not interaction.response.deferred):
+                early.append("_refresh_config")
+
+        monkeypatch.setattr(LFGAdminMixin, "_refresh_config", refresh)
+        return early
+
+    @pytest.mark.asyncio
+    async def test_update_validation_does_not_touch_the_database(self, monkeypatch):
+        cog = _cog(monkeypatch)
+        interaction = FakeInteraction(user=_manager(), guild_id=42424)
+        # A valid rename that goes all the way through, plus every validation
+        # path that must reject before deferring.
+        # (options, whether the options are accepted and reach the database)
+        cases = [
+            ({"new_command": "game_renamed"}, True),
+            ({"new_command": "game_b"}, True),
+            ({"new_command": "game_a"}, False),
+            ({"new_command": "Not Valid"}, False),
+            ({"name": "x" * (constants.GAME_NAME_MAX + 1)}, False),
+            ({"role": "123"}, False),
+            ({"forum": "456"}, False),
+            ({"channel": "789"}, False),
+            ({"max_players": 1}, False),
+            ({"title_field": "bad field"}, False),
+            ({}, False),
+        ]
+        for options, accepted in cases:
+            # A fresh interaction per case: the defer flag is per interaction.
+            interaction = FakeInteraction(user=_manager(), guild_id=42424)
+            early = self._forbid_db_before_defer(
+                monkeypatch, interaction,
+                update_game=True, ensure_guild_config=None,
+                load_config_from_db=None, add_parameter=True)
+            await Matchmaking.games_update.callback(
+                cog, interaction, command="game_a", **options)
+            assert early == [], f"{options} reached {early} before deferring"
+            # Rejected options answer on the initial response and never defer;
+            # accepted ones defer and go on to the database.
+            if (accepted):
+                assert interaction.response.deferred is True, options
+            else:
+                assert interaction.response.deferred is None, options
+                assert interaction.followup.sent == []
+
+    @pytest.mark.asyncio
+    async def test_rename_error_does_not_touch_the_database(self, monkeypatch):
+        # _rename_error is a pre-defer validation helper: it must resolve the
+        # "already configured" conflict from the in-memory configuration only.
+        cog = _cog(monkeypatch)
+        interaction = FakeInteraction(user=_manager(), guild_id=42424)
+        calls = []
+        for name in ("update_game", "ensure_guild_config",
+                     "load_config_from_db", "copy_game"):
+            monkeypatch.setattr(
+                db_config, name,
+                (lambda name: lambda *a, **k: calls.append(name) or True)(name))
+
+        error = cog._rename_error(interaction, "game_a", "Not Valid")
+        assert "not a valid slash command name" in error
+        assert cog._rename_error(interaction, "game_a", "game_a") == (
+            "`new_command` must differ from `command`.")
+        cog.get_guild_config(42424).games["game_taken"] = (
+            cog.get_guild_config(42424).games["game_a"])
+        assert "already configured" in cog._rename_error(
+            interaction, "game_a", "game_taken")
+        assert cog._rename_error(interaction, "game_a", "game_free") is None
+        # None of the checks reached the database.
+        assert calls == []
+
+    @pytest.mark.asyncio
+    async def test_copy_validation_does_not_touch_the_database(self, monkeypatch):
+        cog = _cog(monkeypatch)
+        interaction = FakeInteraction(user=_manager(), guild_id=42424)
+        cases = [
+            {"game": "game_a", "command": "game_x", "name": "Game X"},
+            {"game": "missing", "command": "game_x", "name": "Game X"},
+            {"game": "game_a", "command": "game_a", "name": "Game X"},
+            {"game": "game_a", "command": "game_x", "name": "Game A"},
+            {"game": "game_a", "command": "Not Valid", "name": "Game X"},
+            {"game": "game_a", "command": "game_x", "name": "game:x"},
+        ]
+        for options in cases:
+            interaction = FakeInteraction(user=_manager(), guild_id=42424)
+            early = self._forbid_db_before_defer(
+                monkeypatch, interaction,
+                copy_game=True, ensure_guild_config=None,
+                load_config_from_db=None, update_game=True)
+            await Matchmaking.games_copy.callback(cog, interaction, **options)
+            assert early == [], f"{options} reached {early} before deferring"
+
 
 class TestGamesRemove:
     @pytest.mark.asyncio
@@ -601,6 +813,22 @@ class TestGamesList:
         content = interaction.response.messages[0][0]
         assert "game_a" in content
         assert "Game A" in content
+
+    @pytest.mark.asyncio
+    async def test_games_are_sorted_by_display_name(self, monkeypatch):
+        cog = _cog(monkeypatch)
+        games = cog.get_guild_config(42424).games
+        games["game_z"] = GameOption(
+            name="AAA", command="game_z", role="", icon="", color="",
+            forum=None, channel=None, tag=None, visibility=None, message=None,
+            registration_api=None, match_api=None, match_url=None,
+            api_token=None, website_url=None, registration_url=None,
+            profile_url=None, default_max_guests=None)
+        interaction = FakeInteraction(user=_manager(), guild_id=42424)
+        await Matchmaking.games_list.callback(cog, interaction)
+        content = interaction.response.messages[0][0]
+        # Insertion order is game_a then game_z, but "AAA" sorts first.
+        assert content.index("`game_z`") < content.index("`game_a`")
 
     @pytest.mark.asyncio
     async def test_requires_manage_guild(self, monkeypatch):
