@@ -141,6 +141,19 @@ class TestRollSentinel:
         assert random_token_available(self._shadowing()) is False
         assert random_token_available({RANDOM_VALUE: "Anything"}) is False
 
+    def test_random_token_is_unavailable_for_a_single_value(self):
+        # A roll could only ever draw that one value, so it is not offered.
+        assert random_token_available({"live": "Live"}) is False
+        # ... and the sentinel is not pending for such a parameter.
+        assert pending_roll([RANDOM_VALUE], {"live": "Live"}) is False
+
+    def test_empty_map_still_accepts_the_token_so_the_roll_is_dropped(self):
+        # An unknown parameter has no values: the roll is accepted, drawn
+        # from nothing and dropped, so no sentinel reaches the match API.
+        assert random_token_available({}) is True
+        assert pending_roll([RANDOM_VALUE], {}) is True
+        assert roll_param_values([RANDOM_VALUE], {}) == []
+
     def test_display_form_is_normalized_to_the_sentinel(self):
         # Display form round-trips to the sentinel.
         assert normalize_param_values(
@@ -209,17 +222,26 @@ class TestRollParamValues:
         assert set(rolled) == set(self.DECK)
 
     def test_no_value_left_to_draw_drops_the_sentinel(self):
-        # Nothing left to draw: dropped, not duplicated.
+        # Every value is already picked explicitly, so the extra roll has
+        # nothing left to draw: dropped, not duplicated. (A single-value
+        # parameter cannot reach this: it never accepts a roll at all.)
         rolled = roll_param_values(
-            ["standard", RANDOM_VALUE], {"standard": "Standard"},
-            random.Random(1))
+            ["standard", "e&p", RANDOM_VALUE], self.DECK, random.Random(1))
 
-        assert rolled == ["standard"]
+        assert rolled == ["standard", "e&p"]
 
     def test_values_without_a_sentinel_are_untouched(self):
         values = ["autumn", "winter"]
 
         assert roll_param_values(values, self.MAPPING) == values
+
+    def test_single_value_parameter_never_rolls(self):
+        # The sentinel is left as a plain value: there is nothing to draw.
+        single = {"live": "Live"}
+
+        assert roll_param_values([RANDOM_VALUE], single, random.Random(0)) == [
+            RANDOM_VALUE]
+        assert roll_param_values(["live"], single) == ["live"]
 
     def test_no_roll_when_the_token_is_a_display_name(self):
         # The parameter's own display name wins: the sentinel resolves to the

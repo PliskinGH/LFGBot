@@ -130,7 +130,10 @@ def is_random_value(token: str) -> bool:
 
 def random_token_available(value_display: dict[str, str]) -> bool:
     """Whether a parameter accepts the roll sentinel (false when a value or
-    display name already uses it)."""
+    display name already uses it, or when the parameter has a single value)."""
+    
+    if (len(value_display) == 1):
+        return False
     for value, display in value_display.items():
         if (is_random_value(value) or is_random_value(display)):
             return False

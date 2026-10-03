@@ -2204,6 +2204,146 @@ class TestGameParametersHelp:
         assert "# Help: /game_b" in content
 
 
+class TestSingleValueParameter:
+    """A parameter with one acceptable value is always set, and never rolls."""
+
+    @staticmethod
+    def _matchmaking():
+        # turn_timing has a single value (always selected); deck has two
+        # (optional, and the only one that may roll).
+        config = configparser.ConfigParser()
+        config.read_string(
+            "[DEFAULT]\n"
+            "GamesCommands = rdl\n"
+            "GamesFullNames = RDL\n"
+            "\n"
+        )
+        params = configparser.ConfigParser()
+        params.read_string(
+            "[rdl]\n"
+            "turn_timing = turn_timing: (live, Live)\n"
+            "deck = deck: (standard, Standard), (e&p, Exiles and Partitions)\n"
+            "\n"
+        )
+        return Matchmaking(bot=FakeBot(), config=config,
+                           game_parameters=params)
+
+    def test_single_value_is_added_when_nothing_is_provided(self):
+        matchmaking = self._matchmaking()
+
+        settings = matchmaking._effective_game_settings(
+            DEFAULT_GUILD_ID, "rdl", None)
+
+        assert settings == {"turn_timing": ["live"]}
+
+    def test_multi_value_parameter_is_not_added(self):
+        # Still optional: only the single-value one is forced.
+        matchmaking = self._matchmaking()
+
+        settings = matchmaking._effective_game_settings(
+            DEFAULT_GUILD_ID, "rdl", None)
+
+        assert "deck" not in settings
+
+    def test_provided_values_win_and_keep_the_parameter_order(self):
+        matchmaking = self._matchmaking()
+
+        settings = matchmaking._effective_game_settings(
+            DEFAULT_GUILD_ID, "rdl", {"deck": ["e&p"], "turn_timing": ["live"]})
+
+        assert settings == {"turn_timing": ["live"], "deck": ["e&p"]}
+        assert list(settings) == ["turn_timing", "deck"]
+
+    @pytest.mark.asyncio
+    async def test_lfg_embed_always_shows_the_single_value(self):
+        matchmaking = self._matchmaking()
+        host = FakeMember(100, "Host")
+        interaction = FakeInteraction(
+            user=host, guild=FakeGuild(id=1, members={100: host}))
+        game_option = matchmaking.default_guild_config.games["rdl"]
+
+        await matchmaking.create_lfg(
+            interaction, game_option, None, "desc", None)
+
+        embed = interaction.channel.sent[0][1]
+        settings = next(field for field in embed.fields
+                        if field.name == LFG_FIELD_GAME_SETTINGS)
+        # The value is rendered with its display name, even though the user
+        # passed no argument at all.
+        assert settings.value == "turn_timing: Live"
+
+    @pytest.mark.asyncio
+    async def test_modal_route_also_sets_the_single_value(self):
+        # A per-game command used with no argument opens the guided modal;
+        # the single value must still be applied to the created LFG.
+        matchmaking = self._matchmaking()
+        host = FakeMember(100, "Host")
+        interaction = FakeInteraction(
+            user=host, guild=FakeGuild(id=1, members={100: host}))
+
+        await matchmaking._run_game_command(interaction, "rdl", {})
+
+        modal = interaction.response.modals[0]
+        assert modal.game_select is None
+        submitted = FakeInteraction(user=host, guild=interaction.guild)
+        await Matchmaking._create_lfg_from_modal(
+            matchmaking, submitted, modal, "rdl")
+        embed = submitted.channel.sent[0][1]
+        settings = next(field for field in embed.fields
+                        if field.name == LFG_FIELD_GAME_SETTINGS)
+        assert settings.value == "turn_timing: Live"
+
+    @pytest.mark.asyncio
+    async def test_autocomplete_offers_no_random_for_a_single_value(self):
+        matchmaking = self._matchmaking()
+        interaction = FakeInteraction(user=FakeMember(1, "host"), guild_id=1)
+
+        autocomplete = matchmaking._make_param_autocomplete(
+            DEFAULT_GUILD_ID, "rdl", "turn_timing")
+        choices = await autocomplete(interaction, "")
+
+        assert [(c.name, c.value) for c in choices] == [("Live", "Live")]
+
+    @pytest.mark.asyncio
+    async def test_autocomplete_still_offers_random_for_several_values(self):
+        matchmaking = self._matchmaking()
+        interaction = FakeInteraction(user=FakeMember(1, "host"), guild_id=1)
+
+        autocomplete = matchmaking._make_param_autocomplete(
+            DEFAULT_GUILD_ID, "rdl", "deck")
+        choices = await autocomplete(interaction, "")
+
+        assert RANDOM_DISPLAY in [c.name for c in choices]
+
+    @pytest.mark.asyncio
+    async def test_random_is_rejected_as_an_invalid_value(self):
+        matchmaking = self._matchmaking()
+        host = FakeMember(100, "Host")
+        interaction = FakeInteraction(
+            user=host, guild=FakeGuild(id=1, members={100: host}))
+
+        await matchmaking._run_game_command(
+            interaction, "rdl", {"title": "T", "turn_timing": RANDOM_DISPLAY})
+
+        message = interaction.response.messages[0][0]
+        assert "Invalid value(s) for `turn_timing`" in message
+        # The single value is the only one offered: no Random suffix on the
+        # "Valid values" line (the rejected token is echoed above it).
+        valid_values = message.split("Valid values:")[1]
+        assert valid_values.strip() == "live (Live)."
+
+    def test_help_does_not_mention_random_for_a_single_value(self):
+        matchmaking = self._matchmaking()
+        interaction = FakeInteraction(user=FakeMember(1, "host"), guild_id=1)
+
+        _run(matchmaking.send_help(interaction, "rdl"))
+
+        description = interaction.response.messages[0][1][-1].description
+        assert "- `turn_timing`: Live" in description
+        assert f"also accepts `{RANDOM_DISPLAY}`" in description  # deck rolls
+        assert f"`turn_timing` also accepts `{RANDOM_DISPLAY}`" not in description
+
+
 class TestCreateLfgSettings:
     @pytest.mark.asyncio
     async def test_renders_settings_field(self, matchmaking):

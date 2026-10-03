@@ -466,6 +466,24 @@ class LFGInteractionMixin:
             return False
         return True
 
+    def _effective_game_settings(self, guild_id: int,
+                                game_command: str | None,
+                                game_settings: dict[str, list[str]] | None,
+                                ) -> dict[str, list[str]]:
+        """The given settings, plus every single-value parameter of the game.
+
+        A parameter with a single acceptable value is always set.
+        Provided values win, and the result follows the
+        parameter configuration's order.
+        """
+        mappings = self.get_game_parameters(guild_id, game_command or "")
+        defaults = {
+            param_name: list(parameter.get("values", {}))
+            for param_name, parameter in mappings.items()
+            if len(parameter.get("values", {})) == 1
+        }
+        return {**defaults, **(game_settings or {})}
+
     def _game_settings_lines(self, guild_id: int,
                              game_command: str | None,
                              game_settings: dict[str, list[str]]) -> list[str]:
@@ -517,6 +535,8 @@ class LFGInteractionMixin:
             embed.add_field(name=utils.guests_field_name(0, max_guests),
                             value="", inline=False)
         
+        game_settings = self._effective_game_settings(
+            interaction.guild_id, game_option.command, game_settings)
         if (game_settings):
             embed.add_field(name=constants.LFG_FIELD_GAME_SETTINGS,
                             value="\n".join(self._game_settings_lines(interaction.guild_id, game_option.command, game_settings)), inline=False)

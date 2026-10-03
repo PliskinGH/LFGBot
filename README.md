@@ -195,6 +195,8 @@ the optional `display_name` is the friendlier label shown in
 the option description, help and Game settings field, and defaults to the name.
 `values` accepts the same `(value, Display)` syntax as the config file.
 `api_field` (letters/digits/`_`) maps the parameter to a match API field.
+A parameter declaring a single value is always selected (even when the
+argument is omitted) and does not offer `Random`.
 
 Changes re-register and sync the per-game slash commands for that guild
 immediately. If that sync fails, the change is
