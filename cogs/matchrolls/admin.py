@@ -5,8 +5,9 @@ from discord import app_commands
 
 from common import constants as common_constants, utils as common_utils
 from common.views import ConfirmView
+from db import config_log
 
-from . import constants, db_config
+from . import constants, db_config, validation
 
 
 class RollsAdminMixin:
@@ -30,71 +31,6 @@ class RollsAdminMixin:
     # the end of this class so CogMeta registers it as a child command.
     rollsets_description = app_commands.Group(
         name="description", description="Manage an item's description variants.")
-
-    # ------------------------------------------------------------------ #
-    # Validation
-    # ------------------------------------------------------------------ #
-
-    @staticmethod
-    def _category_name_error(value: str, fallback: str) -> str | None:
-        """An error message when a category name is invalid, else None."""
-        name = value.strip()
-        if (not name or len(name) > 50 or "\n" in name or "\r" in name):
-            return f"`{fallback}` must be 1-50 characters without newlines."
-        if (name == common_constants.CONFIG_ID.lower()):
-            return (f"`{fallback}` cannot be "
-                    f"`{common_constants.CONFIG_ID.lower()}` (reserved).")
-        return None
-
-    @staticmethod
-    def _item_names_error(value: str) -> tuple[list[str] | None, str | None]:
-        """(names, error): the parsed item names, or an error message."""
-        names = [item.strip() for item in value.split(",")]
-        if (not names or not names[0]):
-            return None, "`items` requires at least one item."
-        for name in names:
-            if (not name or len(name) > 50 or "\n" in name or "\r" in name):
-                return None, ("`items` must be a comma-separated list of "
-                              "1-50 character names.")
-        if (len(set(names)) != len(names)):
-            return None, "`items` cannot contain duplicate names."
-        return names, None
-
-    @staticmethod
-    def _parse_color(value: str | None) -> tuple[int | None, str | None]:
-        """(color, error): ``-`` clears the color; None keeps it."""
-        if (value is None or value == common_constants.RESET_SENTINEL):
-            return None, None
-        try:
-            color = int(value)
-        except ValueError:
-            return None, "`color` must be an integer 0-16777215, or `-` to clear it."
-        if (not (0 <= color <= 0xFFFFFF)):
-            return None, "`color` must be an integer 0-16777215, or `-` to clear it."
-        return color, None
-
-    @staticmethod
-    def _parse_url(value: str | None, name: str) -> tuple[str | None, str | None]:
-        """(url, error): ``-`` clears the value; None keeps it."""
-        if (value is None or value == common_constants.RESET_SENTINEL):
-            return None, None
-        value = value.strip()
-        if (not value or len(value) > 2048):
-            return None, (f"`{name}` must be a URL of at most 2048 characters, "
-                          "or `-` to clear it.")
-        return value, None
-
-    @staticmethod
-    def _parse_text(value: str | None) -> tuple[str | None, str | None]:
-        """(text, error): ``-`` clears the text; None keeps it."""
-        if (value is None):
-            return None, None
-        if (value == common_constants.RESET_SENTINEL):
-            return "", None
-        if (not value or len(value) > common_constants.EMBED_DESCRIPTION_LIMIT):
-            return None, (f"`text` must be 1-{common_constants.EMBED_DESCRIPTION_LIMIT} "
-                          "characters, or `-` to clear it.")
-        return value, None
 
     async def _category_autocomplete(
         self, interaction: discord.Interaction, current: str
@@ -182,10 +118,10 @@ class RollsAdminMixin:
         guild_id = await self._expect_guild(interaction)
         if (guild_id is None):
             return
-        if (error := self._category_name_error(category, "category")):
+        if (error := validation.category_name_error(category, "category")):
             await interaction.response.send_message(error, ephemeral=True)
             return
-        item_names, error = self._item_names_error(items)
+        item_names, error = validation.item_names_error(items)
         if (error):
             await interaction.response.send_message(error, ephemeral=True)
             return
@@ -196,6 +132,8 @@ class RollsAdminMixin:
                 f"A roll category `{category}` already exists here.",
                 ephemeral=True)
             return
+        await config_log.record_command_change(
+            interaction, "rollset.category.add", category)
         await self._reload()
         await interaction.followup.send(
             f"Roll category `{category}` added "
@@ -217,16 +155,16 @@ class RollsAdminMixin:
         guild_id = await self._expect_guild(interaction)
         if (guild_id is None):
             return
-        if (error := self._category_name_error(category, "category")):
+        if (error := validation.category_name_error(category, "category")):
             await interaction.response.send_message(error, ephemeral=True)
             return
-        if (new_name is not None and (error := self._category_name_error(
+        if (new_name is not None and (error := validation.category_name_error(
                 new_name, "new_name"))):
             await interaction.response.send_message(error, ephemeral=True)
             return
         item_names = None
         if (items is not None):
-            item_names, error = self._item_names_error(items)
+            item_names, error = validation.item_names_error(items)
             if (error):
                 await interaction.response.send_message(error, ephemeral=True)
                 return
@@ -246,6 +184,11 @@ class RollsAdminMixin:
                 f"There is no roll category `{category}` in this server.",
                 ephemeral=True)
             return
+        summary = category
+        if (new_name and new_name != category):
+            summary = f"{category} -> {new_name}"
+        await config_log.record_command_change(
+            interaction, "rollset.category.update", summary)
         await self._reload()
         if (new_name and new_name != category):
             message = f"Roll category `{category}` renamed to `{new_name}`."
@@ -279,6 +222,8 @@ class RollsAdminMixin:
 
         async def confirm() -> str:
             if (await db_config.delete_category(guild_id, category)):
+                await config_log.record_command_change(
+                    interaction, "rollset.category.remove", category)
                 await self._reload()
                 return f"Deleted roll category `{category}`."
             return f"There is no roll category `{category}`."
@@ -314,7 +259,7 @@ class RollsAdminMixin:
         if (guild_id is None):
             return
         if (category is not None):
-            if (error := self._category_name_error(category, "category")):
+            if (error := validation.category_name_error(category, "category")):
                 await interaction.response.send_message(error, ephemeral=True)
                 return
             category = category.strip()
@@ -378,19 +323,19 @@ class RollsAdminMixin:
         guild_id = await self._expect_guild(interaction)
         if (guild_id is None):
             return
-        text_value, error = self._parse_text(text)
+        text_value, error = validation.parse_text(text)
         if (error):
             await interaction.response.send_message(error, ephemeral=True)
             return
-        color_value, error = self._parse_color(color)
+        color_value, error = validation.parse_color(color)
         if (error):
             await interaction.response.send_message(error, ephemeral=True)
             return
-        image_url, error = self._parse_url(image, "image")
+        image_url, error = validation.parse_url(image, "image")
         if (error):
             await interaction.response.send_message(error, ephemeral=True)
             return
-        thumbnail_url, error = self._parse_url(thumbnail, "thumbnail")
+        thumbnail_url, error = validation.parse_url(thumbnail, "thumbnail")
         if (error):
             await interaction.response.send_message(error, ephemeral=True)
             return
@@ -407,6 +352,8 @@ class RollsAdminMixin:
                 f"There is no active item `{item}` in this server.",
                 ephemeral=True)
             return
+        await config_log.record_command_change(
+            interaction, "rollset.description.add", item)
         await self._reload()
         await interaction.followup.send(
             f"Added a description variant to `{item}`.", ephemeral=True)
@@ -437,25 +384,25 @@ class RollsAdminMixin:
             return
         fields: dict = {}
         if (text is not None):
-            text_value, error = self._parse_text(text)
+            text_value, error = validation.parse_text(text)
             if (error):
                 await interaction.response.send_message(error, ephemeral=True)
                 return
             fields["description"] = text_value
         if (color is not None):
-            color_value, error = self._parse_color(color)
+            color_value, error = validation.parse_color(color)
             if (error):
                 await interaction.response.send_message(error, ephemeral=True)
                 return
             fields["color"] = color_value
         if (image is not None):
-            image_url, error = self._parse_url(image, "image")
+            image_url, error = validation.parse_url(image, "image")
             if (error):
                 await interaction.response.send_message(error, ephemeral=True)
                 return
             fields["image_url"] = image_url
         if (thumbnail is not None):
-            thumbnail_url, error = self._parse_url(thumbnail, "thumbnail")
+            thumbnail_url, error = validation.parse_url(thumbnail, "thumbnail")
             if (error):
                 await interaction.response.send_message(error, ephemeral=True)
                 return
@@ -466,6 +413,8 @@ class RollsAdminMixin:
             await interaction.followup.send(
                 f"`{item}` has no variant #{variant}.", ephemeral=True)
             return
+        await config_log.record_command_change(
+            interaction, "rollset.description.update", f"{item} #{variant}")
         await self._reload()
         await interaction.followup.send(
             f"Updated variant #{variant} of `{item}`.", ephemeral=True)
@@ -492,6 +441,8 @@ class RollsAdminMixin:
             await interaction.followup.send(
                 f"`{item}` has no variant #{variant}.", ephemeral=True)
             return
+        await config_log.record_command_change(
+            interaction, "rollset.description.remove", f"{item} #{variant}")
         await self._reload()
         await interaction.followup.send(
             f"Removed variant #{variant} from `{item}`.", ephemeral=True)

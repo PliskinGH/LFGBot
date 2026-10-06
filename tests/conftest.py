@@ -431,7 +431,8 @@ def _safe_url(url: str) -> str:
 async def _drop_all_tables():
     """Drop the bot's tables and the migration history, for a clean test run."""
     await connections.get("default").execute_script(
-        "DROP TABLE IF EXISTS tortoise_migrations, roll_descriptions, "
+        "DROP TABLE IF EXISTS config_changes, tortoise_migrations, "
+        "roll_descriptions, "
         "roll_items, roll_categories, game_parameter_values, "
         "game_parameters, game_api_field_overrides, default_api_fields, "
         "games, guilds CASCADE")

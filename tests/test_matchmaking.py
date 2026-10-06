@@ -3427,41 +3427,41 @@ class TestGameNameValidation:
     """Games add and update name caps keeping the embed title parsable."""
 
     def test_long_name_is_rejected(self):
-        from cogs.matchmaking.admin import LFGAdminMixin
+        from cogs.matchmaking import validation
 
-        assert LFGAdminMixin._game_name_error("G" * 101) is not None
-        assert LFGAdminMixin._game_name_error("G" * 100) is None
+        assert validation.game_name_error("G" * 101) is not None
+        assert validation.game_name_error("G" * 100) is None
 
     def test_game_colon_name_is_rejected(self):
-        from cogs.matchmaking.admin import LFGAdminMixin
+        from cogs.matchmaking import validation
 
-        assert LFGAdminMixin._game_name_error("Quiz game: Night") is not None
-        assert LFGAdminMixin._game_name_error("Quiz Game: Night") is not None
-        assert LFGAdminMixin._game_name_error("Game Night") is None
-        assert LFGAdminMixin._game_name_error("") is None
-        assert LFGAdminMixin._game_name_error(None) is None
+        assert validation.game_name_error("Quiz game: Night") is not None
+        assert validation.game_name_error("Quiz Game: Night") is not None
+        assert validation.game_name_error("Game Night") is None
+        assert validation.game_name_error("") is None
+        assert validation.game_name_error(None) is None
 
     def test_games_add_rejects_an_invalid_name(self):
-        from cogs.matchmaking.admin import LFGAdminMixin
+        from cogs.matchmaking import validation
 
-        fields, error = LFGAdminMixin._game_fields(
+        fields, error = validation.game_fields(
             name="Quiz game: Night", role="", icon="", color="")
         assert fields is None
         assert "game:" in error
 
     def test_updated_fields_rejects_an_invalid_name(self):
-        from cogs.matchmaking.admin import LFGAdminMixin
+        from cogs.matchmaking import validation
 
-        fields, error = LFGAdminMixin._updated_fields(name="Quiz game: Night")
+        fields, error = validation.updated_fields(name="Quiz game: Night")
         assert fields is None
         assert "game:" in error
 
     def test_updated_fields_do_not_reset_the_name_with_the_sentinel(self):
-        from cogs.matchmaking.admin import LFGAdminMixin
+        from cogs.matchmaking import validation
 
         # Unlike api_token, the name has no "-" reset: a game always has a
         # display name, so the sentinel is just an (invalid) name.
-        fields, error = LFGAdminMixin._updated_fields(name="-")
+        fields, error = validation.updated_fields(name="-")
         assert error is not None
 
 

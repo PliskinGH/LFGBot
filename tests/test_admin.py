@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import discord
 import pytest
 
-from cogs.matchmaking import constants, db_config
+from cogs.matchmaking import constants, db_config, validation
 from cogs.matchmaking.admin import LFGAdminMixin
 from cogs.matchmaking.cog import Matchmaking
 from cogs.matchmaking.constants import DEFAULT_GUILD_ID
@@ -67,7 +67,7 @@ class TestIsValidCommandName:
         ("a" * 33, False),
     ])
     def test_validity(self, name, expected):
-        assert Matchmaking.is_valid_command_name(name) is expected
+        assert validation.is_valid_command_name(name) is expected
 
 
 class TestGamesAdd:
@@ -722,30 +722,16 @@ class TestPreDeferHasNoDatabaseCalls:
                 assert interaction.response.deferred is None, options
                 assert interaction.followup.sent == []
 
-    @pytest.mark.asyncio
-    async def test_rename_error_does_not_touch_the_database(self, monkeypatch):
-        # _rename_error is a pre-defer validation helper: it must resolve the
-        # "already configured" conflict from the in-memory configuration only.
-        cog = _cog(monkeypatch)
-        interaction = FakeInteraction(user=_manager(), guild_id=42424)
-        calls = []
-        for name in ("update_game", "ensure_guild_config",
-                     "load_config_from_db", "copy_game"):
-            monkeypatch.setattr(
-                db_config, name,
-                (lambda name: lambda *a, **k: calls.append(name) or True)(name))
-
-        error = cog._rename_error(interaction, "game_a", "Not Valid")
-        assert "not a valid slash command name" in error
-        assert cog._rename_error(interaction, "game_a", "game_a") == (
+    def test_rename_error_is_decided_by_the_commands_alone(self):
+        # The pre-defer check of /games update reads the commands the guild
+        # has configured, never the database.
+        assert "not a valid slash command name" in validation.rename_error(
+            "Not Valid", "game_a", ["game_a"])
+        assert validation.rename_error("game_a", "game_a", ["game_a"]) == (
             "`new_command` must differ from `command`.")
-        cog.get_guild_config(42424).games["game_taken"] = (
-            cog.get_guild_config(42424).games["game_a"])
-        assert "already configured" in cog._rename_error(
-            interaction, "game_a", "game_taken")
-        assert cog._rename_error(interaction, "game_a", "game_free") is None
-        # None of the checks reached the database.
-        assert calls == []
+        assert "already configured" in validation.rename_error(
+            "game_taken", "game_a", ["game_a", "game_taken"])
+        assert validation.rename_error("game_free", "game_a", ["game_a"]) is None
 
     @pytest.mark.asyncio
     async def test_copy_validation_does_not_touch_the_database(self, monkeypatch):
@@ -1180,7 +1166,7 @@ class TestParameterError:
         ("newparam", ",", False),
     ])
     def test_parameter_error(self, name, values, valid):
-        error = Matchmaking._parameter_error(name, values)
+        error = validation.parameter_error(name, values)
         assert (error is None) is valid
 
     @pytest.mark.parametrize("api_field,valid", [
@@ -1190,7 +1176,7 @@ class TestParameterError:
         ("bad.field", False), ("   ", False),
     ])
     def test_api_field_error(self, api_field, valid):
-        error = Matchmaking._parameter_error("newparam", "a, b", api_field=api_field)
+        error = validation.parameter_error("newparam", "a, b", api_field=api_field)
         assert (error is None) is valid
 
     @pytest.mark.parametrize("display_name,valid", [
@@ -1199,7 +1185,7 @@ class TestParameterError:
         ("   ", False), ("a" * 51, False), ("line\nbreak", False),
     ])
     def test_display_name_error(self, display_name, valid):
-        error = Matchmaking._parameter_error(
+        error = validation.parameter_error(
             "newparam", "a, b", display_name=display_name)
         assert (error is None) is valid
 

@@ -7,11 +7,12 @@ from discord import app_commands
 
 from common import constants as common_constants
 from common import utils as common_utils
+from db import config_log
 
 from . import constants
 from . import db_config
 from . import utils
-from .config import LFGConfigMixin
+from . import validation
 from .models import GameOption
 
 # Option descriptions shared by /games add and /games update.
@@ -39,17 +40,6 @@ _GAME_OPTION_DESCRIPTIONS = {
     "discord_username_field": "Match API field receiving each Discord name; `-` resets to the default.",
 }
 
-# Reserved match-payload component fields: /games add|update argument name
-# -> canonical api_* key stored as a per-game override of the default payload
-# field names. Unlike the game columns above they are not Game model fields.
-_API_FIELD_ARGUMENTS = {
-    "title_field": constants.API_TITLE_FIELD_KEY,
-    "table_talk_url_field": constants.API_TABLE_TALK_URL_FIELD_KEY,
-    "participants_field": constants.API_PARTICIPANTS_FIELD_KEY,
-    "discord_username_field": constants.API_DISCORD_USERNAME_FIELD_KEY,
-}
-
-
 class LFGAdminMixin:
     """Permission-gated commands to edit the server's games.
 
@@ -71,90 +61,6 @@ class LFGAdminMixin:
     games_parameter = app_commands.Group(
         name="parameter", description="Manage a game's parameters.")
 
-    @staticmethod
-    def is_valid_command_name(name: str) -> bool:
-        """Whether ``name`` can become a Discord slash command."""
-        return bool(common_constants.COMMAND_NAME_RE.match(name))
-
-    @staticmethod
-    def _game_name_error(name: str | None) -> str | None:
-        """An error message when a game display name is invalid, else None."""
-        if (not name):
-            return None
-        if (name == common_constants.RESET_SENTINEL):
-            return "`name` cannot be `-`: the display name has no reset; just omit the option to keep it."
-        if (len(name) > constants.GAME_NAME_MAX):
-            return f"`name` must be at most {constants.GAME_NAME_MAX} characters."
-        if (constants.GAME_NAME_INVALID_RE.search(name)):
-            return "`name` cannot contain \"game:\": it would break the LFG title parsing."
-        return None
-
-    @staticmethod
-    def _parameter_error(name: str, values: str | None,
-                         api_field: str | None = None,
-                         display_name: str | None = None) -> str | None:
-        """An error message when a parameter name/values/api_field are invalid, else None."""
-        if (not common_constants.COMMAND_NAME_RE.match(name)):
-            return "`name` must be 1-32 lowercase letters, digits or underscores."
-        if (name.startswith(constants.API_FIELD_PREFIX)):
-            return f"`name` cannot start with `{constants.API_FIELD_PREFIX}` (reserved)."
-        if (values is not None and not utils.parse_param_entries(values or "")):
-            return "`values` must contain at least one value."
-        # Blank (empty string) is valid: it resets the API field (db_config
-        # turns "" into NULL); on add it means "no field". The update command
-        # accepts "-" as the reset sentinel, since Discord cannot send "".
-        if (api_field and not common_constants.API_FIELD_RE.match(api_field)):
-            return ("`api_field` must be a non-empty field name (letters, digits,"
-                    " underscores), or `-` to reset it.")
-        if (display_name is not None and display_name != "" and (
-                not display_name.strip() or len(display_name) > 50
-                or "\n" in display_name or "\r" in display_name)):
-            return "`display_name` must be 1-50 characters without newlines."
-        return None
-
-    @staticmethod
-    def _mention_error(role: str | None, channel: str | None,
-                       forum: str | None = None) -> str | None:
-        """An error message when role/channel/forum are not Discord mentions, else None.
-
-        The values must be valid mentions (roles: role/user mentions;
-        LFG channels and forums: channel mentions); anything else would not
-        resolve at runtime.
-        """
-        if (role and not common_constants.ROLE_MENTION_RE.match(role)):
-            return "`role` must be a role or user mention."
-        if (channel and not common_constants.CHANNEL_MENTION_RE.match(channel)):
-            return "`channel` must be a channel mention."
-        if (forum and not common_constants.CHANNEL_MENTION_RE.match(forum)):
-            return "`forum` must be a channel mention."
-        return None
-
-    @staticmethod
-    def _api_fields_error(
-            values: dict[str, Optional[str]]
-    ) -> tuple[dict[str, Optional[str]], Optional[str]]:
-        """The reserved api_* overrides from /games add|update arguments.
-
-        Returns ``(api_fields, error)``: a mapping of canonical api_* keys to
-        the requested field name (``None`` = clear the override, falling back
-        to the default), or an error message when a value is malformed.
-        Arguments left out (None) keep the current override untouched.
-        """
-        api_fields = {}
-        for argument, key in _API_FIELD_ARGUMENTS.items():
-            value = values.get(argument)
-            if (value is None):
-                continue
-            if (value == common_constants.RESET_SENTINEL):
-                api_fields[key] = None
-            elif (not common_constants.API_FIELD_RE.match(value)):
-                return {}, (f"`{argument}` must be a non-empty field name "
-                            "(letters, digits, underscores), or `-` to reset "
-                            "it to the default.")
-            else:
-                api_fields[key] = value
-        return api_fields, None
-
     async def _guard_admin(self, interaction: discord.Interaction) -> bool:
         """Reject non-managers with an ephemeral message."""
         permissions = getattr(interaction.user, "guild_permissions", None)
@@ -174,93 +80,6 @@ class LFGAdminMixin:
                 ephemeral=True)
             return False
         return True
-
-    @staticmethod
-    def _game_fields(
-        name="", role="", icon="", color="",
-        channel=None, forum=None, tag=None, visibility=None, message=None,
-        registration_api=None, match_api=None, match_url=None,
-        api_token="",
-        website_url=None, registration_url=None, profile_url=None,
-        max_players=None,
-    ) -> tuple[dict, str | None]:
-        """The Game fields from add options; returns (fields, error message).
-
-        ``api_token`` is the token VALUE (a secret, never displayed): config
-        files resolve their env var at load time, admins set it via /games.
-        """
-        mention_error = LFGAdminMixin._mention_error(role, channel, forum)
-        if (mention_error is not None):
-            return None, mention_error
-        name_error = LFGAdminMixin._game_name_error(name)
-        if (name_error is not None):
-            return None, name_error
-        default_max_guests = None
-        if (max_players is not None):
-            default_max_guests = LFGConfigMixin.parse_default_max_guests(str(max_players))
-            if (default_max_guests is None):
-                return None, "`max_players` must be between 2 and 100."
-        fields = {
-            "name": name,
-            "role": role,
-            "icon": icon,
-            "color": color,
-            "channel": channel,
-            "forum": forum,
-            "tag": tag,
-            "visibility": visibility,
-            "message": message,
-            "registration_api": registration_api,
-            "match_api": match_api,
-            "match_url": match_url,
-            "api_token": api_token,
-            "website_url": website_url,
-            "registration_url": registration_url,
-            "profile_url": profile_url,
-            "default_max_guests": default_max_guests,
-        }
-        return fields, None
-
-    @staticmethod
-    def _updated_fields(
-        name=None, role=None, icon=None, color=None,
-        channel=None, forum=None, tag=None, visibility=None, message=None,
-        registration_api=None, match_api=None, match_url=None,
-        api_token=None,
-        website_url=None, registration_url=None, profile_url=None,
-        max_players=None,
-    ) -> tuple[dict, str | None]:
-        """The Game fields to change from update options; (fields, error).
-
-        Only the provided options are touched; omitted ones keep their value.
-        ``api_token`` accepts ``-`` as the reset sentinel (Discord cannot send
-        an empty string), which clears the token.
-        """
-        mention_error = LFGAdminMixin._mention_error(role, channel, forum)
-        if (mention_error is not None):
-            return None, mention_error
-        name_error = LFGAdminMixin._game_name_error(name)
-        if (name_error is not None):
-            return None, name_error
-        fields = {}
-        for field_name, value in (
-            ("name", name), ("role", role), ("icon", icon), ("color", color),
-            ("channel", channel), ("forum", forum), ("tag", tag),
-            ("visibility", visibility), ("message", message),
-            ("registration_api", registration_api), ("match_api", match_api),
-            ("match_url", match_url),
-            ("api_token", "" if (api_token == common_constants.RESET_SENTINEL) else api_token),
-            ("website_url", website_url), ("registration_url", registration_url),
-            ("profile_url", profile_url),
-        ):
-            if (value is not None):
-                fields[field_name] = value
-        if (max_players is not None):
-            default_max_guests = LFGConfigMixin.parse_default_max_guests(str(max_players))
-            if (default_max_guests is None):
-                return None, "`max_players` must be between 2 and 100."
-            fields["default_max_guests"] = default_max_guests
-        return fields, None
 
     async def _refresh_config(self) -> None:
         """Reload the configuration from the database and re-register the
@@ -328,13 +147,11 @@ class LFGAdminMixin:
         if (not await self._guard_admin(interaction)
                 or not await self._guard_database(interaction)):
             return
-        if (not self.is_valid_command_name(command)):
+        if (not validation.is_valid_command_name(command)):
             await interaction.response.send_message(
-                f"`{command}` is not a valid slash command name: use 1-32 "
-                "lowercase letters, digits or underscores.",
-                ephemeral=True)
+                validation.invalid_command_message(command), ephemeral=True)
             return
-        fields, error = self._game_fields(
+        fields, error = validation.game_fields(
             name=name or "", role=role, icon=icon, color=color,
             channel=channel, forum=forum, tag=tag, visibility=visibility,
             message=message,
@@ -345,7 +162,7 @@ class LFGAdminMixin:
         if (error is not None):
             await interaction.response.send_message(error, ephemeral=True)
             return
-        api_fields, error = self._api_fields_error({
+        api_fields, error = validation.api_fields_error({
             "title_field": title_field,
             "table_talk_url_field": table_talk_url_field,
             "participants_field": participants_field,
@@ -368,6 +185,7 @@ class LFGAdminMixin:
                 f"`{command}` is already configured; use `/games update` "
                 "to change it.", ephemeral=True)
             return
+        await config_log.record_command_change(interaction, "game.add", command)
         await self._refresh_config()
         await self._sync_guild(interaction)
         await interaction.followup.send(
@@ -412,11 +230,9 @@ class LFGAdminMixin:
         if (not await self._guard_admin(interaction)
                 or not await self._guard_database(interaction)):
             return
-        if (not self.is_valid_command_name(command)):
+        if (not validation.is_valid_command_name(command)):
             await interaction.response.send_message(
-                f"`{command}` is not a valid slash command name: use 1-32 "
-                "lowercase letters, digits or underscores.",
-                ephemeral=True)
+                validation.invalid_command_message(command), ephemeral=True)
             return
         guild_id = interaction.guild_id
         source_option = self.get_guild_config(guild_id).games.get(game)
@@ -424,17 +240,11 @@ class LFGAdminMixin:
             await interaction.response.send_message(
                 f"`{game}` is not configured for this server.", ephemeral=True)
             return
-        if (command == game):
-            await interaction.response.send_message(
-                f"`command` must differ from the copied game `{game}`.",
-                ephemeral=True)
+        error = validation.copy_error(command, name, game, source_option.name)
+        if (error is not None):
+            await interaction.response.send_message(error, ephemeral=True)
             return
-        if (name == source_option.name):
-            await interaction.response.send_message(
-                "`name` must differ from the copied game's display name.",
-                ephemeral=True)
-            return
-        overrides, error = self._updated_fields(
+        overrides, error = validation.updated_fields(
             name=name, role=role, icon=icon, color=color,
             channel=channel, forum=forum, tag=tag, visibility=visibility,
             message=message,
@@ -445,7 +255,7 @@ class LFGAdminMixin:
         if (error is not None):
             await interaction.response.send_message(error, ephemeral=True)
             return
-        api_fields, error = self._api_fields_error({
+        api_fields, error = validation.api_fields_error({
             "title_field": title_field,
             "table_talk_url_field": table_talk_url_field,
             "participants_field": participants_field,
@@ -467,6 +277,8 @@ class LFGAdminMixin:
                 f"`{command}` is already configured; use `/games update` "
                 "to change it.", ephemeral=True)
             return
+        await config_log.record_command_change(
+            interaction, "game.copy", f"{command} from {game}")
         await self._refresh_config()
         await self._sync_guild(interaction)
         await interaction.followup.send(
@@ -514,11 +326,13 @@ class LFGAdminMixin:
                 or not await self._guard_database(interaction)):
             return
         if (new_command is not None):
-            error = self._rename_error(interaction, command, new_command)
+            error = validation.rename_error(
+                new_command, command,
+                self.get_guild_config(interaction.guild_id).games)
             if (error is not None):
                 await interaction.response.send_message(error, ephemeral=True)
                 return
-        fields, error = self._updated_fields(
+        fields, error = validation.updated_fields(
             name=name, role=role, icon=icon, color=color,
             channel=channel, forum=forum, tag=tag, visibility=visibility,
             message=message,
@@ -526,7 +340,7 @@ class LFGAdminMixin:
             match_url=match_url, api_token=api_token,
             website_url=website_url, registration_url=registration_url,
             profile_url=profile_url, max_players=max_players)
-        api_fields, api_error = self._api_fields_error({
+        api_fields, api_error = validation.api_fields_error({
             "title_field": title_field,
             "table_talk_url_field": table_talk_url_field,
             "participants_field": participants_field,
@@ -556,6 +370,14 @@ class LFGAdminMixin:
             await interaction.followup.send(
                 f"`{command}` is not configured for this server.", ephemeral=True)
             return
+        if (new_command is not None):
+            summary = f"{command} -> {new_command}"
+        else:
+            summary = ", ".join(sorted(update_kwargs))
+        await config_log.record_command_change(
+            interaction,
+            "game.rename" if (new_command is not None) else "game.update",
+            summary)
         await self._refresh_config()
         await self._sync_guild(interaction)
         if (new_command is not None):
@@ -564,20 +386,6 @@ class LFGAdminMixin:
         else:
             await interaction.followup.send(
                 f"Game `{command}` updated.", ephemeral=True)
-
-    def _rename_error(self, interaction: discord.Interaction,
-                      command: str, new_command: str) -> str | None:
-        """Reject an invalid or unusable `new_command`; an error message, or None."""
-        if (not self.is_valid_command_name(new_command)):
-            return (f"`{new_command}` is not a valid slash command name: use "
-                    "1-32 lowercase letters, digits or underscores.")
-        if (new_command == command):
-            return "`new_command` must differ from `command`."
-        if (new_command in self.get_guild_config(
-                interaction.guild_id).games):
-            return (f"`{new_command}` is already configured for this server; "
-                    "use `/games update` to change it instead.")
-        return None
 
     @games_update.autocomplete("command")
     async def games_update_command_autocomplete(
@@ -599,6 +407,8 @@ class LFGAdminMixin:
             await interaction.followup.send(
                 f"`{command}` is not configured for this server.", ephemeral=True)
             return
+        await config_log.record_command_change(
+            interaction, "game.remove", command)
         await self._refresh_config()
         await self._sync_guild(interaction)
         await interaction.followup.send(
@@ -800,7 +610,7 @@ class LFGAdminMixin:
         if (not await self._guard_admin(interaction)
                 or not await self._guard_database(interaction)):
             return
-        error = self._parameter_error(name, values, api_field, display_name)
+        error = validation.parameter_error(name, values, api_field, display_name)
         if (error is not None):
             await interaction.response.send_message(error, ephemeral=True)
             return
@@ -821,6 +631,8 @@ class LFGAdminMixin:
             await interaction.followup.send(
                 f"`{game}` already has a parameter named `{name}`.", ephemeral=True)
             return
+        await config_log.record_command_change(
+            interaction, "parameter.add", f"{game}/{name}")
         await self._refresh_config()
         await self._sync_guild(interaction)
         await interaction.followup.send(
@@ -863,7 +675,7 @@ class LFGAdminMixin:
             await interaction.response.send_message(
                 f"`{game}` is not configured for this server.", ephemeral=True)
             return
-        error = self._parameter_error(name, values, api_field, display_name)
+        error = validation.parameter_error(name, values, api_field, display_name)
         if (error is not None):
             await interaction.response.send_message(error, ephemeral=True)
             return
@@ -886,6 +698,8 @@ class LFGAdminMixin:
             await interaction.followup.send(
                 f"`{game}` has no parameter named `{name}`.", ephemeral=True)
             return
+        await config_log.record_command_change(
+            interaction, "parameter.update", f"{game}/{name}")
         await self._refresh_config()
         await self._sync_guild(interaction)
         await interaction.followup.send(
@@ -924,6 +738,8 @@ class LFGAdminMixin:
             await interaction.followup.send(
                 f"`{game}` has no parameter named `{name}`.", ephemeral=True)
             return
+        await config_log.record_command_change(
+            interaction, "parameter.remove", f"{game}/{name}")
         await self._refresh_config()
         await self._sync_guild(interaction)
         await interaction.followup.send(

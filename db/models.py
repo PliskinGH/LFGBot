@@ -9,6 +9,8 @@ item); ``cogs/matchrolls/db_config.py`` maps
 those rows <-> config objects. Rows are seeded in config-file order and
 loaded back ordered by their insertion ``id``, preserving the ordering the
 cogs rely on.
+``ConfigChange`` records every configuration write (Discord command or web
+panel) for the audit trail and for the bot's reload queue.
 """
 
 from tortoise import fields, models
@@ -170,3 +172,26 @@ class RollDescription(models.Model):
 
     class Meta:
         table = "roll_descriptions"
+
+
+class ConfigChange(models.Model):
+    """One configuration write, from a Discord command or the web panel.
+
+    ``applied_at`` is set on writes the bot has already reloaded (its own
+    slash commands); a NULL value is a change the bot still owes, which is how
+    a write from outside its process reaches it.
+    """
+
+    id = fields.IntField(primary_key=True)
+    guild_id = fields.BigIntField(index=True)
+    actor_id = fields.BigIntField()
+    actor_name = fields.TextField(default="", db_default="")
+    # "discord" or "web" (see db/config_log.py).
+    source = fields.TextField()
+    action = fields.TextField()
+    summary = fields.TextField(default="", db_default="")
+    created_at = fields.DatetimeField(auto_now_add=True)
+    applied_at = fields.DatetimeField(null=True)
+
+    class Meta:
+        table = "config_changes"
