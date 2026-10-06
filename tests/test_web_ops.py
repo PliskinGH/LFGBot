@@ -11,7 +11,8 @@ from tests.conftest import api_client, api_guild, be_operator, csrf_of
 
 async def _change(guild_id: int = 7, action: str = "game.add",
                   source: str = config_log.SOURCE_WEB, applied: bool = False,
-                  days_ago: int = 0, actor_name: str = "Webbie"):
+                  days_ago: int = 0, minutes_ago: int = 0,
+                  actor_name: str = "Webbie"):
     """Log one change, stamped as applied a while ago when asked to be."""
     change = await config_log.record_change(
         guild_id, actor_id=1, actor_name=actor_name, source=source,
@@ -19,6 +20,10 @@ async def _change(guild_id: int = 7, action: str = "game.add",
     if (days_ago):
         change.applied_at = timezone.now() - timedelta(days=days_ago)
         await change.save(update_fields=["applied_at"])
+    if (minutes_ago):
+        # A row the bot has not picked up yet, written a while ago.
+        change.created_at = timezone.now() - timedelta(minutes=minutes_ago)
+        await change.save(update_fields=["created_at"])
     return change
 
 
@@ -78,6 +83,35 @@ class TestHub:
         assert "Discord could not be read" in response.text
         assert "<td>90401</td>" not in response.text
         assert response.text.count("<code>90401</code>") == 1
+
+
+class TestWaitingAge:
+    """How long the bot has owed a change, once it is worth saying."""
+
+    async def test_a_wait_worth_flagging_is_reported_on_the_hub(
+            self, db, client, login, monkeypatch):
+        be_operator(monkeypatch)
+        await _change(guild_id=7, minutes_ago=6)
+        login(client)
+        response = client.get("/ops")
+        assert ("6 minute(s): check that the bot process is running"
+                in response.text)
+
+    async def test_a_short_wait_is_only_mentioned(self, db, client, login,
+                                                 monkeypatch):
+        be_operator(monkeypatch)
+        await _change(guild_id=7, minutes_ago=2)
+        login(client)
+        response = client.get("/ops/changes")
+        assert "2 minute(s)." in response.text
+        assert "check that the bot process is running" not in response.text
+
+    async def test_nothing_owed_says_nothing(self, db, client, login,
+                                            monkeypatch):
+        be_operator(monkeypatch)
+        await _change(guild_id=7, applied=True)
+        login(client)
+        assert "minute(s)" not in client.get("/ops").text
 
 
 class TestChangeLog:

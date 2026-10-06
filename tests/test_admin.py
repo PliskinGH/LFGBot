@@ -679,9 +679,9 @@ class TestPreDeferHasNoDatabaseCalls:
 
         async def refresh(_self):
             if (not interaction.response.deferred):
-                early.append("_refresh_config")
+                early.append("reload_config")
 
-        monkeypatch.setattr(LFGAdminMixin, "_refresh_config", refresh)
+        monkeypatch.setattr(LFGAdminMixin, "reload_config", refresh)
         return early
 
     @pytest.mark.asyncio

@@ -4,6 +4,15 @@
 <h1 class="h3">Change log</h1>
 <p class="text-body-secondary">{{ total }} entry/entries match.
 {{ pending }} change(s) are waiting for the bot.</p>
+{% if waiting %}
+{% if waiting.stale %}
+<div class="alert alert-warning">The bot has not applied a change for
+{{ waiting.minutes }} minute(s): check that the bot process is running.</div>
+{% else %}
+<p class="text-body-secondary">The oldest waiting change has been waiting for
+{{ waiting.minutes }} minute(s).</p>
+{% endif %}
+{% endif %}
 
 <form class="row g-2 align-items-end mb-3" method="get"
       action="{{ url_for('ops_changes') }}">

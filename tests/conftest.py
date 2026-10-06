@@ -350,7 +350,13 @@ class FakeBot:
         self.user = FakeMember(1, "LFGBot")
         self._cogs = {}
         self._channels = {}
+        self.guilds: list = []
         self.provided_guild_ids: set = set()
+
+    @property
+    def cogs(self) -> dict:
+        """The loaded cogs, as ``commands.Bot`` exposes them."""
+        return self._cogs
 
     def get_cog(self, cog_name):
         return self._cogs.get(cog_name)
@@ -451,6 +457,8 @@ async def db():
     The test database is provisioned by the environment (CI service or local
     Postgres). Like the deploy step, the schema is built from the committed
     migrations; each test drops it and re-applies them for isolation.
+    ``Database.close()`` releases the global fallback context, so the next test
+    can initialize again.
     """
     url = _test_database_url()
     if (not url):

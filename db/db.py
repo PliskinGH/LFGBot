@@ -24,8 +24,13 @@ class Database:
         self.fresh: bool = False
 
     async def initialize(self) -> bool:
-        """Connect and report whether the database held no guild rows."""
-        await Tortoise.init(config=orm_config(self._url))
+        """Connect and report whether the database held no guild rows.
+
+        The global fallback is what lets a command handler's or the watcher's
+        task query: a task of its own does not inherit the context opened here.
+        """
+        await Tortoise.init(config=orm_config(self._url),
+                            _enable_global_fallback=True)
         self.fresh = (await models.Guild.all().count() == 0)
         return self.fresh
 

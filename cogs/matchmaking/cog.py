@@ -38,6 +38,10 @@ class Matchmaking(LFGAdminMixin, LFGConfigMixin, LFGGuildCommandsMixin,
         # Per-LFG-message locks:
         # the actions on each message are serialized to avoid race conditions.
         self._lfg_locks: dict[int, asyncio.Lock] = {}
+        # Serializes the in-memory reload and the command-tree rebuild that
+        # follows it: the slash commands and the web panel's watcher (see
+        # db/config_queue.py) are two writers of the same configuration.
+        self.config_lock = asyncio.Lock()
         # guild_id -> game_command -> { parameter_name -> {"display_name": label,
         # "values": {value: display_name}} }
         self.game_parameters: dict[int, dict[str, dict[str, ParameterDefinition]]] = {}

@@ -4,6 +4,15 @@
 <h1 class="h3">Operations</h1>
 <p class="text-body-secondary">Every server the bot is in.
 {{ pending }} change(s) are waiting for the bot to pick them up.</p>
+{% if waiting %}
+{% if waiting.stale %}
+<div class="alert alert-warning">The bot has not applied a change for
+{{ waiting.minutes }} minute(s): check that the bot process is running.</div>
+{% else %}
+<p class="text-body-secondary">The oldest waiting change has been waiting for
+{{ waiting.minutes }} minute(s).</p>
+{% endif %}
+{% endif %}
 <p>
   <a class="btn btn-outline-primary btn-sm" href="{{ url_for('ops_changes') }}">Change log</a>
   {% if knows_default %}

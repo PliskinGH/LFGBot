@@ -49,6 +49,9 @@ class LFGAdminMixin:
     (``DATABASE_URL`` set); config-file mode is read-only.
     """
 
+    # The queued change actions this cog owns (see db/config_queue.py).
+    change_prefixes = ("game.", "parameter.")
+
     games = app_commands.Group(
         name="games", description="Manage this server's games.",
         # Hide the whole /games group (including its subcommands) from
@@ -81,19 +84,22 @@ class LFGAdminMixin:
             return False
         return True
 
-    async def _refresh_config(self) -> None:
+    async def reload_config(self) -> None:
         """Reload the configuration from the database and re-register the
         dynamic per-guild commands."""
-        loaded = await db_config.load_config_from_db()
-        self.unregister_guild_commands()
-        self.guilds = loaded.guilds
-        self.default_guild_config = loaded.default_guild_config
-        self.game_parameters = loaded.game_parameters
-        self.game_api_fields = loaded.game_api_fields
-        self.default_api_fields = loaded.default_api_fields
-        self.register_guild_commands()
+        # Held across the reload and the re-registration: a second writer doing
+        # the same at once would collide on the commands it re-adds.
+        async with self.config_lock:
+            loaded = await db_config.load_config_from_db()
+            self.unregister_guild_commands()
+            self.guilds = loaded.guilds
+            self.default_guild_config = loaded.default_guild_config
+            self.game_parameters = loaded.game_parameters
+            self.game_api_fields = loaded.game_api_fields
+            self.default_api_fields = loaded.default_api_fields
+            self.register_guild_commands()
 
-    async def _sync_guild(self, interaction: discord.Interaction) -> None:
+    async def sync_guild(self, guild_id: int) -> None:
         """Sync the guild's slash commands so the change applies immediately.
 
         Per-guild syncs are lenient (Discord's restrictive daily limit applies
@@ -101,10 +107,6 @@ class LFGAdminMixin:
         failure here only delays the update: the startup sync in the bot's
         ``setup_hook`` re-syncs on the next restart.
         """
-        guild_id = interaction.guild_id
-        if (guild_id is None):
-            return
-        
         print(f"Syncing per-guild commands for guild {guild_id}...")
         guild = discord.Object(id=guild_id)
         try:
@@ -112,6 +114,18 @@ class LFGAdminMixin:
             print(f"Synced {len(synced)} command(s) for guild {guild_id}.")
         except Exception as error:
             print(f"Failed to sync commands for guild {guild_id}: {error}")
+
+    async def sync_applied(self, guild_ids: set[int]) -> None:
+        """Sync the commands of the guilds a queued change touched.
+
+        A change to the [DEFAULT] configuration is stored under guild 0 and can
+        alter the commands of every server the bot is in, so all of them are
+        re-synced; guild 0 itself has no commands of its own.
+        """
+        if (constants.DEFAULT_GUILD_ID in guild_ids):
+            guild_ids = {guild.id for guild in self.bot.guilds}
+        for guild_id in sorted(guild_ids):
+            await self.sync_guild(guild_id)
 
     @games.command(name="add", description="Add a game to this server.")
     @app_commands.describe(
@@ -186,8 +200,8 @@ class LFGAdminMixin:
                 "to change it.", ephemeral=True)
             return
         await config_log.record_command_change(interaction, "game.add", command)
-        await self._refresh_config()
-        await self._sync_guild(interaction)
+        await self.reload_config()
+        await self.sync_guild(interaction.guild_id)
         await interaction.followup.send(
             f"Game `{command}` added.", ephemeral=True)
 
@@ -279,8 +293,8 @@ class LFGAdminMixin:
             return
         await config_log.record_command_change(
             interaction, "game.copy", f"{command} from {game}")
-        await self._refresh_config()
-        await self._sync_guild(interaction)
+        await self.reload_config()
+        await self.sync_guild(interaction.guild_id)
         await interaction.followup.send(
             f"Game `{command}` copied from `{game}`.", ephemeral=True)
 
@@ -378,8 +392,8 @@ class LFGAdminMixin:
             interaction,
             "game.rename" if (new_command is not None) else "game.update",
             summary)
-        await self._refresh_config()
-        await self._sync_guild(interaction)
+        await self.reload_config()
+        await self.sync_guild(interaction.guild_id)
         if (new_command is not None):
             await interaction.followup.send(
                 f"Game `{command}` renamed to `{new_command}`.", ephemeral=True)
@@ -409,8 +423,8 @@ class LFGAdminMixin:
             return
         await config_log.record_command_change(
             interaction, "game.remove", command)
-        await self._refresh_config()
-        await self._sync_guild(interaction)
+        await self.reload_config()
+        await self.sync_guild(interaction.guild_id)
         await interaction.followup.send(
             f"Game `{command}` removed.", ephemeral=True)
 
@@ -633,8 +647,8 @@ class LFGAdminMixin:
             return
         await config_log.record_command_change(
             interaction, "parameter.add", f"{game}/{name}")
-        await self._refresh_config()
-        await self._sync_guild(interaction)
+        await self.reload_config()
+        await self.sync_guild(interaction.guild_id)
         await interaction.followup.send(
             f"Parameter `{name}` added to `{game}`.", ephemeral=True)
 
@@ -700,8 +714,8 @@ class LFGAdminMixin:
             return
         await config_log.record_command_change(
             interaction, "parameter.update", f"{game}/{name}")
-        await self._refresh_config()
-        await self._sync_guild(interaction)
+        await self.reload_config()
+        await self.sync_guild(interaction.guild_id)
         await interaction.followup.send(
             f"Parameter `{name}` updated.", ephemeral=True)
 
@@ -740,8 +754,8 @@ class LFGAdminMixin:
             return
         await config_log.record_command_change(
             interaction, "parameter.remove", f"{game}/{name}")
-        await self._refresh_config()
-        await self._sync_guild(interaction)
+        await self.reload_config()
+        await self.sync_guild(interaction.guild_id)
         await interaction.followup.send(
             f"Parameter `{name}` removed from `{game}`.", ephemeral=True)
 

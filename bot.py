@@ -1,10 +1,11 @@
 import os
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 from dotenv import load_dotenv
 
 from common import utils
 from db import Database
+from db.config_queue import apply_pending
 
 load_dotenv()
 
@@ -17,6 +18,9 @@ TEST_GUILD_IDS = utils.split_config_list(os.getenv('TEST_GUILD_ID'))
 # Optional configuration database (see db/); without it, or when the database
 # cannot be reached, the bot falls back to the config files.
 DATABASE_URL = os.getenv('DATABASE_URL')
+# How often the bot applies the configuration writes made outside its own
+# process, i.e. the web panel's queue (see db/config_queue.py).
+CONFIG_POLL_SECONDS = 30
 if (PREFIX is None):
     PREFIX = "!"
 
@@ -36,6 +40,12 @@ class LFGBot(commands.Bot):
         self.provided_guild_ids: set[int] = set()
         # Postgres-backed configuration store; None in config-file mode.
         self.db: Database | None = None
+        # Applies the web panel's queued writes to this process's cogs; started
+        # by setup_hook once the cogs are loaded (see db/config_queue.py).
+        self.config_watcher = tasks.loop(seconds=CONFIG_POLL_SECONDS)(
+            self._apply_queued_changes)
+        self.config_watcher.before_loop(self._wait_until_ready)
+        self.config_watcher.error(self._report_watcher_failure)
 
     async def setup_hook(self):
         """Runs automatically before the bot connects to Discord."""
@@ -90,6 +100,10 @@ class LFGBot(commands.Bot):
             synced = await self.tree.sync()
             print(f"Synced {len(synced)} command(s) globally.")
 
+        # Only now: with the cogs loaded and their commands synced, the watcher
+        # may start applying the web panel's writes.
+        self._start_config_watcher()
+
     async def _init_database(self):
         """Initialize the optional Postgres-backed configuration store; on
         any failure the bot falls back to the config files."""
@@ -111,6 +125,32 @@ class LFGBot(commands.Bot):
             return
         print("Database initialized: cog setup will seed from the config files "
               "when a table is empty, else load from the database.")
+
+    def _start_config_watcher(self) -> None:
+        """Watch the web panel's queue; without a database there is nothing there."""
+        if (self.db is None or self.config_watcher.is_running()):
+            return
+        self.config_watcher.start()
+
+    async def _apply_queued_changes(self) -> None:
+        """Apply what the web panel queued, so its writes reach this process."""
+        applied = await apply_pending(self)
+        if (applied):
+            print(f"Applied {applied} configuration change(s) from the web panel.")
+
+    async def _wait_until_ready(self) -> None:
+        """Hold the first tick until the bot is logged in and knows its guilds."""
+        await self.wait_until_ready()
+
+    async def _report_watcher_failure(self, error) -> None:
+        """Report a failed tick; the watcher carries on and retries."""
+        print(f"The configuration watcher failed ({error}); "
+              "the next tick tries again.")
+
+    async def close(self) -> None:
+        """Stop the configuration watcher, then close the bot as usual."""
+        self.config_watcher.cancel()
+        await super().close()
 
     async def on_ready(self):
         print(f"Logged in as {self.user} (ID: {self.user.id})")

@@ -64,6 +64,15 @@ async def pending_count() -> int:
     return await models.ConfigChange.filter(applied_at=None).count()
 
 
+async def pending_age_minutes() -> int | None:
+    """How long the oldest change the bot still owes has been waiting, else None."""
+    oldest = await (models.ConfigChange.filter(applied_at=None)
+                    .order_by("id").first())
+    if (oldest is None):
+        return None
+    return int((timezone.now() - oldest.created_at).total_seconds() // 60)
+
+
 async def changes_for_guild(guild_id: int,
                             limit: int = 10) -> list[models.ConfigChange]:
     """The most recent changes of one guild, newest first."""

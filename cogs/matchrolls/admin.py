@@ -20,6 +20,9 @@ class RollsAdminMixin:
     (``DATABASE_URL`` set); config-file mode is read-only.
     """
 
+    # The queued change actions this cog owns (see db/config_queue.py).
+    change_prefixes = ("rollset.",)
+
     rollsets = app_commands.Group(
         name=constants.ROLLSETS_COMMAND,
         description="Manage this server's roll sets.",
@@ -134,7 +137,7 @@ class RollsAdminMixin:
             return
         await config_log.record_command_change(
             interaction, "rollset.category.add", category)
-        await self._reload()
+        await self.reload_config()
         await interaction.followup.send(
             f"Roll category `{category}` added "
             f"({len(item_names)} items).",
@@ -189,7 +192,7 @@ class RollsAdminMixin:
             summary = f"{category} -> {new_name}"
         await config_log.record_command_change(
             interaction, "rollset.category.update", summary)
-        await self._reload()
+        await self.reload_config()
         if (new_name and new_name != category):
             message = f"Roll category `{category}` renamed to `{new_name}`."
         else:
@@ -224,7 +227,7 @@ class RollsAdminMixin:
             if (await db_config.delete_category(guild_id, category)):
                 await config_log.record_command_change(
                     interaction, "rollset.category.remove", category)
-                await self._reload()
+                await self.reload_config()
                 return f"Deleted roll category `{category}`."
             return f"There is no roll category `{category}`."
 
@@ -354,7 +357,7 @@ class RollsAdminMixin:
             return
         await config_log.record_command_change(
             interaction, "rollset.description.add", item)
-        await self._reload()
+        await self.reload_config()
         await interaction.followup.send(
             f"Added a description variant to `{item}`.", ephemeral=True)
 
@@ -415,7 +418,7 @@ class RollsAdminMixin:
             return
         await config_log.record_command_change(
             interaction, "rollset.description.update", f"{item} #{variant}")
-        await self._reload()
+        await self.reload_config()
         await interaction.followup.send(
             f"Updated variant #{variant} of `{item}`.", ephemeral=True)
 
@@ -443,7 +446,7 @@ class RollsAdminMixin:
             return
         await config_log.record_command_change(
             interaction, "rollset.description.remove", f"{item} #{variant}")
-        await self._reload()
+        await self.reload_config()
         await interaction.followup.send(
             f"Removed variant #{variant} from `{item}`.", ephemeral=True)
 
@@ -471,13 +474,16 @@ class RollsAdminMixin:
             return False
         return True
 
-    async def _reload(self) -> None:
+    async def reload_config(self) -> None:
         """Refresh the in-memory configuration from the database."""
-        loaded = await db_config.load_config_from_db()
-        self.default_categories = loaded.default_categories
-        self.guilds = loaded.guilds
-        self.default_descriptions = loaded.default_descriptions
-        self.guild_descriptions = loaded.guild_descriptions
+        # Held across the reload: a second writer doing the same at once would
+        # leave the cog reading a half-swapped configuration.
+        async with self.config_lock:
+            loaded = await db_config.load_config_from_db()
+            self.default_categories = loaded.default_categories
+            self.guilds = loaded.guilds
+            self.default_descriptions = loaded.default_descriptions
+            self.guild_descriptions = loaded.guild_descriptions
 
     async def _expect_guild(self, interaction: discord.Interaction) -> int | None:
         """Send an ephemeral error and return None outside a guild."""

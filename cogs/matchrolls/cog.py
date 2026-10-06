@@ -1,5 +1,6 @@
 """The concrete MatchRolls cog, composing the feature mixins."""
 
+import asyncio
 import configparser
 
 from discord.ext import commands
@@ -20,6 +21,10 @@ class MatchRolls(RollsAdminMixin, RollsConfigMixin, RollsHelpMixin,
                  descriptions: list[dict] = None,
                  loaded_config: LoadedRollsConfig = None):
         self.bot = bot
+        # Serializes the in-memory reload: the slash commands and the web
+        # panel's watcher (see db/config_queue.py) are two writers of the same
+        # configuration.
+        self.config_lock = asyncio.Lock()
         if (loaded_config is not None):
             # Pre-parsed configuration (e.g. from the database).
             self.default_categories = loaded_config.default_categories

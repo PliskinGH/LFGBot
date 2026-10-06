@@ -14,6 +14,8 @@ from .. import auth, csrf, discord_reads, overview, pages
 DEFAULT_GUILD_ID = 0
 PAGE_SIZE = 50
 PRUNE_DAYS = 90
+# A wait longer than this means the bot is not applying what the panel writes.
+STALE_AFTER_MINUTES = 5
 # Why a configured server has no name to show, in the two cases there are.
 NOT_IN_SERVER = "the bot is not in this server"
 UNREADABLE = "Discord could not be read"
@@ -49,7 +51,8 @@ async def hub(request):
     return pages.render(request, "ops.html", active="ops",
                         guilds=sorted(rows.values(), key=_order),
                         knows_default=DEFAULT_GUILD_ID in stored,
-                        pending=await config_log.pending_count())
+                        pending=await config_log.pending_count(),
+                        waiting=await _waiting())
 
 
 def _order(row: dict):
@@ -78,7 +81,8 @@ async def changes_page(request):
                         changes=changes, total=total, filters=filters,
                         size=PAGE_SIZE, states=STATES,
                         sources=(config_log.SOURCE_DISCORD, config_log.SOURCE_WEB),
-                        pending=await config_log.pending_count())
+                        pending=await config_log.pending_count(),
+                        waiting=await _waiting())
 
 
 @auth.require_operator
@@ -101,6 +105,18 @@ async def prune_page(request):
                         days=PRUNE_DAYS,
                         prunable=await config_log.applied_before(_cutoff(PRUNE_DAYS)),
                         pending=await config_log.pending_count())
+
+
+async def _waiting() -> dict | None:
+    """How long the oldest waiting change has waited, when it is worth saying.
+
+    A change applied within the minute is the normal case, so nothing is shown;
+    a longer wait is reported, and flagged once the bot should have caught up.
+    """
+    minutes = await config_log.pending_age_minutes()
+    if (minutes is None or minutes < 1):
+        return None
+    return {"minutes": minutes, "stale": minutes >= STALE_AFTER_MINUTES}
 
 
 def _filters(request) -> dict:
