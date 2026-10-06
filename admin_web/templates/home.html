@@ -1,0 +1,22 @@
+{% extends 'base.html' %}
+{% block title %}Servers — LFG bot panel{% endblock %}
+{% block content %}
+<h1 class="h3">Your servers</h1>
+<p class="text-body-secondary">Servers where Discord gives you
+<em>Manage Server</em>.</p>
+{% if guilds %}
+<div class="list-group">
+  {% for guild in guilds %}
+  <a class="list-group-item list-group-item-action d-flex justify-content-between align-items-center"
+     href="{{ url_for('guild', guild_id=guild.id) }}">
+    <span>{{ guild.name }}</span>
+    <span class="text-body-secondary small"><code>{{ guild.id }}</code></span>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+<p class="mb-0">No server of yours can be edited here. You need the
+<em>Manage Server</em> permission on a server the bot is in (and the panel needs
+the <code>guilds</code> scope, which the login asks for).</p>
+{% endif %}
+{% endblock %}

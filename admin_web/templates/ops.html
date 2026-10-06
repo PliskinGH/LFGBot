@@ -1,0 +1,44 @@
+{% extends 'base.html' %}
+{% block title %}Operations — LFG bot panel{% endblock %}
+{% block content %}
+<h1 class="h3">Operations</h1>
+<p class="text-body-secondary">Every server the bot is in.
+{{ pending }} change(s) are waiting for the bot to pick them up.</p>
+<p>
+  <a class="btn btn-outline-primary btn-sm" href="{{ url_for('ops_changes') }}">Change log</a>
+  {% if knows_default %}
+  <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('ops_default') }}">[DEFAULT] configuration</a>
+  {% endif %}
+</p>
+<div class="card table-card">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead><tr><th>Server</th><th>Id</th><th>Configuration</th><th></th></tr></thead>
+      <tbody>
+      {% for guild in guilds %}
+        <tr>
+          <td>
+          {%- if guild.known -%}
+            {{ guild.name }}
+          {%- else -%}
+            <span class="text-body-secondary fst-italic">{{ guild.note }}</span>
+          {%- endif -%}
+          </td>
+          <td><code>{{ guild.id }}</code></td>
+          <td>
+          {%- if guild.configured -%}
+            <span class="badge text-bg-success">own</span>
+          {%- else -%}
+            <span class="badge text-bg-secondary">inherits [DEFAULT]</span>
+          {%- endif -%}
+          </td>
+          <td><a href="{{ url_for('guild', guild_id=guild.id) }}">Open</a></td>
+        </tr>
+      {% else %}
+        <tr><td colspan="4" class="text-body-secondary">No server is known.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

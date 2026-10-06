@@ -1,0 +1,17 @@
+{% extends 'base.html' %}
+{% block title %}Prune the change log — LFG bot panel{% endblock %}
+{% block content %}
+<h1 class="h3">Prune the change log</h1>
+<p>
+  {{ prunable }} applied entry/entries are older than {{ days }} day(s).
+  {{ pending }} change(s) are still waiting for the bot: those are never deleted.
+</p>
+<form method="post" action="{{ url_for('ops_prune') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label class="form-label" for="days">Delete applied entries older than (days)</label>
+  <input class="form-control mb-3" id="days" name="days" type="number" min="1"
+         value="{{ days }}" style="max-width: 10rem">
+  <button class="btn btn-danger" type="submit">Delete them</button>
+  <a class="btn btn-secondary" href="{{ url_for('ops_changes') }}">Cancel</a>
+</form>
+{% endblock %}

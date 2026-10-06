@@ -1,0 +1,65 @@
+{% extends 'base.html' %}
+{% block title %}{{ guild_name }} — LFG bot panel{% endblock %}
+{% block content %}
+<h1 class="h3">{{ guild_name }}</h1>
+<p class="text-body-secondary">
+{% if is_default %}
+The <code>[DEFAULT]</code> configuration: every server without configuration of
+its own inherits it.
+{% else %}
+Server <code>{{ guild_id }}</code>.
+{% endif %}
+</p>
+{% if inherited and not is_default %}
+<div class="alert alert-info">This server has no configuration of its own: it
+inherits <code>[DEFAULT]</code>.</div>
+{% endif %}
+
+<h2 class="h5 mt-4">Games <span class="text-body-secondary">({{ games|length }})</span></h2>
+{% if games %}
+<div class="card table-card">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead>
+        <tr><th>Command</th><th>Name</th><th>Pings</th><th>Posts in</th>
+            <th>Players</th><th>Parameters</th><th>League</th></tr>
+      </thead>
+      <tbody>
+      {% for game in games %}
+        <tr>
+          <td><code>{{ game.command }}</code></td>
+          <td>{{ game.name or '—' }}</td>
+          <td>{{ game.role or '—' }}</td>
+          <td>{{ game.forum or game.channel or '—' }}</td>
+          <td>{{ game.players or '—' }}</td>
+          <td>{{ game.parameters|join(', ') if game.parameters else '—' }}</td>
+          <td>
+          {%- if game.league -%}
+            {{ 'token set' if game.token else 'no token' }}
+          {%- else -%}—{%- endif -%}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<p class="text-body-secondary">No game is configured here.</p>
+{% endif %}
+
+<h2 class="h5 mt-4">Roll sets <span class="text-body-secondary">({{ rolls|length }})</span></h2>
+{% if rolls %}
+<ul class="list-group">
+  {% for roll in rolls %}
+  <li class="list-group-item"><strong>{{ roll.name }}</strong> —
+  {{ roll.names|join(', ') }}</li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="text-body-secondary">No roll category is configured here.</p>
+{% endif %}
+
+<h2 class="h5 mt-4">Recent changes</h2>
+{% include '_changes.html' %}
+{% endblock %}

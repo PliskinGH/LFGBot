@@ -1,0 +1,31 @@
+<div class="card table-card">
+  <div class="table-responsive">
+    <table class="table table-hover table-striped align-middle mb-0">
+      <thead>
+        <tr><th>When (UTC)</th><th>Server</th><th>Source</th><th>Who</th>
+            <th>Action</th><th>Detail</th><th>State</th></tr>
+      </thead>
+      <tbody>
+      {% for change in changes %}
+        <tr>
+          <td class="text-nowrap">{{ change.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+          <td>{{ '[DEFAULT]' if change.guild_id == 0 else change.guild_id }}</td>
+          <td>{{ change.source }}</td>
+          <td>{{ change.actor_name or change.actor_id }}</td>
+          <td><code>{{ change.action }}</code></td>
+          <td>{{ change.summary or '—' }}</td>
+          <td class="text-nowrap">
+          {%- if change.applied_at -%}
+            <span class="badge text-bg-success">applied</span>
+          {%- else -%}
+            <span class="badge text-bg-warning">waiting</span>
+          {%- endif -%}
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="7" class="text-body-secondary">Nothing logged yet.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>

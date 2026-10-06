@@ -1,0 +1,11 @@
+{% extends 'base.html' %}
+{% block title %}{{ status }} — LFG bot panel{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="card-body">
+    <h1 class="h4 card-title">{{ status }} — {{ title }}</h1>
+    <p class="mb-3">{{ detail }}</p>
+    <a class="btn btn-primary" href="{{ url_for('home') }}">Back to the servers</a>
+  </div>
+</div>
+{% endblock %}

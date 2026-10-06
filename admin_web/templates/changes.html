@@ -1,0 +1,60 @@
+{% extends 'base.html' %}
+{% block title %}Change log — LFG bot panel{% endblock %}
+{% block content %}
+<h1 class="h3">Change log</h1>
+<p class="text-body-secondary">{{ total }} entry/entries match.
+{{ pending }} change(s) are waiting for the bot.</p>
+
+<form class="row g-2 align-items-end mb-3" method="get"
+      action="{{ url_for('ops_changes') }}">
+  <div class="col-auto">
+    <label class="form-label" for="guild_id">Server id</label>
+    <input class="form-control" id="guild_id" name="guild_id"
+           value="{{ '' if filters.guild_id is none else filters.guild_id }}">
+  </div>
+  <div class="col-auto">
+    <label class="form-label" for="source">Source</label>
+    <select class="form-select" id="source" name="source">
+      <option value="">Any source</option>
+      {% for option in sources %}
+      <option value="{{ option }}"
+              {% if filters.source == option %}selected{% endif %}>{{ option }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-auto">
+    <label class="form-label" for="state">State</label>
+    <select class="form-select" id="state" name="state">
+      {% for value, label in states %}
+      <option value="{{ value }}"
+              {% if filters.state == value %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-auto">
+    <button class="btn btn-primary" type="submit">Filter</button>
+  </div>
+</form>
+
+{% include '_changes.html' %}
+
+{% set query = 'guild_id=' ~ ('' if filters.guild_id is none else filters.guild_id)
+   ~ '&source=' ~ (filters.source or '') ~ '&state=' ~ (filters.state or '') %}
+<div class="d-flex justify-content-between">
+  <span>
+    {% if filters.page > 1 %}
+    <a href="{{ url_for('ops_changes') }}?{{ query }}&page={{ filters.page - 1 }}">Newer</a>
+    {% endif %}
+  </span>
+  <span class="text-body-secondary">page {{ filters.page }}</span>
+  <span>
+    {% if filters.offset + changes|length < total %}
+    <a href="{{ url_for('ops_changes') }}?{{ query }}&page={{ filters.page + 1 }}">Older</a>
+    {% endif %}
+  </span>
+</div>
+
+<p class="mt-3">
+  <a class="btn btn-outline-danger btn-sm" href="{{ url_for('ops_prune') }}">Prune old entries</a>
+</p>
+{% endblock %}

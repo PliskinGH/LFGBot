@@ -57,3 +57,48 @@ async def mark_applied(changes: list[models.ConfigChange]) -> None:
     await models.ConfigChange.filter(
         id__in=[change.id for change in changes]).update(
         applied_at=timezone.now())
+
+
+async def pending_count() -> int:
+    """How many changes the bot has not applied yet."""
+    return await models.ConfigChange.filter(applied_at=None).count()
+
+
+async def changes_for_guild(guild_id: int,
+                            limit: int = 10) -> list[models.ConfigChange]:
+    """The most recent changes of one guild, newest first."""
+    return await (models.ConfigChange.filter(guild_id=guild_id)
+                  .order_by("-id").limit(limit))
+
+
+async def change_page(*, guild_id: int | None = None, source: str | None = None,
+                      pending: bool | None = None,
+                      limit: int = 50, offset: int = 0,
+                      ) -> tuple[list[models.ConfigChange], int]:
+    """A page of the log, newest first, with how many rows the filter matched."""
+    query = models.ConfigChange.all()
+    if (guild_id is not None):
+        query = query.filter(guild_id=guild_id)
+    if (source):
+        query = query.filter(source=source)
+    if (pending is not None):
+        query = (query.filter(applied_at=None) if pending
+                 else query.exclude(applied_at=None))
+    total = await query.count()
+    return (await query.order_by("-id").offset(offset).limit(limit), total)
+
+
+async def applied_before(cutoff) -> int:
+    """How many applied changes are older than a cutoff."""
+    return await models.ConfigChange.filter(
+        applied_at__not_isnull=True, applied_at__lt=cutoff).count()
+
+
+async def prune_applied(cutoff) -> int:
+    """Delete the applied changes older than a cutoff; how many went.
+
+    Pending changes are never deleted: they are the bot's work queue, and a
+    row left pending is the sign the bot has not caught up.
+    """
+    return await models.ConfigChange.filter(
+        applied_at__not_isnull=True, applied_at__lt=cutoff).delete()

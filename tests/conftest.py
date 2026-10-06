@@ -8,12 +8,18 @@ followup``, ``channels``, ``members``, etc. without touching the network.
 from __future__ import annotations
 
 import configparser
+import json
 import os
+import re
 import sys
+from base64 import b64decode
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 import discord
 import pytest
+from itsdangerous import TimestampSigner
+from starlette.testclient import TestClient
 
 # Make the project root importable: tests run from the repo root via pytest.ini,
 # but keep this explicit so the suite also works if invoked from elsewhere.
@@ -462,3 +468,196 @@ async def db():
         pytest.skip(f"Database at {_safe_url(url)} is unreachable: {error}")
     yield database
     await database.close()
+
+
+# --------------------------------------------------------------------------- #
+# Web panel
+# --------------------------------------------------------------------------- #
+
+# The session secret and cookie the web tests sign and read.
+WEB_SESSION_SECRET = "test-session-secret"
+WEB_SESSION_COOKIE = "lfgbot_admin"
+
+
+@pytest.fixture
+def web_app(monkeypatch):
+    """The panel's app, with its credentials and session secret pinned.
+
+    The app owns its Discord reads and no client is logged in, so a test
+    reaches the database rather than the network; one that wants names or
+    picker choices gives those reads a stand-in client (see ``reads``). The
+    app is built without running its lifespan, so the database comes from the
+    ``db`` fixture.
+    """
+    from admin_web import settings
+
+    monkeypatch.setattr(settings, "SESSION_SECRET", WEB_SESSION_SECRET)
+    monkeypatch.setattr(settings, "DISCORD_TOKEN", "test-bot-token")
+    monkeypatch.setattr(settings, "DISCORD_CLIENT_ID", "test-client")
+    monkeypatch.setattr(settings, "DISCORD_CLIENT_SECRET", "test-secret")
+    monkeypatch.setattr(settings, "OPERATOR_DISCORD_IDS", frozenset())
+
+    from admin_web.app import create_app
+
+    return create_app()
+
+
+@pytest.fixture
+def client(web_app) -> TestClient:
+    """A test client on the panel."""
+    return TestClient(web_app)
+
+
+@pytest.fixture
+def reads(web_app):
+    """The app's Discord reads, whose client a test replaces with a stand-in."""
+    return web_app.state.discord
+
+
+@pytest.fixture
+def login(monkeypatch):
+    """Log a test client in through the panel's own OAuth callback.
+
+    The identity Discord would report is stubbed, so the login is real
+    everywhere else: the state check, the session cookie, the stored account.
+    """
+    def log(client: TestClient, *, user_id: int = 42, name: str = "Manager",
+            guilds: dict[int, str] | None = None) -> None:
+        from admin_web import auth
+
+        async def fake_identity(code, redirect_uri):
+            return {
+                "account": {"id": str(user_id), "username": name.lower(),
+                            "global_name": name},
+                "guilds": [{"id": str(guild_id), "name": guild_name,
+                            "permissions": str(auth.MANAGE_GUILD)}
+                           for guild_id, guild_name in (guilds or {}).items()],
+            }
+
+        monkeypatch.setattr(auth, "fetch_identity", fake_identity)
+        connect = client.get("/discord/connect", follow_redirects=False)
+        state = parse_qs(urlsplit(connect.headers["location"]).query)["state"][0]
+        done = client.get("/discord/callback",
+                          params={"code": "code", "state": state},
+                          follow_redirects=False)
+        assert done.status_code == 303, done.text
+
+    return log
+
+
+def read_session(client: TestClient) -> dict:
+    """The session the client's cookie carries, read back for assertions.
+
+    A session the middleware cleared comes back as the JSON literal ``null``,
+    which reads here as an empty session.
+    """
+    for cookie in client.cookies.jar:
+        if (cookie.name == WEB_SESSION_COOKIE):
+            data = cookie.value.encode("utf-8")
+            return json.loads(b64decode(
+                TimestampSigner(WEB_SESSION_SECRET).unsign(data))) or {}
+    return {}
+
+
+def csrf_of(client: TestClient, path: str = "/") -> str:
+    """The CSRF token the page at ``path`` rendered into its forms."""
+    page = client.get(path).text
+    match = re.search(r'name="csrf_token" value="([^"]+)"', page)
+    assert match is not None, f"no form was rendered at {path}"
+    return match.group(1)
+
+
+def be_operator(monkeypatch, user_id: int = 42) -> None:
+    """Let the session's account operate on every server."""
+    from admin_web import settings
+
+    monkeypatch.setattr(settings, "OPERATOR_DISCORD_IDS", frozenset({user_id}))
+
+
+# The Discord stand-ins the panel's reads go through, in place of a REST client.
+
+
+class ApiTag:
+    """A forum tag, as the REST client reads one."""
+
+    def __init__(self, id: int, name: str):
+        self.id = id
+        self.name = name
+
+
+class ApiChannel:
+    """A channel of a given type, as the REST client reads one."""
+
+    def __init__(self, id: int, name: str, type: discord.ChannelType,
+                 tags: list | None = None):
+        self.id = id
+        self.name = name
+        self.type = type
+        self.available_tags = tags or []
+
+
+class ApiRole:
+    """A role, with the two flags the panel filters on."""
+
+    def __init__(self, id: int, name: str, default: bool = False,
+                 managed: bool = False):
+        self.id = id
+        self.name = name
+        self.managed = managed
+        self._default = default
+
+    def is_default(self) -> bool:
+        return self._default
+
+
+class ApiGuild:
+    """A guild, offering the two reads the panel makes of one."""
+
+    def __init__(self, id: int, name: str, channels: list | None = None,
+                 roles: list | None = None):
+        self.id = id
+        self.name = name
+        self.channels = channels or []
+        self.roles = roles or []
+
+    async def fetch_channels(self) -> list:
+        return list(self.channels)
+
+    async def fetch_roles(self) -> list:
+        return list(self.roles)
+
+
+class ApiClient:
+    """A stand-in for the REST client, counting the guild reads it served."""
+
+    def __init__(self, guilds: list | None = None,
+                 channels: list | None = None):
+        self.guilds = list(guilds or [])
+        self.known_channels = {channel.id: channel for channel in channels or []}
+        self.guild_fetches = 0
+
+    async def fetch_guilds(self, *, limit=None):
+        for guild in self.guilds:
+            yield guild
+
+    async def fetch_guild(self, guild_id: int) -> ApiGuild:
+        self.guild_fetches += 1
+        for guild in self.guilds:
+            if (guild.id == guild_id):
+                return guild
+        raise AssertionError(f"no guild {guild_id} was set up")
+
+    async def fetch_channel(self, channel_id: int) -> ApiChannel:
+        return self.known_channels[channel_id]
+
+
+def api_guild(guild_id: int = 7, name: str = "Server Seven",
+              channels: list | None = None,
+              roles: list | None = None) -> ApiGuild:
+    """A guild with the channels and roles a test gives it."""
+    return ApiGuild(guild_id, name, channels=channels, roles=roles)
+
+
+def api_client(*guilds: ApiGuild, forums: list | None = None) -> ApiClient:
+    """A REST client stand-in over the given guilds, and the forums it can fetch."""
+    return ApiClient(list(guilds), channels=forums)

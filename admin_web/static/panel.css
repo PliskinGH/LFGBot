@@ -1,0 +1,22 @@
+/* The few additions the panel makes to Bootstrap. */
+
+.table code,
+.list-group-item code {
+  /* Ids and command names must not wrap mid-token. */
+  white-space: nowrap;
+}
+
+.navbar .navbar-text {
+  /* The account name stays next to the log out button. */
+  white-space: nowrap;
+}
+
+/* A table in a card is clipped to the card's rounded corners, and its last row
+   does not double the card's own border. */
+.table-card {
+  overflow: hidden;
+}
+
+.table-card .table > tbody:last-child > tr:last-child > * {
+  border-bottom-width: 0;
+}
