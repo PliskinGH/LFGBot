@@ -59,6 +59,18 @@ async def mark_applied(changes: list[models.ConfigChange]) -> None:
         applied_at=timezone.now())
 
 
+async def mark_pending_applied() -> int:
+    """Stamp every pending change applied; how many there were.
+
+    The bot writes off its queue with this at startup: the cogs load the
+    database before it logs in, so a write already committed is in the
+    configuration they loaded and owes no reload. A write that arrives after
+    this stays pending, for the watcher to apply (see db/config_queue.py).
+    """
+    return await models.ConfigChange.filter(applied_at=None).update(
+        applied_at=timezone.now())
+
+
 async def pending_count() -> int:
     """How many changes the bot has not applied yet."""
     return await models.ConfigChange.filter(applied_at=None).count()

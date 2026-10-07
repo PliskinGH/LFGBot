@@ -4,7 +4,7 @@ from discord.ext import commands, tasks
 from dotenv import load_dotenv
 
 from common import utils
-from db import Database
+from db import Database, config_log
 from db.config_queue import apply_pending
 
 # The file wins over the environment: a stale or empty variable left in a shell
@@ -52,6 +52,9 @@ class LFGBot(commands.Bot):
     async def setup_hook(self):
         """Runs automatically before the bot connects to Discord."""
         await self._init_database()
+        # The cogs load the database below, so a write already committed is in
+        # the configuration they load: a restart owes nothing.
+        await self._mark_pending_applied()
         # Loop through files in the ./cogs directory
         for filename in os.listdir("./cogs"):
             if filename.endswith(".py"):
@@ -127,6 +130,20 @@ class LFGBot(commands.Bot):
             return
         print("Database initialized: cog setup will seed from the config files "
               "when a table is empty, else load from the database.")
+
+    async def _mark_pending_applied(self) -> None:
+        """Write off the queue the cogs are about to load over (see setup_hook)."""
+        if (self.db is None):
+            return
+        try:
+            stamped = await config_log.mark_pending_applied()
+        except Exception as error:
+            print(f"Could not write off the queued changes ({error}); "
+                  "the watcher applies them.")
+            return
+        if (stamped):
+            print(f"{stamped} queued configuration change(s) were already "
+                  "loaded at startup.")
 
     def _start_config_watcher(self) -> None:
         """Watch the web panel's queue; without a database there is nothing there."""

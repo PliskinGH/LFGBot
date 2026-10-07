@@ -79,6 +79,35 @@ class TestRecordChange:
         assert stored.applied_at is not None
 
 
+class TestMarkPendingApplied:
+    """A restart writes off the queue its own configuration load covers."""
+
+    async def test_it_stamps_every_pending_change(self, db):
+        for guild_id, action in ((1, "game.add"), (2, "rollset.item.add")):
+            await config_log.record_change(
+                guild_id, actor_id=7, actor_name="Webbie",
+                source=config_log.SOURCE_WEB, action=action)
+        assert await config_log.mark_pending_applied() == 2
+        assert await config_log.pending_changes() == {}
+        assert await models.ConfigChange.filter(applied_at=None).count() == 0
+
+    async def test_it_leaves_applied_changes_alone(self, db):
+        interaction = FakeInteraction(user=_manager(), guild_id=GAMES_GUILD_ID)
+        await config_log.record_command_change(interaction, "game.add")
+        assert await config_log.mark_pending_applied() == 0
+        stored = await models.ConfigChange.get()
+        assert stored.applied_at is not None
+
+    async def test_a_write_arriving_afterwards_is_still_pending(self, db):
+        # The restart covers what its load read; a later write is the watcher's
+        # to apply (see db/config_queue.py).
+        assert await config_log.mark_pending_applied() == 0
+        await config_log.record_change(
+            GAMES_GUILD_ID, actor_id=7, actor_name="Webbie",
+            source=config_log.SOURCE_WEB, action="game.add")
+        assert sorted(await config_log.pending_changes()) == [GAMES_GUILD_ID]
+
+
 class TestCommandWritesAreLogged:
     """Every /games and /rollsets write leaves a row saying what it changed."""
 
