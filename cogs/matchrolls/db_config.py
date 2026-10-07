@@ -174,11 +174,11 @@ def _description_embed(description: models.RollDescription) -> dict:
     return embed
 
 
-async def description_variant_embeds(guild_id: int, item_name: str,
+async def description_variant_embeds(guild_id: int, item_id: int,
                                      ) -> list[dict]:
-    """The item's description variants as embed dicts, in insertion order."""
+    """One of the guild's items' variants as embed dicts, in insertion order."""
     return [_description_embed(description)
-            for description in await description_variants(guild_id, item_name)]
+            for description in await description_variants(guild_id, item_id)]
 
 
 # --------------------------------------------------------------------------- #
@@ -284,26 +284,76 @@ async def _guild_has_own_categories(guild_id: int) -> bool:
         guild__guild_id=guild_id).count() > 0)
 
 
+async def _read_source(guild_id: int) -> int:
+    """The guild whose rows a guild reads: its own once materialized, else
+    the [DEFAULT] ones."""
+    if (await _guild_has_own_categories(guild_id)):
+        return guild_id
+    return constants.DEFAULT_GUILD_ID
+
+
+def item_label(item: models.RollItem) -> str:
+    """How an item is named where more than a name fits: ``category — name``.
+
+    A guild can roll the same name in two categories, so a bare name does not
+    identify an item; the label is what the commands offer and log.
+    """
+    return f"{item.category.name} — {item.name}"
+
+
 async def _items_for_read(guild_id: int, category_name: str | None = None
                           ) -> list[models.RollItem]:
     """Item rows visible to a guild: its own if materialized, else [DEFAULT]'s."""
-    source = guild_id if (await _guild_has_own_categories(guild_id)) \
-        else constants.DEFAULT_GUILD_ID
-    query = models.RollItem.filter(category__guild__guild_id=source)
+    query = models.RollItem.filter(
+        category__guild__guild_id=await _read_source(guild_id))
     if (category_name is not None):
         query = query.filter(category__name=category_name)
-    return await query.order_by("id")
+    return await query.order_by("id").select_related("category")
 
 
-async def _descriptions_for_read(guild_id: int, item_name: str
-                                 ) -> list[models.RollDescription]:
-    """Description rows visible to a guild: its own if materialized, else
-    [DEFAULT]'s."""
-    source = guild_id if (await _guild_has_own_categories(guild_id)) \
-        else constants.DEFAULT_GUILD_ID
-    return await models.RollDescription.filter(
-        item__category__guild__guild_id=source, item__name=item_name
-    ).order_by("id").select_related("item", "item__category")
+async def item_by_id(guild_id: int, item_id: int) -> models.RollItem | None:
+    """One of the items a guild can see, addressed by its row id.
+
+    None when the row is not one of them, which is how a stale or another
+    guild's id is refused. The category comes with it: ``item_label`` reads it.
+    """
+    return await models.RollItem.filter(
+        id=item_id,
+        category__guild__guild_id=await _read_source(guild_id)
+    ).select_related("category").first()
+
+
+async def item_for_option(guild_id: int, received: str) -> models.RollItem | None:
+    """The item an option names, whether it carries the id or the label.
+
+    Discord sends the choice's value (the item's row id) in the normal case,
+    and the label it last displayed when the option is re-selected by hand;
+    both are accepted, and a composed label is retried by its halves.
+    """
+    received = (received or "").strip()
+    if (received.isdigit()):
+        item = await item_by_id(guild_id, int(received))
+        if (item is not None):
+            return item
+    items = await _items_for_read(guild_id)
+    for wanted in (received, *_label_halves(received)):
+        for item in items:
+            if (wanted.lower() in (item.name.lower(), item_label(item).lower())):
+                return item
+    for wanted in (received, *_label_halves(received)):
+        for item in items:
+            if (wanted.lower() in item.name.lower()
+                    or wanted.lower() in item_label(item).lower()):
+                return item
+    return None
+
+
+def _label_halves(label: str) -> tuple[str, str]:
+    """The head and the tail of a ``category — name`` label, when it has them."""
+    if ("—" not in label):
+        return ()
+    head, _, tail = label.partition("—")
+    return head.strip(), tail.strip()
 
 
 async def list_category_items(guild_id: int, category_name: str,
@@ -387,51 +437,58 @@ async def delete_category(guild_id: int, category_name: str) -> bool:
 
 
 async def item_variant_counts(guild_id: int, category_name: str | None = None,
-                              ) -> list[tuple[str, int, bool]]:
-    """The guild's ordered (item, variant count, active) rows, optionally
-    restricted to one category."""
+                              ) -> list[tuple[int, str, int, bool]]:
+    """The guild's ordered (item id, name, variant count, active) rows,
+    optionally restricted to one category."""
     items = await _items_for_read(guild_id, category_name)
-    counts: list[tuple[str, int, bool]] = []
+    counts: list[tuple[int, str, int, bool]] = []
     for item in items:
         count = await models.RollDescription.filter(item=item).count()
-        counts.append((item.name, count, item.active))
+        counts.append((item.id, item.name, count, item.active))
     return counts
 
 
-async def active_item_names(guild_id: int) -> list[str]:
-    """The guild's active item names across its categories."""
+async def active_items(guild_id: int) -> list[models.RollItem]:
+    """The guild's active items across its categories, in insertion order."""
     items = await _items_for_read(guild_id)
-    return [item.name for item in items if item.active]
+    return [item for item in items if item.active]
 
 
-async def add_description(guild_id: int, item_name: str,
-                          fields: dict) -> bool:
-    """Add a description variant to a guild-owned active item; whether added.
+async def add_description(guild_id: int, item_id: int, fields: dict) -> bool:
+    """Add a description variant to one of the guild's active items.
 
     ``fields`` maps model attribute to value (description, color, image_url,
-    thumbnail_url); a None value leaves the attribute unset.
+    thumbnail_url); a None value leaves the attribute unset. ``item_id`` is a
+    row the guild can see (see ``item_by_id``); whether the variant was added.
     """
     await ensure_guild_categories(guild_id)
     item = await models.RollItem.get_or_none(
-        category__guild__guild_id=guild_id, name=item_name, active=True)
+        id=item_id, category__guild__guild_id=await _read_source(guild_id),
+        active=True)
     if (item is None):
         return False
     await models.RollDescription.create(item=item, **fields)
     return True
 
 
-async def description_variants(guild_id: int, item_name: str,
+async def description_variants(guild_id: int, item_id: int,
                                ) -> list[models.RollDescription]:
-    """The item's description variants in insertion order ([] when unknown)."""
-    return await _descriptions_for_read(guild_id, item_name)
+    """One of the guild's items' description variants, in insertion order.
+
+    Empty when the row is not one of the items the guild can see.
+    """
+    return await models.RollDescription.filter(
+        item__id=item_id,
+        item__category__guild__guild_id=await _read_source(guild_id)
+    ).order_by("id").select_related("item", "item__category")
 
 
-async def update_description(guild_id: int, item_name: str, variant: int,
+async def update_description(guild_id: int, item_id: int, variant: int,
                              fields: dict) -> bool:
-    """Update one variant (1-based) of an item's descriptions; whether it
+    """Update one variant (1-based) of one of the guild's items; whether it
     existed. Only the keys of ``fields`` are changed (None clears the value)."""
     await ensure_guild_categories(guild_id)
-    variants = await description_variants(guild_id, item_name)
+    variants = await description_variants(guild_id, item_id)
     if (variant < 1 or variant > len(variants)):
         return False
     if (fields):
@@ -440,12 +497,11 @@ async def update_description(guild_id: int, item_name: str, variant: int,
     return True
 
 
-async def delete_description(guild_id: int, item_name: str,
-                             variant: int) -> bool:
-    """Delete one variant (1-based) of an item's descriptions; whether it
+async def delete_description(guild_id: int, item_id: int, variant: int) -> bool:
+    """Delete one variant (1-based) of one of the guild's items; whether it
     existed."""
     await ensure_guild_categories(guild_id)
-    variants = await description_variants(guild_id, item_name)
+    variants = await description_variants(guild_id, item_id)
     if (variant < 1 or variant > len(variants)):
         return False
     await variants[variant - 1].delete()

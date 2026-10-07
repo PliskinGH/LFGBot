@@ -51,12 +51,23 @@ class RollsAdminMixin:
     ) -> list[app_commands.Choice[str]]:
         if (interaction.guild_id is None):
             return []
-        items = await db_config.active_item_names(interaction.guild_id)
+        items = await db_config.active_items(interaction.guild_id)
         return [
-            app_commands.Choice(name=name, value=name)
-            for name in items
-            if current.lower() in name.lower()
+            app_commands.Choice(name=db_config.item_label(item),
+                                value=str(item.id))
+            for item in items
+            if (current.lower() in db_config.item_label(item).lower()
+                or current.lower() in item.name.lower())
         ][:common_constants.AUTOCOMPLETE_LIMIT]
+
+    async def _item_of(self, guild_id: int, item: str):
+        """The item an option names, by its row id or the label it showed.
+
+        The guild's own rows come first: an id can only address a row the guild
+        can see, and materializing copies [DEFAULT]'s items under new ids.
+        """
+        await db_config.ensure_guild_categories(guild_id)
+        return await db_config.item_for_option(guild_id, item)
 
     # ------------------------------------------------------------------ #
     # Categories
@@ -219,7 +230,7 @@ class RollsAdminMixin:
             await interaction.followup.send(
                 f"There is no roll category `{category}`.", ephemeral=True)
             return
-        variants = sum(count for _, count, _ in
+        variants = sum(count for _, _, count, _ in
                        await db_config.item_variant_counts(guild_id, category))
         item_count = len(active) + len(inactive)
 
@@ -269,7 +280,7 @@ class RollsAdminMixin:
         await interaction.response.defer(ephemeral=True)
         rows = await db_config.item_variant_counts(guild_id, category)
         lines = [f"- `{name}` — {count} variant(s)."
-                 for name, count, active in rows]
+                 for _item_id, name, count, _active in rows]
         if (not lines):
             await interaction.followup.send(
                 "There are no items here yet.", ephemeral=True)
@@ -292,16 +303,23 @@ class RollsAdminMixin:
         if (guild_id is None):
             return
         await interaction.response.defer(ephemeral=True)
-        embeds = await db_config.description_variant_embeds(guild_id, item)
+        resolved = await db_config.item_for_option(guild_id, item)
+        if (resolved is None):
+            await interaction.followup.send(
+                f"There is no item `{item}` in this server.", ephemeral=True)
+            return
+        label = db_config.item_label(resolved)
+        embeds = await db_config.description_variant_embeds(guild_id,
+                                                            resolved.id)
         if (variant is not None):
             if (variant < 1 or variant > len(embeds)):
                 await interaction.followup.send(
-                    f"`{item}` has no variant #{variant}.", ephemeral=True)
+                    f"`{label}` has no variant #{variant}.", ephemeral=True)
                 return
             embeds = [embeds[variant - 1]]
         if (not embeds):
             await interaction.followup.send(
-                f"`{item}` has no description variants.", ephemeral=True)
+                f"`{label}` has no description variants.", ephemeral=True)
             return
         await interaction.followup.send(
             embeds=[discord.Embed.from_dict(embed) for embed in embeds],
@@ -350,16 +368,23 @@ class RollsAdminMixin:
         if (thumbnail_url is not None):
             fields["thumbnail_url"] = thumbnail_url
         await interaction.response.defer(ephemeral=True)
-        if (not await db_config.add_description(guild_id, item, fields)):
+        resolved = await self._item_of(guild_id, item)
+        if (resolved is None):
             await interaction.followup.send(
                 f"There is no active item `{item}` in this server.",
                 ephemeral=True)
             return
+        if (not await db_config.add_description(guild_id, resolved.id, fields)):
+            await interaction.followup.send(
+                f"There is no active item `{item}` in this server.",
+                ephemeral=True)
+            return
+        label = db_config.item_label(resolved)
         await config_log.record_command_change(
-            interaction, "rollset.description.add", item)
+            interaction, "rollset.description.add", label)
         await self.reload_config()
         await interaction.followup.send(
-            f"Added a description variant to `{item}`.", ephemeral=True)
+            f"Added a description variant to `{label}`.", ephemeral=True)
 
     @rollsets_description.command(
         name="update", description="Update one description variant of an item.")
@@ -411,16 +436,22 @@ class RollsAdminMixin:
                 return
             fields["thumbnail_url"] = thumbnail_url
         await interaction.response.defer(ephemeral=True)
-        if (not await db_config.update_description(
-                guild_id, item, variant, fields)):
+        resolved = await self._item_of(guild_id, item)
+        if (resolved is None):
             await interaction.followup.send(
-                f"`{item}` has no variant #{variant}.", ephemeral=True)
+                f"There is no item `{item}` in this server.", ephemeral=True)
+            return
+        label = db_config.item_label(resolved)
+        if (not await db_config.update_description(
+                guild_id, resolved.id, variant, fields)):
+            await interaction.followup.send(
+                f"`{label}` has no variant #{variant}.", ephemeral=True)
             return
         await config_log.record_command_change(
-            interaction, "rollset.description.update", f"{item} #{variant}")
+            interaction, "rollset.description.update", f"{label} #{variant}")
         await self.reload_config()
         await interaction.followup.send(
-            f"Updated variant #{variant} of `{item}`.", ephemeral=True)
+            f"Updated variant #{variant} of `{label}`.", ephemeral=True)
 
     @rollsets_description.command(
         name="remove", description="Remove one description variant of an item.")
@@ -440,15 +471,22 @@ class RollsAdminMixin:
                 "`variant` must be a positive index.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
-        if (not await db_config.delete_description(guild_id, item, variant)):
+        resolved = await self._item_of(guild_id, item)
+        if (resolved is None):
             await interaction.followup.send(
-                f"`{item}` has no variant #{variant}.", ephemeral=True)
+                f"There is no item `{item}` in this server.", ephemeral=True)
+            return
+        label = db_config.item_label(resolved)
+        if (not await db_config.delete_description(guild_id, resolved.id,
+                                                   variant)):
+            await interaction.followup.send(
+                f"`{label}` has no variant #{variant}.", ephemeral=True)
             return
         await config_log.record_command_change(
-            interaction, "rollset.description.remove", f"{item} #{variant}")
+            interaction, "rollset.description.remove", f"{label} #{variant}")
         await self.reload_config()
         await interaction.followup.send(
-            f"Removed variant #{variant} from `{item}`.", ephemeral=True)
+            f"Removed variant #{variant} from `{label}`.", ephemeral=True)
 
     # Attach the description subgroup to the rollsets group now that its
     # subcommands exist; CogMeta skips it as a top-level command (parent set).

@@ -157,5 +157,7 @@ class TestCommandWritesAreLogged:
         await MatchRolls.description_add.callback(
             cog, interaction, item="Zeta", text="A flavour text.")
         change = await models.ConfigChange.get()
+        # The label rather than the bare name: a name alone does not identify
+        # an item, since two categories can roll the same one.
         assert (change.action, change.summary) == (
-            "rollset.description.add", "Zeta")
+            "rollset.description.add", "map — Zeta")

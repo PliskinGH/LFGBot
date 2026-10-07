@@ -50,8 +50,13 @@ class RollsCommandsMixin:
 
         nb_descriptions = 0
         if (len(choice)):
+            # The item's own variants: the same name can be rolled in two
+            # categories, and each has its own descriptions. An entry with no
+            # category (a legacy embed) stays eligible.
             dicts = [ _dict for _dict in self.get_descriptions(interaction.guild_id)
-                      if ("title" in _dict and _dict["title"] == choice) ]
+                      if (_dict.get("title") == choice
+                          and _dict.get("category", "").lower()
+                          in ("", category.lower())) ]
             nb_descriptions = len(dicts)
         description = {}
         if (nb_descriptions >= 1):

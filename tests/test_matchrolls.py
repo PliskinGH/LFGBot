@@ -120,6 +120,39 @@ class TestRandomCommand:
         assert "Randomly chosen among: Alpha, Beta." in embed.footer.text
 
     @pytest.mark.asyncio
+    async def test_it_rolls_the_categorys_own_description(self, matchrolls,
+                                                          monkeypatch):
+        # The same name can be rolled in two categories, each with its own
+        # variants: the roll takes the one belonging to the rolled category.
+        matchrolls.default_descriptions = [
+            {"title": "Delta", "category": "Map", "description": "Map Delta."},
+            {"title": "Delta", "category": "Landmark",
+             "description": "Landmark Delta."}]
+        interaction = self._interaction()
+        self._patch_random(monkeypatch)
+
+        await self._call_random(matchrolls, interaction, "landmark")
+
+        _, embeds, _, _ = interaction.response.messages[0]
+        embed = embeds[0]
+        assert embed.title == "Random Landmark: Delta"
+        assert embed.description == "Landmark Delta."
+
+    @pytest.mark.asyncio
+    async def test_a_description_without_a_category_still_rolls(
+            self, matchrolls, monkeypatch):
+        # A legacy embed carries no category: it stays eligible.
+        matchrolls.default_descriptions = [
+            {"title": "Delta", "description": "Legacy Delta."}]
+        interaction = self._interaction()
+        self._patch_random(monkeypatch)
+
+        await self._call_random(matchrolls, interaction, "landmark")
+
+        _, embeds, _, _ = interaction.response.messages[0]
+        assert embeds[0].description == "Legacy Delta."
+
+    @pytest.mark.asyncio
     async def test_subset_out_of_range_reports_no_item(self, matchrolls, monkeypatch):
         interaction = self._interaction()
         self._patch_random(monkeypatch)

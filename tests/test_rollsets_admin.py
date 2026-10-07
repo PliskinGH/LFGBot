@@ -17,6 +17,22 @@ async def _noop(*args, **kwargs):
     return None
 
 
+def _item(item_id=7, name="Zeta", category="map"):
+    """An item row as a command reads one: its row id, name and category."""
+    return SimpleNamespace(id=item_id, name=name,
+                           category=SimpleNamespace(name=category))
+
+
+async def _item_option(guild_id, item):
+    """The fixture's items: Zeta (id 7) and Eta (id 8), both under map."""
+    wanted = str(item).strip().lower()
+    if (wanted in ("zeta", "7", "map — zeta")):
+        return _item()
+    if (wanted in ("eta", "8", "map — eta")):
+        return _item(8, "Eta")
+    return None
+
+
 async def _sets(guild_id):
     return {"map": "Zeta", "landmark": "Delta"}
 
@@ -43,6 +59,7 @@ def rollset_cog(monkeypatch):
     monkeypatch.setattr(db_config, "load_config_from_db", _loaded_config)
     monkeypatch.setattr(db_config, "ensure_guild_categories", _noop)
     monkeypatch.setattr(db_config, "effective_category_sets", _sets)
+    monkeypatch.setattr(db_config, "item_for_option", _item_option)
     return MatchRolls(bot=bot, config=_config(), descriptions=[])
 
 
@@ -222,7 +239,8 @@ class TestRollsetsRemove:
             return ["Zeta", "Eta"], ["Theta"]
 
         async def counts(guild_id, category):
-            return [("Zeta", 2, True), ("Eta", 0, True), ("Theta", 0, False)]
+            return [(7, "Zeta", 2, True), (8, "Eta", 0, True),
+                    (9, "Theta", 0, False)]
 
         async def delete(guild_id, category):
             deletes.append((guild_id, category))
@@ -255,7 +273,7 @@ class TestRollsetsRemove:
             return ["Zeta"], []
 
         async def counts(guild_id, category):
-            return [("Zeta", 1, True)]
+            return [(7, "Zeta", 1, True)]
 
         monkeypatch.setattr(db_config, "list_category_items", items)
         monkeypatch.setattr(db_config, "item_variant_counts", counts)
@@ -275,7 +293,7 @@ class TestRollsetsRemove:
             return ["Zeta"], []
 
         async def counts(guild_id, category):
-            return [("Zeta", 0, True)]
+            return [(7, "Zeta", 0, True)]
 
         monkeypatch.setattr(db_config, "list_category_items", items)
         monkeypatch.setattr(db_config, "item_variant_counts", counts)
@@ -303,7 +321,7 @@ class TestDescriptionCommands:
     @pytest.mark.asyncio
     async def test_list_shows_variant_counts(self, rollset_cog, monkeypatch):
         async def counts(guild_id, category=None):
-            return [("Zeta", 2, True), ("Eta", 0, True)]
+            return [(7, "Zeta", 2, True), (8, "Eta", 0, True)]
         monkeypatch.setattr(db_config, "item_variant_counts", counts)
         interaction = _interaction()
         await MatchRolls.description_list.callback(rollset_cog, interaction)
@@ -313,7 +331,7 @@ class TestDescriptionCommands:
 
     @pytest.mark.asyncio
     async def test_show_all_or_one_variant(self, rollset_cog, monkeypatch):
-        async def embeds(guild_id, item):
+        async def embeds(guild_id, item_id):
             return [{"title": "Zeta", "category": "Map", "description": "One."},
                     {"title": "Zeta", "category": "Map", "description": "Two."}]
         monkeypatch.setattr(db_config, "description_variant_embeds", embeds)
@@ -331,7 +349,7 @@ class TestDescriptionCommands:
 
     @pytest.mark.asyncio
     async def test_show_bounds_and_unknown_item(self, rollset_cog, monkeypatch):
-        async def embeds(guild_id, item):
+        async def embeds(guild_id, item_id):
             return [{"title": "Zeta", "category": "Map"}]
         monkeypatch.setattr(db_config, "description_variant_embeds", embeds)
         interaction = _interaction()
@@ -339,12 +357,17 @@ class TestDescriptionCommands:
             rollset_cog, interaction, "Zeta", 3)
         assert "no variant #3" in interaction.response.messages[0][0]
 
-        async def none(guild_id, item):
+        async def none(guild_id, item_id):
             return []
         monkeypatch.setattr(db_config, "description_variant_embeds", none)
         interaction = _interaction()
-        await MatchRolls.description_show.callback(rollset_cog, interaction, "Nope")
+        await MatchRolls.description_show.callback(rollset_cog, interaction, "Zeta")
         assert "no description variants" in interaction.response.messages[0][0]
+
+        # A name nobody has is refused before any variant is looked up.
+        interaction = _interaction()
+        await MatchRolls.description_show.callback(rollset_cog, interaction, "Nope")
+        assert "There is no item `Nope`" in interaction.response.messages[0][0]
 
 
 class TestDescriptionMutations:
@@ -352,24 +375,24 @@ class TestDescriptionMutations:
     async def test_add_passes_the_parsed_fields(self, rollset_cog, monkeypatch):
         calls = {}
 
-        async def add(guild_id, item, fields):
-            calls["args"] = (guild_id, item, fields)
+        async def add(guild_id, item_id, fields):
+            calls["args"] = (guild_id, item_id, fields)
             return True
         monkeypatch.setattr(db_config, "add_description", add)
         interaction = _interaction()
         await MatchRolls.description_add.callback(
             rollset_cog, interaction, "Zeta", "Flavor.", "111", "https://a/b.png")
-        assert calls["args"] == (42424, "Zeta",
+        assert calls["args"] == (42424, 7,
                                  {"description": "Flavor.", "color": 111,
                                   "image_url": "https://a/b.png"})
-        assert "Added a description variant to `Zeta`" in (
+        assert "Added a description variant to `map — Zeta`" in (
             interaction.response.messages[0][0])
 
         interaction = _interaction()
         await MatchRolls.description_add.callback(
             rollset_cog, interaction, "Zeta", common_constants.RESET_SENTINEL, None)
         # "-" clears the text to an empty description (same as update).
-        assert calls["args"] == (42424, "Zeta", {"description": ""})
+        assert calls["args"] == (42424, 7, {"description": ""})
 
     @pytest.mark.asyncio
     async def test_add_validates_text_color_and_item(
@@ -384,10 +407,16 @@ class TestDescriptionMutations:
             rollset_cog, interaction, "Zeta", "Flavor.", "nope")
         assert "`color` must be" in interaction.response.messages[0][0]
 
-        monkeypatch.setattr(db_config, "add_description", _noop_return(False))
+        # A name nobody has, and an item the write refuses, read the same way.
         interaction = _interaction()
         await MatchRolls.description_add.callback(
             rollset_cog, interaction, "Nope", "Flavor.")
+        assert "no active item" in interaction.response.messages[0][0]
+
+        monkeypatch.setattr(db_config, "add_description", _noop_return(False))
+        interaction = _interaction()
+        await MatchRolls.description_add.callback(
+            rollset_cog, interaction, "Eta", "Flavor.")
         assert "no active item" in interaction.response.messages[0][0]
 
     @pytest.mark.asyncio
@@ -395,33 +424,33 @@ class TestDescriptionMutations:
             self, rollset_cog, monkeypatch):
         calls = {}
 
-        async def update(guild_id, item, variant, fields):
-            calls["args"] = (guild_id, item, variant, fields)
+        async def update(guild_id, item_id, variant, fields):
+            calls["args"] = (guild_id, item_id, variant, fields)
             return True
         monkeypatch.setattr(db_config, "update_description", update)
         interaction = _interaction()
         await MatchRolls.description_update.callback(
             rollset_cog, interaction, "Zeta", 2, "New text.", common_constants.RESET_SENTINEL)
         # "-" clears the colour; omitted image/thumbnail are left untouched.
-        assert calls["args"] == (42424, "Zeta", 2,
+        assert calls["args"] == (42424, 7, 2,
                                  {"description": "New text.", "color": None})
-        assert "Updated variant #2 of `Zeta`" in (
+        assert "Updated variant #2 of `map — Zeta`" in (
             interaction.response.messages[0][0])
 
     @pytest.mark.asyncio
     async def test_update_dash_clears_text(self, rollset_cog, monkeypatch):
         calls = {}
 
-        async def update(guild_id, item, variant, fields):
-            calls["args"] = (guild_id, item, variant, fields)
+        async def update(guild_id, item_id, variant, fields):
+            calls["args"] = (guild_id, item_id, variant, fields)
             return True
         monkeypatch.setattr(db_config, "update_description", update)
         interaction = _interaction()
         await MatchRolls.description_update.callback(
             rollset_cog, interaction, "Zeta", 1, common_constants.RESET_SENTINEL)
         # "-" clears the description text to an empty string.
-        assert calls["args"] == (42424, "Zeta", 1, {"description": ""})
-        assert "Updated variant #1 of `Zeta`" in (
+        assert calls["args"] == (42424, 7, 1, {"description": ""})
+        assert "Updated variant #1 of `map — Zeta`" in (
             interaction.response.messages[0][0])
 
     @pytest.mark.asyncio
@@ -443,15 +472,15 @@ class TestDescriptionMutations:
     async def test_remove_requires_a_variant(self, rollset_cog, monkeypatch):
         calls = []
 
-        async def delete(guild_id, item, variant):
-            calls.append((guild_id, item, variant))
+        async def delete(guild_id, item_id, variant):
+            calls.append((guild_id, item_id, variant))
             return True
         monkeypatch.setattr(db_config, "delete_description", delete)
         interaction = _interaction()
         await MatchRolls.description_remove.callback(
             rollset_cog, interaction, "Zeta", 1)
-        assert calls == [(42424, "Zeta", 1)]
-        assert "Removed variant #1 from `Zeta`" in (
+        assert calls == [(42424, 7, 1)]
+        assert "Removed variant #1 from `map — Zeta`" in (
             interaction.response.messages[0][0])
 
         monkeypatch.setattr(db_config, "delete_description", _noop_return(False))
@@ -465,16 +494,19 @@ class TestAutocomplete:
     @pytest.mark.asyncio
     async def test_categories_and_items(self, rollset_cog, monkeypatch):
         async def items(guild_id):
-            return ["Zeta", "Eta"]
-        monkeypatch.setattr(db_config, "active_item_names", items)
+            return [_item(), _item(8, "Eta")]
+        monkeypatch.setattr(db_config, "active_items", items)
 
         interaction = _interaction()
         categories = await rollset_cog._category_autocomplete(interaction, "")
         assert [choice.value for choice in categories] == ["map", "landmark"]
 
+        # The value is the row id and the name the label: a name alone would
+        # not tell two categories' items apart.
         interaction = _interaction()
         choices = await rollset_cog._item_autocomplete(interaction, "ze")
-        assert [choice.value for choice in choices] == ["Zeta"]
+        assert [(choice.name, choice.value) for choice in choices] == [
+            ("map — Zeta", "7")]
 
 
 class TestHelp:
