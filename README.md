@@ -74,6 +74,8 @@ mention roles.
 | `SESSION_MAX_AGE` | No | Login lifetime in seconds (default 8 hours). |
 | *(per-game API tokens)* | Config-file mode only | Named by `GamesAPITokenEnvVars` in `config/games.ini`. |
 
+See `.env.example`.
+
 
 #### Database configuration (optional)
 
