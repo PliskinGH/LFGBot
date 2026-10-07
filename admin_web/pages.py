@@ -2,12 +2,16 @@
 
 from pathlib import Path
 
+from jinja2 import StrictUndefined
 from starlette.templating import Jinja2Templates
 
 from . import auth, csrf
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
+# A page's variables are supplied explicitly: a missing one raises instead of
+# rendering an empty value (an empty href, say, reloads the page it is on).
+templates.env.undefined = StrictUndefined
 
 
 def render(request, template: str, status_code: int = 200, **context):

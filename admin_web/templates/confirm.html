@@ -1,0 +1,11 @@
+{% extends 'base.html' %}
+{% block title %}{{ title }} — LFG bot panel{% endblock %}
+{% block content %}
+<h1 class="h3">{{ title }}</h1>
+<p>{{ message }}</p>
+<form method="post" action="{{ action_url }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <button class="btn btn-danger" type="submit">Remove</button>
+  <a class="btn btn-secondary" href="{{ cancel_url }}">Cancel</a>
+</form>
+{% endblock %}

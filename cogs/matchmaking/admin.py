@@ -23,7 +23,7 @@ _GAME_OPTION_DESCRIPTIONS = {
     "color": "Embed color.",
     "channel": "LFG channel mention where the game's LFG posts go; blank keeps them in the command's channel.",
     "forum": "Forum channel mention for game threads.",
-    "tag": "Forum tag id.",
+    "tag": "Forum tag name, as it appears on the target forum.",
     "visibility": "0 for private threads.",
     "message": "Extra message added to the game-start ping.",
     "registration_api": "League registration API URL.",
@@ -190,7 +190,6 @@ class LFGAdminMixin:
         await interaction.response.defer(ephemeral=True)
 
         guild_id = interaction.guild_id
-        await db_config.ensure_guild_config(guild_id)
         add_kwargs = dict(fields)
         if (api_fields):
             add_kwargs["api_fields"] = api_fields
@@ -282,7 +281,6 @@ class LFGAdminMixin:
         # Defer to avoid the 3s timeout.
         await interaction.response.defer(ephemeral=True)
 
-        await db_config.ensure_guild_config(guild_id)
         copied = await db_config.copy_game(
             guild_id, game, command, name=overrides.pop("name"),
             api_fields=api_fields or None, **overrides)
@@ -637,7 +635,6 @@ class LFGAdminMixin:
         # Defer to avoid the 3s timeout.
         await interaction.response.defer(ephemeral=True)
 
-        await db_config.ensure_guild_config(guild_id)
         if (not await db_config.add_parameter(
                 guild_id, game, name,
                 utils.parse_param_entries(values), api_field=api_field,
@@ -700,7 +697,6 @@ class LFGAdminMixin:
         # Defer to avoid the 3s timeout.
         await interaction.response.defer(ephemeral=True)
 
-        await db_config.ensure_guild_config(guild_id)
         update_kwargs = {"values": value_display}
         if (api_field is not None):
             update_kwargs["api_field"] = api_field
@@ -747,7 +743,6 @@ class LFGAdminMixin:
         # Defer to avoid the 3s timeout.
         await interaction.response.defer(ephemeral=True)
         
-        await db_config.ensure_guild_config(guild_id)
         if (not await db_config.delete_parameter(guild_id, game, name)):
             await interaction.followup.send(
                 f"`{game}` has no parameter named `{name}`.", ephemeral=True)

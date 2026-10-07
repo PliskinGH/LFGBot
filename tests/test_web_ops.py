@@ -39,6 +39,19 @@ class TestHub:
         assert response.status_code == 200
         assert "Bot Server" in response.text
 
+    async def test_the_whole_row_opens_the_server(self, db, client, login,
+                                                  monkeypatch, reads):
+        be_operator(monkeypatch)
+        reads.client = api_client(api_guild(7, "Bot Server"))
+        login(client)
+        response = client.get("/ops")
+        # Clicking anywhere on a row opens that server: the row is the link,
+        # so there is no column of its own for it.
+        assert 'class="stretched-link"' in response.text
+        assert 'href="http://testserver/g/7"' in response.text
+        assert "<th></th>" not in response.text
+        assert "Open" not in response.text
+
     async def test_it_marks_a_server_that_has_its_own_configuration(
             self, db, client, login, monkeypatch, games_config,
             game_parameters_config):

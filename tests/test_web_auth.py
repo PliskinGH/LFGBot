@@ -4,10 +4,12 @@ from urllib.parse import parse_qs, urlsplit
 
 import aiohttp
 import pytest
+from starlette.testclient import TestClient
 
 from admin_web import auth, settings
 
-from tests.conftest import be_operator, csrf_of, read_session
+from tests.conftest import (WEB_SESSION_COOKIE, WEB_SESSION_SECRET, be_operator,
+                            csrf_of, read_session)
 
 ACCOUNT = {"id": "42", "username": "manager", "global_name": "Manager"}
 
@@ -208,3 +210,30 @@ class TestLifespan:
         response = client.get("/healthz")
         assert response.status_code == 503
         assert "unreachable" in response.text
+
+
+class TestTheErrorPage:
+    """The panel's error page renders whatever went wrong, layout included."""
+
+    @staticmethod
+    def _signed(payload: bytes) -> str:
+        """A session cookie carrying ``payload``, signed as the panel signs one."""
+        from base64 import b64encode
+
+        from itsdangerous import TimestampSigner
+
+        return TimestampSigner(WEB_SESSION_SECRET).sign(
+            b64encode(payload)).decode()
+
+    def test_a_session_cookie_that_cannot_be_read_still_renders_a_page(
+            self, web_app):
+        # A signed cookie that is not a session makes the middleware raise
+        # before it puts one in the scope: the error page then has to render
+        # from the values the layout needs and the session cannot provide.
+        client = TestClient(web_app, raise_server_exceptions=False)
+        client.cookies.set(WEB_SESSION_COOKIE, self._signed(b"not a session"))
+        response = client.get("/")
+        assert response.status_code == 500
+        assert "LFG Bot" in response.text
+        assert "went wrong" in response.text
+

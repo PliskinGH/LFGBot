@@ -11,6 +11,7 @@ import time
 from typing import Any
 
 import discord
+from discord.http import Route
 
 from common.constants import MENTION_RE
 
@@ -19,6 +20,11 @@ from . import settings
 # Read once and kept briefly: a page render must not wait on Discord twice.
 GUILDS_TIMEOUT = 60
 LIST_TIMEOUT = 300
+# How many members Discord's search is asked for before a name is matched.
+MEMBER_SEARCH_LIMIT = 10
+
+# A role mention is the one form a ping has that names a role rather than a user.
+ROLE_MENTION_PREFIX = "<@&"
 
 # Channel types the panel offers: where an LFG post goes, and the forums.
 TEXT_CHANNEL_TYPES = (discord.ChannelType.text, discord.ChannelType.news)
@@ -47,7 +53,11 @@ class DiscordReads:
         if (not self.token):
             self._unreadable("DISCORD_TOKEN is not set")
             return
-        client = discord.Client(intents=discord.Intents.none())
+        intents = discord.Intents.none()
+        # Only the member reads need a privileged bit; the client never opens a
+        # gateway, so enabling it here costs nothing else.
+        intents.members = True
+        client = discord.Client(intents=intents)
         try:
             await client.login(self.token)
         except (discord.LoginFailure, discord.HTTPException, OSError) as error:
@@ -125,6 +135,62 @@ class DiscordReads:
                        for choice in await self.roles(guild_id)})
         return labels
 
+    async def member_search(self, guild_id: int, query: str,
+                            limit: int = MEMBER_SEARCH_LIMIT) -> list[dict]:
+        """The members a name matches, as ``{id, label}`` mentions.
+
+        Discord's own search endpoint caps the answer, so a server of any size
+        costs the same: a member list is never read. The route is called
+        directly because discord.py's own helper needs a gateway connection.
+        """
+        if (self.client is None):
+            return []
+        route = Route("GET", "/guilds/{guild_id}/members/search",
+                      guild_id=guild_id)
+        members = await self.client.http.request(
+            route, params={"query": query, "limit": limit})
+        return [{"id": user_mention(int(member["user"]["id"])),
+                 "label": f"@{member_payload_label(member)}"}
+                for member in members]
+
+    async def member_name(self, guild_id: int, user_id: int) -> str | None:
+        """The name Discord knows for a member, or None when it cannot be read.
+
+        A member who left the server (or an unreadable Discord) is None, and
+        that is remembered, so one page render asks Discord only once.
+        """
+        cached = self._remembered(f"member:{guild_id}:{user_id}")
+        if (cached is not None):
+            return cached or None
+        if (self.client is None):
+            return None
+        guild = await self._guild(guild_id)
+        if (guild is None):
+            return None
+        try:
+            member = await guild.fetch_member(user_id)
+        except UNREACHABLE:
+            name = ""
+        else:
+            name = member_label(member)
+        return self._remember(f"member:{guild_id}:{user_id}", name,
+                              LIST_TIMEOUT) or None
+
+    async def mention_label(self, guild_id: int, mention: str | None) -> str:
+        """How a stored role or user mention is shown, or the mention itself."""
+        if (not mention):
+            return ""
+        try:
+            if (mention.startswith(ROLE_MENTION_PREFIX)):
+                return (await self.labels(guild_id)).get(mention, mention)
+            user_id = mention_id(mention)
+            if (user_id is None):
+                return mention
+            name = await self.member_name(guild_id, user_id)
+        except UNREACHABLE:
+            return mention
+        return f"@{name}" if (name) else mention
+
     async def _guild(self, guild_id: int):
         """The guild object, read once and kept briefly (None without a client)."""
         cached = self._remembered(f"guild:{guild_id}")
@@ -179,6 +245,24 @@ class DiscordReads:
 def channel_mention(channel_id: int) -> str:
     """A channel id in the mention form the configuration stores."""
     return f"<#{channel_id}>"
+
+
+def user_mention(user_id: int) -> str:
+    """A user id in the mention form the configuration stores."""
+    return f"<@{user_id}>"
+
+
+def member_label(member) -> str:
+    """The name a ``discord.Member`` is shown under: nick, display name, username."""
+    return (getattr(member, "nick", None) or getattr(member, "global_name", None)
+            or getattr(member, "name", None) or str(member.id))
+
+
+def member_payload_label(member: dict) -> str:
+    """The name a member read as JSON is shown under (the search's own shape)."""
+    user = member.get("user") or {}
+    return (member.get("nick") or user.get("global_name")
+            or user.get("username") or str(user.get("id") or ""))
 
 
 def role_mention(role_id: int) -> str:

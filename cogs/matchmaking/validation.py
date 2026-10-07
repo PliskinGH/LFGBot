@@ -31,17 +31,27 @@ def invalid_command_message(name: str) -> str:
             "lowercase letters, digits or underscores.")
 
 
+def game_name_value_error(name: str) -> str | None:
+    """An error message when a display name is too long or breaks title parsing."""
+    if (len(name) > constants.GAME_NAME_MAX):
+        return f"`name` must be at most {constants.GAME_NAME_MAX} characters."
+    if (constants.GAME_NAME_INVALID_RE.search(name)):
+        return "`name` cannot contain \"game:\": it would break the LFG title parsing."
+    return None
+
+
 def game_name_error(name: str | None) -> str | None:
     """An error message when a game display name is invalid, else None."""
     if (not name):
         return None
     if (name == common_constants.RESET_SENTINEL):
         return "`name` cannot be `-`: the display name has no reset; just omit the option to keep it."
-    if (len(name) > constants.GAME_NAME_MAX):
-        return f"`name` must be at most {constants.GAME_NAME_MAX} characters."
-    if (constants.GAME_NAME_INVALID_RE.search(name)):
-        return "`name` cannot contain \"game:\": it would break the LFG title parsing."
-    return None
+    return game_name_value_error(name)
+
+
+def is_valid_api_field(value: str) -> bool:
+    """Whether a value can be a match API field name."""
+    return bool(common_constants.API_FIELD_RE.match(value))
 
 
 def parameter_error(name: str, values: str | None,
@@ -57,7 +67,7 @@ def parameter_error(name: str, values: str | None,
     # Blank (empty string) is valid: it resets the API field (db_config
     # turns "" into NULL); on add it means "no field". The update command
     # accepts "-" as the reset sentinel, since Discord cannot send "".
-    if (api_field and not common_constants.API_FIELD_RE.match(api_field)):
+    if (api_field and not is_valid_api_field(api_field)):
         return ("`api_field` must be a non-empty field name (letters, digits,"
                 " underscores), or `-` to reset it.")
     if (display_name is not None and display_name != "" and (
@@ -65,6 +75,11 @@ def parameter_error(name: str, values: str | None,
             or "\n" in display_name or "\r" in display_name)):
         return "`display_name` must be 1-50 characters without newlines."
     return None
+
+
+def is_role_or_user_mention(value: str) -> bool:
+    """Whether a value is the role or user mention a ping accepts."""
+    return bool(common_constants.ROLE_MENTION_RE.match(value))
 
 
 def mention_error(role: str | None, channel: str | None,
@@ -75,7 +90,7 @@ def mention_error(role: str | None, channel: str | None,
     LFG channels and forums: channel mentions); anything else would not
     resolve at runtime.
     """
-    if (role and not common_constants.ROLE_MENTION_RE.match(role)):
+    if (role and not is_role_or_user_mention(role)):
         return "`role` must be a role or user mention."
     if (channel and not common_constants.CHANNEL_MENTION_RE.match(channel)):
         return "`channel` must be a channel mention."
@@ -101,13 +116,29 @@ def api_fields_error(
             continue
         if (value == common_constants.RESET_SENTINEL):
             api_fields[key] = None
-        elif (not common_constants.API_FIELD_RE.match(value)):
+        elif (not is_valid_api_field(value)):
             return {}, (f"`{argument}` must be a non-empty field name "
                         "(letters, digits, underscores), or `-` to reset "
                         "it to the default.")
         else:
             api_fields[key] = value
     return api_fields, None
+
+
+def visibility_error(value: str | None) -> str | None:
+    """An error message when a thread visibility is not a thread type, else None.
+
+    The cog reads it as an integer (0 = private thread); a value it cannot read
+    would raise at thread creation, so it is refused here instead.
+    """
+    if (not value):
+        return None
+    try:
+        int(value)
+    except ValueError:
+        return ("`visibility` must be a number: `0` for private threads, "
+                "anything else for public ones.")
+    return None
 
 
 def game_fields(
@@ -127,6 +158,9 @@ def game_fields(
     if (error is not None):
         return None, error
     error = game_name_error(name)
+    if (error is not None):
+        return None, error
+    error = visibility_error(visibility)
     if (error is not None):
         return None, error
     default_max_guests = None
@@ -174,6 +208,9 @@ def updated_fields(
     if (error is not None):
         return None, error
     error = game_name_error(name)
+    if (error is not None):
+        return None, error
+    error = visibility_error(visibility)
     if (error is not None):
         return None, error
     provided = {

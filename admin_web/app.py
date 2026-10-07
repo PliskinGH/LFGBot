@@ -15,7 +15,7 @@ from tortoise import Tortoise
 from db.orm_config import orm_config
 
 from . import discord_reads, errors, settings
-from .views import home, ops
+from .views import games, home, ops
 
 STATIC_DIR = Path(__file__).parent / "static"
 SESSION_COOKIE = "lfgbot_admin"
@@ -69,6 +69,7 @@ def routes() -> list:
         Route("/discord/callback", home.discord_callback,
               name="discord_callback"),
         Route("/g/{guild_id:int}", home.guild_page, name="guild"),
+        *games.routes(),
         Route("/ops", ops.hub, name="ops"),
         Route("/ops/default", ops.default_page, name="ops_default"),
         Route("/ops/changes", ops.changes_page, name="ops_changes"),

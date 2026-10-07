@@ -9,6 +9,7 @@ config files' ordering (slash-command option order, help, autocomplete).
 
 import configparser
 
+from tortoise.exceptions import IntegrityError
 from tortoise.transactions import in_transaction
 
 from common import constants as common_constants
@@ -266,33 +267,52 @@ def _game_fields(game: models.Game) -> dict:
 async def ensure_guild_config(guild_id: int) -> None:
     """Give the guild its own configuration row, seeded from the defaults.
 
-    Guilds without a row fall back to the sentinel default config; the first
-    admin edit copies those defaults into a per-guild row so the guild gets a
-    complete, independent configuration.
+    Every write calls this first: a guild with no row of its own falls back to
+    the sentinel default config, and its first write materializes a complete,
+    independent copy of it before changing anything.
     """
     if (guild_id == constants.DEFAULT_GUILD_ID):
         return
     if (await models.Guild.get_or_none(guild_id=guild_id) is not None):
         return
-    async with in_transaction():
-        guild = await models.Guild.create(guild_id=guild_id)
-        for game in await models.Game.filter(guild_id=constants.DEFAULT_GUILD_ID).order_by("id"):
-            new_game = await models.Game.create(
-                guild=guild, command=game.command, **_game_fields(game))
-            for parameter in await models.GameParameter.filter(
-                    game_id=game.id).order_by("id"):
-                new_parameter = await models.GameParameter.create(
-                    game=new_game, name=parameter.name,
-                    display_name=parameter.display_name or parameter.name,
-                    api_field=parameter.api_field)
-                for value in await models.ParameterValue.filter(
-                        parameter_id=parameter.id).order_by("id"):
-                    await models.ParameterValue.create(
-                        parameter=new_parameter,
-                        value=value.value, display_name=value.display_name)
-            for override in await models.GameApiFieldOverride.filter(game_id=game.id):
-                await models.GameApiFieldOverride.create(
-                    game=new_game, key=override.key, field_name=override.field_name)
+    try:
+        async with in_transaction():
+            guild = await models.Guild.create(guild_id=guild_id)
+            await _copy_default_config(guild)
+    except IntegrityError:
+        # The bot and the panel are separate processes: a concurrent first
+        # write can create the row between the check and the insert. Its own
+        # atomic copy stands; anything else is a real failure.
+        if (await models.Guild.get_or_none(guild_id=guild_id) is None):
+            raise
+
+
+async def _copy_default_config(guild: models.Guild) -> None:
+    """Copy the [DEFAULT] games, with their parameters and api_* overrides."""
+    for game in await models.Game.filter(
+            guild_id=constants.DEFAULT_GUILD_ID).order_by("id"):
+        new_game = await models.Game.create(
+            guild=guild, command=game.command, **_game_fields(game))
+        await _copy_game_tree(game, new_game)
+
+
+async def _copy_game_tree(source: models.Game, target: models.Game) -> None:
+    """Copy a game's parameters, their values and its api_* overrides."""
+    for parameter in await models.GameParameter.filter(
+            game_id=source.id).order_by("id"):
+        new_parameter = await models.GameParameter.create(
+            game=target, name=parameter.name,
+            display_name=parameter.display_name or parameter.name,
+            api_field=parameter.api_field)
+        for value in await models.ParameterValue.filter(
+                parameter_id=parameter.id).order_by("id"):
+            await models.ParameterValue.create(
+                parameter=new_parameter,
+                value=value.value, display_name=value.display_name)
+    for override in await models.GameApiFieldOverride.filter(
+            game_id=source.id):
+        await models.GameApiFieldOverride.create(
+            game=target, key=override.key, field_name=override.field_name)
 
 
 async def _write_api_field_overrides(
@@ -319,11 +339,77 @@ async def add_game(guild_id: int, command: str, *,
     the match API field name stored as a per-game override of the default
     payload field names.
     """
+    await ensure_guild_config(guild_id)
     game, created = await models.Game.get_or_create(
         guild_id=guild_id, command=command, defaults=fields)
     if (created and api_fields):
         await _write_api_field_overrides(game, api_fields)
     return created
+
+
+async def reset_guild_config(guild_id: int) -> bool:
+    """Drop every configuration the guild owns, so it inherits [DEFAULT] again.
+
+    The guild row is shared with the rolls cog, so its categories go with the
+    games; whether the guild had a configuration of its own.
+    """
+    if (guild_id == constants.DEFAULT_GUILD_ID):
+        return False
+    return (await models.Guild.filter(guild_id=guild_id).delete()) > 0
+
+
+async def adopt_game(guild_id: int, source_command: str) -> bool:
+    """Copy one [DEFAULT] game into a guild's own configuration; whether it did.
+
+    Materializing copies every [DEFAULT] game at once, so a game [DEFAULT]
+    gained afterwards reaches a guild only through this. False when the guild
+    already has the command or [DEFAULT] has no such game.
+    """
+    if (guild_id == constants.DEFAULT_GUILD_ID):
+        return False
+    if (await models.Game.get_or_none(
+            guild_id=guild_id, command=source_command) is not None):
+        return False
+    source = await models.Game.get_or_none(
+        guild_id=constants.DEFAULT_GUILD_ID, command=source_command)
+    if (source is None):
+        return False
+    await ensure_guild_config(guild_id)
+    if (await models.Game.get_or_none(
+            guild_id=guild_id, command=source_command) is not None):
+        # The guild had no configuration yet: the copy above brought it in.
+        return False
+    async with in_transaction():
+        new_game = await models.Game.create(
+            guild_id=guild_id, command=source_command, **_game_fields(source))
+        await _copy_game_tree(source, new_game)
+    return True
+
+
+async def materialize_game(guild_id: int, command: str) -> int | None:
+    """The guild's own row for a game, copying it in first when it has none.
+
+    A guild with no configuration of its own gets a complete copy of the
+    [DEFAULT] one; a game [DEFAULT] has gained since then is copied on its own.
+    The command is checked before any copy, so a name nobody has cannot
+    materialize a guild's configuration. None when neither has that command,
+    which callers answer as not found.
+    """
+    game = await models.Game.get_or_none(guild_id=guild_id, command=command)
+    if (game is not None):
+        return game.id
+    default_game = await models.Game.get_or_none(
+        guild_id=constants.DEFAULT_GUILD_ID, command=command)
+    if (default_game is None):
+        return None
+    await ensure_guild_config(guild_id)
+    game = await models.Game.get_or_none(guild_id=guild_id, command=command)
+    if (game is None):
+        # The guild's copy predates this [DEFAULT] game: copy that one.
+        await adopt_game(guild_id, command)
+        game = await models.Game.get_or_none(
+            guild_id=guild_id, command=command)
+    return None if (game is None) else game.id
 
 
 async def copy_game(guild_id: int, source_command: str, new_command: str, *,
@@ -335,6 +421,7 @@ async def copy_game(guild_id: int, source_command: str, new_command: str, *,
     ``api_fields`` is applied on top of the copied reserved api_* overrides.
     Returns False when the source is missing or the new command exists.
     """
+    await ensure_guild_config(guild_id)
     source = await models.Game.get_or_none(
         guild_id=guild_id, command=source_command)
     if (source is None):
@@ -348,21 +435,7 @@ async def copy_game(guild_id: int, source_command: str, new_command: str, *,
     async with in_transaction():
         new_game = await models.Game.create(
             guild_id=guild_id, command=new_command, **fields)
-        for parameter in await models.GameParameter.filter(
-                game_id=source.id).order_by("id"):
-            new_parameter = await models.GameParameter.create(
-                game=new_game, name=parameter.name,
-                display_name=parameter.display_name or parameter.name,
-                api_field=parameter.api_field)
-            for value in await models.ParameterValue.filter(
-                    parameter_id=parameter.id).order_by("id"):
-                await models.ParameterValue.create(
-                    parameter=new_parameter,
-                    value=value.value, display_name=value.display_name)
-        for override in await models.GameApiFieldOverride.filter(
-                game_id=source.id):
-            await models.GameApiFieldOverride.create(
-                game=new_game, key=override.key, field_name=override.field_name)
+        await _copy_game_tree(source, new_game)
         if (api_fields):
             await _write_api_field_overrides(new_game, api_fields)
     return True
@@ -380,6 +453,7 @@ async def update_game(guild_id: int, command: str, *,
     ``api_fields`` maps canonical api_* keys to the new field name; a None
     value removes the override so the default applies again.
     """
+    await ensure_guild_config(guild_id)
     game = await models.Game.get_or_none(guild_id=guild_id, command=command)
     if (game is None):
         return False
@@ -399,6 +473,7 @@ async def update_game(guild_id: int, command: str, *,
 
 async def delete_game(guild_id: int, command: str) -> bool:
     """Delete a game row, cascading to its parameters; whether it existed."""
+    await ensure_guild_config(guild_id)
     return (await models.Game.filter(
         guild_id=guild_id, command=command).delete()) > 0
 
@@ -414,6 +489,7 @@ async def add_parameter(guild_id: int, command: str, name: str,
     None/blank means Discord-only. ``display_name`` is the user-facing
     label; None/blank defaults to ``name``.
     """
+    await ensure_guild_config(guild_id)
     game = await models.Game.get_or_none(guild_id=guild_id, command=command)
     if (game is None):
         return False
@@ -442,6 +518,7 @@ async def update_parameter(guild_id: int, command: str, name: str,
     keeps the current field. Passing a value (or ``""`` to clear/reset it)
     sets it; same for ``display_name`` (blank resets it to the name).
     """
+    await ensure_guild_config(guild_id)
     game = await models.Game.get_or_none(guild_id=guild_id, command=command)
     if (game is None):
         return False
@@ -465,6 +542,7 @@ async def update_parameter(guild_id: int, command: str, name: str,
 
 async def delete_parameter(guild_id: int, command: str, name: str) -> bool:
     """Delete a game's parameter (cascading to its values); whether it existed."""
+    await ensure_guild_config(guild_id)
     game = await models.Game.get_or_none(guild_id=guild_id, command=command)
     if (game is None):
         return False

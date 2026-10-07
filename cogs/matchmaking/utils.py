@@ -243,6 +243,27 @@ def guests_field_name(count: int, limit: int | None = None) -> str:
     return f"{constants.LFG_FIELD_GUESTS} ({count}/{limit})"
 
 
+def parse_color(value: str | None) -> discord.Colour | None:
+    """A configured embed colour, or None when it is unset or unreadable.
+
+    Accepts the decimal integer the config files and the database store, and the
+    hex forms Discord itself parses (``0xRRGGBB``, ``#RRGGBB``, ``rgb(...)``). A
+    value that is not a 24-bit colour is None, so the caller can fall back to the
+    host's colour instead of sending Discord one it would refuse.
+    """
+    if (not value):
+        return None
+    text = value.strip()
+    try:
+        colour = discord.Colour.from_str(text)
+    except ValueError:
+        try:
+            colour = discord.Colour(int(text))
+        except ValueError:
+            return None
+    return colour if 0 <= colour.value <= 0xFFFFFF else None
+
+
 def embed_title(game_name: str, title: str | None = None) -> str:
     """The LFG embed title: ``Looking for a(n) <game> game[: <title>]``.
 

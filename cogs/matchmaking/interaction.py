@@ -555,10 +555,8 @@ class LFGInteractionMixin:
             gameIcon = common_constants.DEFAULT_AVATAR_URL
         embed.set_thumbnail(url=gameIcon)
 
-        gameColor = game_option.color
-        if (not(len(gameColor))):
-            gameColor = host.colour
-        embed.colour = gameColor
+        # No colour configured, or one that cannot be read: the host's colour.
+        embed.colour = utils.parse_color(game_option.color) or host.colour
 
         # View for the buttons
         view = LFGView(cog=self)

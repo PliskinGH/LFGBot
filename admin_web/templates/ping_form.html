@@ -1,0 +1,48 @@
+{% extends 'base.html' %}
+{% block title %}Ping of {{ game.command }} — LFG bot panel{% endblock %}
+{% block content %}
+<h1 class="h3">Ping of <code>{{ game.command }}</code></h1>
+<p class="text-body-secondary">What the LFG post pings when it opens: a role, or one
+member. It is currently
+{%- if ping %} <strong>{{ ping_label }}</strong>{% else %} empty{% endif %}.</p>
+{% if errors %}
+<div class="alert alert-danger"><ul class="mb-0">
+  {% for error in errors %}<li>{{ error }}</li>{% endfor %}
+</ul></div>
+{% endif %}
+<form method="post" action="{{ game_base }}/games/{{ game_id }}/ping">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <div class="row g-3">
+    <div class="col-md-6">
+      <label class="form-label" for="role">Role</label>
+      <select class="form-select" id="role" name="role">
+        <option value="">(none)</option>
+        {% for choice in roles %}
+        <option value="{{ choice.value }}"
+                {% if choice.value == values.role %}selected{% endif %}>{{ choice.label }}</option>
+        {% endfor %}
+      </select>
+      <div class="form-text">Everybody holding the role is pinged.</div>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label" for="member">Member</label>
+      <input class="form-control" id="member" name="member"
+             value="{{ values.member or '' }}"
+             placeholder="a name, or <@123456789>">
+      <div class="form-text">A member's name, or a user mention. One member
+      only: leave the role empty.</div>
+    </div>
+  </div>
+  <div class="mt-3">
+    <button class="btn btn-primary" type="submit">Set ping</button>
+    <a class="btn btn-secondary" href="{{ game_base }}">Cancel</a>
+  </div>
+</form>
+{% if ping %}
+<form class="mt-3" method="post"
+      action="{{ game_base }}/games/{{ game_id }}/ping/clear">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <button class="btn btn-outline-danger" type="submit">Clear the ping</button>
+</form>
+{% endif %}
+{% endblock %}

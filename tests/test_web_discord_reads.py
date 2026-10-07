@@ -5,8 +5,8 @@ import pytest
 
 from admin_web import discord_reads
 
-from tests.conftest import (ApiChannel, ApiGuild, ApiRole, ApiTag, api_client,
-                            api_guild)
+from tests.conftest import (ApiChannel, ApiGuild, ApiMember, ApiRole, ApiTag,
+                            api_client, api_guild)
 
 
 def _reading_guild() -> ApiGuild:
@@ -158,9 +158,70 @@ class TestMentions:
         assert discord_reads.channel_mention(10) == "<#10>"
         assert discord_reads.role_mention(20) == "<@&20>"
 
+    def test_a_user_mention(self):
+        assert discord_reads.user_mention(42) == "<@42>"
+
     def test_the_id_of_a_mention(self):
         assert discord_reads.mention_id("<#10>") == 10
         assert discord_reads.mention_id("<@&20>") == 20
         assert discord_reads.mention_id("<@42>") == 42
         assert discord_reads.mention_id("not a mention") is None
         assert discord_reads.mention_id(None) is None
+
+
+class TestMemberReads:
+    """The member reads a ping needs: a search, a single fetch, never a list."""
+
+    def _reads_with(self, *members) -> discord_reads.DiscordReads:
+        return _reads(api_client(
+            api_guild(7, "Server Seven", members=list(members))))
+
+    async def test_a_searched_name_comes_back_as_a_mention(self):
+        reads = self._reads_with(ApiMember(42, "hosty", nick="Hosty"),
+                                 ApiMember(43, "guest"))
+        assert await reads.member_search(7, "host") == [
+            {"id": "<@42>", "label": "@Hosty"}]
+
+    async def test_a_name_nobody_matches_comes_back_empty(self):
+        assert await self._reads_with(ApiMember(42, "hosty")).member_search(
+            7, "nobody") == []
+
+    async def test_a_member_is_named_by_id(self):
+        reads = self._reads_with(ApiMember(42, "hosty", global_name="Hosty"))
+        assert await reads.member_name(7, 42) == "Hosty"
+
+    async def test_a_member_discord_does_not_know_is_not_named(self):
+        reads = self._reads_with()
+        assert await reads.member_name(7, 42) is None
+
+    async def test_a_member_is_asked_for_once(self):
+        reads = self._reads_with(ApiMember(42, "hosty"))
+        await reads.member_name(7, 42)
+        await reads.member_name(7, 42)
+        assert reads.client.guilds[0].member_fetches == 1
+
+    async def test_a_missing_member_is_not_asked_for_again(self):
+        reads = self._reads_with()
+        await reads.member_name(7, 42)
+        await reads.member_name(7, 42)
+        assert reads.client.guilds[0].member_fetches == 1
+
+    async def test_a_user_mention_is_shown_as_its_members_name(self):
+        reads = self._reads_with(ApiMember(42, "hosty", nick="Hosty"))
+        assert await reads.mention_label(7, "<@42>") == "@Hosty"
+
+    async def test_a_role_mention_is_shown_from_the_roles(self):
+        reads = _reads(api_client(_reading_guild()))
+        assert await reads.mention_label(7, "<@&20>") == "@Raid"
+
+    async def test_a_mention_discord_does_not_know_is_shown_as_it_is(self):
+        reads = self._reads_with()
+        assert await reads.mention_label(7, "<@999>") == "<@999>"
+        assert await reads.mention_label(7, "") == ""
+        assert await reads.mention_label(7, "not a mention") == "not a mention"
+
+    async def test_without_a_client_nothing_is_read(self):
+        reads = _reads()
+        assert await reads.member_search(7, "hosty") == []
+        assert await reads.member_name(7, 42) is None
+        assert await reads.mention_label(7, "<@42>") == "<@42>"

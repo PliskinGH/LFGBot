@@ -1,0 +1,161 @@
+{% extends 'base.html' %}
+{% macro text(field, label, value, hint='') %}
+<div class="col-md-6">
+  <label class="form-label" for="{{ field }}">{{ label }}</label>
+  <input class="form-control" id="{{ field }}" name="{{ field }}"
+         value="{{ value or '' }}">
+  {% if hint %}<div class="form-text">{{ hint }}</div>{% endif %}
+</div>
+{% endmacro %}
+{% macro area(field, label, value, hint='') %}
+<div class="col-md-6">
+  <label class="form-label" for="{{ field }}">{{ label }}</label>
+  <textarea class="form-control" id="{{ field }}" name="{{ field }}"
+            rows="2">{{ value or '' }}</textarea>
+  {% if hint %}<div class="form-text">{{ hint }}</div>{% endif %}
+</div>
+{% endmacro %}
+{% macro number(field, label, value, minimum, maximum, hint='') %}
+<div class="col-md-6">
+  <label class="form-label" for="{{ field }}">{{ label }}</label>
+  <input class="form-control" id="{{ field }}" name="{{ field }}" type="number"
+         value="{{ value or '' }}" min="{{ minimum }}" max="{{ maximum }}"
+         step="1" inputmode="numeric">
+  {% if hint %}<div class="form-text">{{ hint }}</div>{% endif %}
+</div>
+{% endmacro %}
+{% macro picker(field, label, choices, value, placeholder='a mention, like <@&123>') %}
+<div class="col-md-6">
+  <label class="form-label" for="{{ field }}">{{ label }}</label>
+  {% if choices %}
+  <select class="form-select" id="{{ field }}" name="{{ field }}">
+    <option value="">(none)</option>
+    {% for choice in choices %}
+    <option value="{{ choice.value }}"
+            {% if choice.value == value %}selected{% endif %}>{{ choice.label }}</option>
+    {% endfor %}
+  </select>
+  {% else %}
+  <input class="form-control" id="{{ field }}" name="{{ field }}"
+         value="{{ value or '' }}" placeholder="{{ placeholder }}">
+  <div class="form-text">Nothing to pick here: type the value.</div>
+  {% endif %}
+</div>
+{% endmacro %}
+{% macro select(field, label, options, value, hint='') %}
+<div class="col-md-6">
+  <label class="form-label" for="{{ field }}">{{ label }}</label>
+  <select class="form-select" id="{{ field }}" name="{{ field }}">
+    {% for option_value, option_label in options %}
+    <option value="{{ option_value }}"
+            {% if option_value == (value or '') %}selected{% endif %}>{{ option_label }}</option>
+    {% endfor %}
+  </select>
+  {% if hint %}<div class="form-text">{{ hint }}</div>{% endif %}
+</div>
+{% endmacro %}
+{% block title %}{{ 'Add a game' if new else 'Edit ' ~ values.command }} — LFG bot panel{% endblock %}
+{% block content %}
+<h1 class="h3">{{ 'Add a game' if new else 'Edit ' ~ values.command }}</h1>
+{% if errors %}
+<div class="alert alert-danger"><ul class="mb-0">
+  {% for error in errors %}<li>{{ error }}</li>{% endfor %}
+</ul></div>
+{% endif %}
+<form method="post" action="{{ game_base }}/games/{{ 'new' if new else game_id }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <h2 class="h5 mt-4">Game</h2>
+  <div class="row g-3">
+    {{ text('command', 'Slash command', values.command, 'Lowercase letters, digits or underscores.') }}
+    {{ text('name', 'Display name', values.name, 'Blank uses the command name.') }}
+    {{ picker('channel', 'LFG channel', choices.channel, values.channel) }}
+    {{ picker('forum', 'Forum for threads', choices.forum, values.forum) }}
+    {{ picker('tag', 'Forum tag', choices.tag, values.tag, 'a tag id, like 123456') }}
+    {{ select('visibility', 'Threads', [('', 'Public (default)'), ('0', 'Private')], values.visibility) }}
+    <div class="col-md-6">
+      <label class="form-label" for="color">Embed colour</label>
+      <div class="d-flex align-items-center gap-3">
+        <input class="form-control form-control-color" id="color" name="color"
+               type="color" value="{{ color_hex }}">
+        <div class="form-check">
+          <input class="form-check-input" id="use_color" name="use_color"
+                 type="checkbox" value="1" {% if color_set %}checked{% endif %}>
+          <label class="form-check-label" for="use_color">Use a colour</label>
+        </div>
+      </div>
+      <div class="form-text">Unticked, the LFG post uses the host's colour.</div>
+    </div>
+    {{ text('icon', 'Icon URL', values.icon) }}
+    {{ number('max_players', 'Default maximum players', values.max_players, 2, 100, 'Host included (2-100). Blank means no player cap.') }}
+    {{ area('message', 'Message on game start', values.message) }}
+  </div>
+  <h2 class="h5 mt-4">Match API field names</h2>
+  <p class="text-body-secondary">A blank field uses the inherited default shown under it.</p>
+  <div class="row g-3">
+    {% set api_labels = {'title_field': 'Title', 'table_talk_url_field': 'Thread URL',
+                         'participants_field': 'Participants', 'discord_username_field': 'Discord names'} %}
+    {% for argument, value in api_values.items() %}
+    {{ text(argument, api_labels.get(argument, argument), value,
+            'default: ' ~ (api_defaults.get(argument) or 'unset')) }}
+    {% endfor %}
+  </div>
+  <h2 class="h5 mt-4">Links</h2>
+  <div class="row g-3">
+    {{ text('registration_api', 'Registration API', values.registration_api) }}
+    {{ text('match_api', 'Match API', values.match_api) }}
+    {{ text('match_url', 'Match URL', values.match_url) }}
+    {{ text('website_url', 'Website', values.website_url) }}
+    {{ text('registration_url', 'Registration page', values.registration_url) }}
+    {{ text('profile_url', 'Profile page', values.profile_url) }}
+  </div>
+  <p class="text-body-secondary mt-3">The ping and the API token are set on
+  their own pages, from the server page: the panel never displays the token.</p>
+  <div class="mt-2">
+    <button class="btn btn-primary" type="submit">Save</button>
+    <a class="btn btn-secondary" href="{{ game_base }}">Cancel</a>
+    {% if not new %}
+    <a class="btn btn-outline-secondary"
+       href="{{ game_base }}/games/{{ game_id }}/copy">Copy</a>
+    <a class="btn btn-outline-danger"
+       href="{{ game_base }}/games/{{ game_id }}/remove">Remove</a>
+    {% endif %}
+  </div>
+</form>
+
+{% if not new %}
+<h2 class="h5 mt-4">Parameters <span class="text-body-secondary">({{ parameters|length }})</span></h2>
+{% if parameters %}
+<div class="card table-card">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead><tr><th>Name</th><th>Label</th><th>Values</th><th>API field</th><th></th></tr></thead>
+      <tbody>
+      {% for parameter in parameters %}
+        <tr>
+          <td><code>{{ parameter.name }}</code></td>
+          <td>{{ parameter.display_name }}</td>
+          <td>{{ parameter.values_text }}</td>
+          <td>{{ parameter.api_field or '—' }}</td>
+          <td class="text-nowrap">
+            <div class="d-flex gap-1">
+              <a class="btn btn-sm btn-outline-secondary"
+                 href="{{ game_base }}/games/{{ game_id }}/parameters/{{ parameter.id }}">Edit</a>
+              <a class="btn btn-sm btn-outline-danger"
+                 href="{{ game_base }}/games/{{ game_id }}/parameters/{{ parameter.id }}/remove">Remove</a>
+            </div>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<p class="text-body-secondary">This game takes no parameter.</p>
+{% endif %}
+<p class="mt-3">
+  <a class="btn btn-outline-primary btn-sm"
+     href="{{ game_base }}/games/{{ game_id }}/parameters/new">Add a parameter</a>
+</p>
+{% endif %}
+{% endblock %}

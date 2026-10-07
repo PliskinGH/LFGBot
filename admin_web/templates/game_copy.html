@@ -1,0 +1,32 @@
+{% extends 'base.html' %}
+{% block title %}Copy {{ source.command }} — LFG bot panel{% endblock %}
+{% block content %}
+<h1 class="h3">Copy <code>{{ source.command }}</code></h1>
+<p class="text-body-secondary">The copy starts with this game's settings, its
+parameters and its API field names; only the command and the display name are new.</p>
+{% if errors %}
+<div class="alert alert-danger"><ul class="mb-0">
+  {% for error in errors %}<li>{{ error }}</li>{% endfor %}
+</ul></div>
+{% endif %}
+<form method="post" action="{{ game_base }}/games/{{ game_id }}/copy">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <div class="row g-3">
+    <div class="col-md-6">
+      <label class="form-label" for="command">New slash command</label>
+      <input class="form-control" id="command" name="command"
+             value="{{ values.command or '' }}">
+      <div class="form-text">Lowercase letters, digits or underscores.</div>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label" for="name">New display name</label>
+      <input class="form-control" id="name" name="name"
+             value="{{ values.name or '' }}">
+    </div>
+  </div>
+  <div class="mt-3">
+    <button class="btn btn-primary" type="submit">Copy</button>
+    <a class="btn btn-secondary" href="{{ game_base }}/games/{{ game_id }}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

@@ -16,27 +16,74 @@ inherits <code>[DEFAULT]</code>.</div>
 {% endif %}
 
 <h2 class="h5 mt-4">Games <span class="text-body-secondary">({{ games|length }})</span></h2>
+<p class="mb-2">
+  <a class="btn btn-outline-primary btn-sm" href="{{ game_base }}/games/new">Add a game</a>
+  {% if not inherited and not is_default %}
+  <a class="btn btn-outline-danger btn-sm" href="{{ game_base }}/reset">Remove this server's configuration</a>
+  {% endif %}
+</p>
 {% if games %}
 <div class="card table-card">
   <div class="table-responsive">
     <table class="table table-hover align-middle mb-0">
       <thead>
-        <tr><th>Command</th><th>Name</th><th>Pings</th><th>Posts in</th>
-            <th>Players</th><th>Parameters</th><th>League</th></tr>
+        <tr><th>Command</th><th>Name</th><th>Pings</th>
+            <th title="Where the LFG post goes; blank keeps it in the channel the command was used in.">Posts in</th>
+            <th title="Where game threads are created; blank creates them under the LFG post.">Threads in</th>
+            <th>Players</th><th>Parameters</th><th>API token</th><th></th></tr>
       </thead>
       <tbody>
       {% for game in games %}
         <tr>
           <td><code>{{ game.command }}</code></td>
           <td>{{ game.name or '—' }}</td>
-          <td>{{ game.role or '—' }}</td>
-          <td>{{ game.forum or game.channel or '—' }}</td>
+          <td class="text-nowrap">
+            {{ game.ping or '—' }}
+            {% if game.id %}
+            <a class="btn btn-sm btn-outline-primary mt-1 d-block"
+               href="{{ game_base }}/games/{{ game.id }}/ping">
+              {{- 'Change' if game.ping else 'Set' }} ping</a>
+            {% endif %}
+          </td>
+          <td>{{ game.channel or '—' }}</td>
+          <td>{{ game.forum or '—' }}</td>
           <td>{{ game.players or '—' }}</td>
           <td>{{ game.parameters|join(', ') if game.parameters else '—' }}</td>
-          <td>
-          {%- if game.league -%}
-            {{ 'token set' if game.token else 'no token' }}
-          {%- else -%}—{%- endif -%}
+          <td class="text-nowrap">
+            {% if game.token %}<span class="badge text-bg-success">set</span>
+            {% else %}<span class="badge text-bg-secondary">not set</span>{% endif %}
+            {% if game.id %}
+            <a class="btn btn-sm btn-outline-primary mt-1 d-block"
+               href="{{ game_base }}/games/{{ game.id }}/token">
+              {{- 'Change' if game.token else 'Set' }} token</a>
+            {% endif %}
+          </td>
+          <td class="text-nowrap">
+            {% if game.id %}
+            <div class="d-flex gap-1">
+              <a class="btn btn-sm btn-outline-secondary"
+                 href="{{ game_base }}/games/{{ game.id }}">Edit</a>
+              <a class="btn btn-sm btn-outline-secondary"
+                 href="{{ game_base }}/games/{{ game.id }}/copy">Copy</a>
+              <a class="btn btn-sm btn-outline-danger"
+                 href="{{ game_base }}/games/{{ game.id }}/remove">Remove</a>
+            </div>
+            {% else %}
+            <span class="text-body-secondary fst-italic">inherited</span>
+            {% if not is_default %}
+            <form method="post" action="{{ game_base }}/games/adopt"
+                  class="mt-1">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="command" value="{{ game.command }}">
+              <button class="btn btn-sm btn-outline-primary" type="submit"
+                      title="Copies this game into this server's own configuration, so it can be edited here.">
+                Customise</button>
+            </form>
+            {% endif %}
+            {% if operator %}
+            <a href="{{ url_for('ops_default') }}">edit in [DEFAULT]</a>
+            {% endif %}
+            {% endif %}
           </td>
         </tr>
       {% endfor %}
@@ -46,6 +93,26 @@ inherits <code>[DEFAULT]</code>.</div>
 </div>
 {% else %}
 <p class="text-body-secondary">No game is configured here.</p>
+{% endif %}
+
+{% if missing %}
+<h3 class="h6 mt-4">In <code>[DEFAULT]</code>, not in this server</h3>
+<p class="text-body-secondary mb-2">This server has its own configuration, so
+these games are not offered here; copy one in to start using it.</p>
+<ul class="list-group">
+  {% for command in missing %}
+  <li class="list-group-item d-flex justify-content-between align-items-center">
+    <code>{{ command }}</code>
+    <form method="post" action="{{ game_base }}/games/adopt">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="command" value="{{ command }}">
+      <button class="btn btn-sm btn-outline-primary" type="submit"
+              title="Copies this game into this server's own configuration, so it can be used and edited here.">
+        Customise</button>
+    </form>
+  </li>
+  {% endfor %}
+</ul>
 {% endif %}
 
 <h2 class="h5 mt-4">Roll sets <span class="text-body-secondary">({{ rolls|length }})</span></h2>

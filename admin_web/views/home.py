@@ -91,4 +91,6 @@ async def guild_page(request):
             or str(guild_id))
     return pages.render(request, "guild.html", active="guild",
                         guild_id=guild_id, guild_name=name, is_default=False,
+                        game_base=str(request.url_for("guild",
+                                                      guild_id=guild_id)),
                         **await overview.guild_config(reads, guild_id))

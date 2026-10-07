@@ -7,10 +7,13 @@ shared ``db`` fixture and ``_drop_all_tables`` helper in tests/conftest.py).
 Tests skip when TEST_DATABASE_URL is unset or the server is unreachable. The
 pure parsing/mapping tests run everywhere.
 """
+import asyncio
 import configparser
 import os
 
+import pytest
 from tortoise import connections
+from tortoise.exceptions import IntegrityError
 from tortoise.migrations.api.migrate import migrate as apply_migrations
 
 from db import models
@@ -596,4 +599,201 @@ class TestAdminPersistence:
         assert "param1" not in loaded.game_parameters[42424]["game_a"]
         assert "param1" not in loaded.game_api_fields[42424]["game_a"]
         assert await db_config.delete_parameter(42424, "game_a", "param1") is False
+
+
+class TestMaterializationOnWrite:
+    """Every write gives an unconfigured guild its own copy of [DEFAULT] first.
+
+    A guild with no rows falls back to the sentinel default config; its first
+    write, whatever the write is, materializes a complete copy and changes that,
+    so the panel and the Discord commands behave identically.
+    """
+
+    async def test_add_game_materializes(self, db, games_config,
+                                         game_parameters_config):
+        await db_config.seed_db_from_config(games_config, game_parameters_config)
+        assert await models.Guild.get_or_none(guild_id=42424) is None
+        assert await db_config.add_game(42424, "root", name="Root") is True
+        loaded = await db_config.load_config_from_db()
+        # The new game comes with the [DEFAULT] ones the guild now owns.
+        assert list(loaded.guilds[42424].games.keys()) == [
+            "game_a", "game_b", "root"]
+
+    async def test_update_game_materializes_then_applies(self, db, games_config,
+                                                         game_parameters_config):
+        await db_config.seed_db_from_config(games_config, game_parameters_config)
+        # game_a is [DEFAULT]'s own game: the write copies the config first and
+        # then changes the guild's copy of it.
+        assert await db_config.update_game(
+            42424, "game_a", name="Renamed") is True
+        loaded = await db_config.load_config_from_db()
+        assert loaded.guilds[42424].games["game_a"].name == "Renamed"
+        assert loaded.default_guild_config.games["game_a"].name == "Game A"
+        # A game [DEFAULT] does not have is still refused.
+        assert await db_config.update_game(42424, "nope", name="X") is False
+
+    async def test_delete_game_materializes_then_removes(self, db, games_config,
+                                                         game_parameters_config):
+        await db_config.seed_db_from_config(games_config, game_parameters_config)
+        assert await db_config.delete_game(42424, "game_a") is True
+        loaded = await db_config.load_config_from_db()
+        assert list(loaded.guilds[42424].games.keys()) == ["game_b"]
+        assert "game_a" in loaded.default_guild_config.games
+
+    async def test_parameter_writes_materialize(self, db, games_config,
+                                                game_parameters_config):
+        await db_config.seed_db_from_config(games_config, game_parameters_config)
+        assert await db_config.update_parameter(
+            42424, "game_a", "param1", display_name="Param One") is True
+        assert await db_config.add_parameter(
+            42424, "game_a", "param4", {"yes": "Yes"}) is True
+        assert await db_config.delete_parameter(42424, "game_a", "param2") is True
+        loaded = await db_config.load_config_from_db()
+        params = loaded.game_parameters[42424]["game_a"]
+        assert params["param1"]["display_name"] == "Param One"
+        assert params["param4"]["values"] == {"yes": "Yes"}
+        assert "param2" not in params
+        # [DEFAULT]'s own definitions are untouched by the guild's writes.
+        assert loaded.game_parameters[DEFAULT_GUILD_ID]["game_a"][
+            "param1"]["display_name"] == "param1"
+
+    async def test_copy_game_materializes(self, db, games_config,
+                                          game_parameters_config):
+        await db_config.seed_db_from_config(games_config, game_parameters_config)
+        assert await db_config.copy_game(
+            42424, "game_a", "game_copy", name="Copy") is True
+        loaded = await db_config.load_config_from_db()
+        assert list(loaded.guilds[42424].games.keys()) == [
+            "game_a", "game_b", "game_copy"]
+
+    async def test_the_default_guild_is_never_materialized(self, db):
+        # The [DEFAULT] configuration is the source the copy is made from.
+        await db_config.ensure_guild_config(DEFAULT_GUILD_ID)
+        assert await models.Guild.get_or_none(
+            guild_id=DEFAULT_GUILD_ID) is None
+
+
+class TestConcurrentMaterialization:
+    """The bot and the panel are separate processes: first writes can collide."""
+
+    async def test_two_concurrent_writes_leave_one_copy(self, db, games_config,
+                                                        game_parameters_config):
+        await db_config.seed_db_from_config(games_config, game_parameters_config)
+        await asyncio.gather(db_config.ensure_guild_config(42424),
+                             db_config.ensure_guild_config(42424))
+        assert await models.Guild.filter(guild_id=42424).count() == 1
+        loaded = await db_config.load_config_from_db()
+        assert list(loaded.guilds[42424].games.keys()) == ["game_a", "game_b"]
+
+    async def test_a_lost_race_keeps_the_winners_copy(self, db, games_config,
+                                                      game_parameters_config,
+                                                      monkeypatch):
+        await db_config.seed_db_from_config(games_config, game_parameters_config)
+        real_get = models.Guild.get_or_none
+        arrivals = {"count": 0}
+        released = asyncio.Event()
+
+        async def synced_get(**kwargs):
+            # Hold both writers at their first check, so each sees "no row"
+            # before either inserts: exactly the interleaving of two processes.
+            arrivals["count"] += 1
+            if (arrivals["count"] <= 2):
+                if (arrivals["count"] == 2):
+                    released.set()
+                await released.wait()
+            return await real_get(**kwargs)
+
+        monkeypatch.setattr(models.Guild, "get_or_none", synced_get)
+        await asyncio.gather(db_config.ensure_guild_config(42424),
+                             db_config.ensure_guild_config(42424))
+        # One writer won and copied the configuration; the other stood down.
+        assert await models.Guild.filter(guild_id=42424).count() == 1
+        loaded = await db_config.load_config_from_db()
+        assert list(loaded.guilds[42424].games.keys()) == ["game_a", "game_b"]
+
+    async def test_a_failed_copy_is_not_swallowed(self, db, games_config,
+                                                  game_parameters_config,
+                                                  monkeypatch):
+        await db_config.seed_db_from_config(games_config, game_parameters_config)
+
+        async def failing_create(**kwargs):
+            raise IntegrityError("duplicate key value violates unique constraint")
+
+        monkeypatch.setattr(models.Guild, "create", failing_create)
+        # No row exists afterwards, so this was not a race: it must surface.
+        with pytest.raises(IntegrityError):
+            await db_config.ensure_guild_config(42424)
+
+
+class TestAdoptingAGame:
+    """A game [DEFAULT] gained after a guild was materialized is copied in."""
+
+    async def test_it_copies_the_game_with_its_parameters(self, db, games_config,
+                                                          game_parameters_config):
+        await db_config.seed_db_from_config(games_config, game_parameters_config)
+        # A guild whose own copy predates one of [DEFAULT]'s games.
+        await db_config.ensure_guild_config(42424)
+        await models.Game.filter(guild_id=42424, command="game_a").delete()
+        assert await db_config.adopt_game(42424, "game_a") is True
+        loaded = await db_config.load_config_from_db()
+        assert "game_a" in loaded.guilds[42424].games
+        # The parameters and the api_* overrides came with it.
+        assert "param1" in loaded.game_parameters[42424]["game_a"]
+        assert loaded.game_api_fields[42424]["game_a"]["param1"] == "field_one"
+
+    async def test_it_refuses_a_game_the_guild_already_has(
+            self, db, games_config, game_parameters_config):
+        await db_config.seed_db_from_config(games_config, game_parameters_config)
+        await db_config.ensure_guild_config(42424)
+        assert await db_config.adopt_game(42424, "game_a") is False
+
+    async def test_it_refuses_a_game_default_does_not_have(self, db):
+        assert await db_config.adopt_game(42424, "nope") is False
+
+    async def test_the_default_guild_owns_everything(self, db, games_config,
+                                                     game_parameters_config):
+        await db_config.seed_db_from_config(games_config, game_parameters_config)
+        assert await db_config.adopt_game(DEFAULT_GUILD_ID, "game_a") is False
+
+    async def test_materialize_game_returns_the_guilds_own_row(self, db,
+                                                               games_config,
+                                                               game_parameters_config):
+        await db_config.seed_db_from_config(games_config, game_parameters_config)
+        # A guild with no configuration: the copy is made, then the row id is
+        # the guild's own (not [DEFAULT]'s, which holds the same command).
+        game_id = await db_config.materialize_game(42424, "game_a")
+        game = await models.Game.get(guild_id=42424, command="game_a")
+        assert game_id == game.id
+        assert await db_config.materialize_game(42424, "game_a") == game.id
+        assert await db_config.materialize_game(42424, "nope") is None
+
+
+class TestResettingAGuild:
+    """Dropping a server's own configuration sends it back to inheriting."""
+
+    async def test_it_drops_the_games_and_the_rolls(self, db, games_config,
+                                                    game_parameters_config,
+                                                    rolls_config, descriptions):
+        await db_config.seed_db_from_config(games_config, game_parameters_config)
+        await rolls_db_config.seed_db_from_config(rolls_config, descriptions)
+        await db_config.ensure_guild_config(42424)
+        await rolls_db_config.ensure_guild_categories(42424)
+        assert await db_config.reset_guild_config(42424) is True
+        loaded = await db_config.load_config_from_db()
+        assert 42424 not in loaded.guilds
+        assert await models.RollCategory.filter(
+            guild__guild_id=42424).count() == 0
+        # The [DEFAULT] rows the copy was made from are untouched.
+        assert list(loaded.default_guild_config.games.keys()) == [
+            "game_a", "game_b"]
+
+    async def test_a_server_without_configuration_returns_false(self, db):
+        assert await db_config.reset_guild_config(42424) is False
+
+    async def test_the_default_guild_is_never_reset(self, db, games_config,
+                                                    game_parameters_config):
+        await db_config.seed_db_from_config(games_config, game_parameters_config)
+        assert await db_config.reset_guild_config(DEFAULT_GUILD_ID) is False
+        assert await models.Guild.get_or_none(
+            guild_id=DEFAULT_GUILD_ID) is not None
 

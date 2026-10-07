@@ -66,6 +66,7 @@ async def default_page(request):
     return pages.render(request, "guild.html", active="ops_default",
                         guild_id=DEFAULT_GUILD_ID, guild_name="[DEFAULT]",
                         is_default=True,
+                        game_base=str(request.url_for("ops_default")),
                         **await overview.guild_config(
                             request.app.state.discord, DEFAULT_GUILD_ID))
 

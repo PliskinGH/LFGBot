@@ -618,21 +618,71 @@ class ApiRole:
         return self._default
 
 
+class ApiMember:
+    """A member, as the REST client reads one."""
+
+    def __init__(self, id: int, name: str, nick: str | None = None,
+                 global_name: str | None = None):
+        self.id = id
+        self.name = name
+        self.nick = nick
+        self.global_name = global_name
+
+
+def _fake_member_name(member: ApiMember) -> str:
+    """What the fake matches a search against and labels a member with."""
+    return member.nick or member.global_name or member.name
+
+
 class ApiGuild:
     """A guild, offering the two reads the panel makes of one."""
 
     def __init__(self, id: int, name: str, channels: list | None = None,
-                 roles: list | None = None):
+                 roles: list | None = None, members: list | None = None):
         self.id = id
         self.name = name
         self.channels = channels or []
         self.roles = roles or []
+        self.members = {member.id: member for member in members or []}
+        self.member_fetches = 0
 
     async def fetch_channels(self) -> list:
         return list(self.channels)
 
     async def fetch_roles(self) -> list:
         return list(self.roles)
+
+    async def fetch_member(self, member_id: int) -> ApiMember:
+        self.member_fetches += 1
+        if (member_id not in self.members):
+            # Discord answers NotFound for a member who is not there; a missing
+            # key reads the same through the panel's UNREACHABLE.
+            raise KeyError(member_id)
+        return self.members[member_id]
+
+    async def query_members(self, *, query: str | None = None,
+                            limit: int = 5) -> list:
+        wanted = (query or "").casefold()
+        return [member for member in self.members.values()
+                if wanted in _fake_member_name(member).casefold()][:limit]
+
+
+class ApiHttp:
+    """The one HTTP route the reads call directly, over a stand-in client."""
+
+    def __init__(self, client: "ApiClient"):
+        self.client = client
+        self.paths: list[str] = []
+
+    async def request(self, route, **kwargs) -> list[dict]:
+        self.paths.append(route.path)
+        params = kwargs.get("params") or {}
+        members = await self.client.guild_by_id(route.guild_id).query_members(
+            query=params.get("query"), limit=params.get("limit", 5))
+        return [{"nick": member.nick,
+                 "user": {"id": str(member.id), "username": member.name,
+                          "global_name": member.global_name}}
+                for member in members]
 
 
 class ApiClient:
@@ -643,6 +693,14 @@ class ApiClient:
         self.guilds = list(guilds or [])
         self.known_channels = {channel.id: channel for channel in channels or []}
         self.guild_fetches = 0
+        self.http = ApiHttp(self)
+
+    def guild_by_id(self, guild_id: int) -> ApiGuild:
+        """The guild the reads are about."""
+        for guild in self.guilds:
+            if (guild.id == guild_id):
+                return guild
+        raise AssertionError(f"no guild {guild_id} was set up")
 
     async def fetch_guilds(self, *, limit=None):
         for guild in self.guilds:
@@ -650,20 +708,18 @@ class ApiClient:
 
     async def fetch_guild(self, guild_id: int) -> ApiGuild:
         self.guild_fetches += 1
-        for guild in self.guilds:
-            if (guild.id == guild_id):
-                return guild
-        raise AssertionError(f"no guild {guild_id} was set up")
+        return self.guild_by_id(guild_id)
 
     async def fetch_channel(self, channel_id: int) -> ApiChannel:
         return self.known_channels[channel_id]
 
 
 def api_guild(guild_id: int = 7, name: str = "Server Seven",
-              channels: list | None = None,
-              roles: list | None = None) -> ApiGuild:
-    """A guild with the channels and roles a test gives it."""
-    return ApiGuild(guild_id, name, channels=channels, roles=roles)
+              channels: list | None = None, roles: list | None = None,
+              members: list | None = None) -> ApiGuild:
+    """A guild with the channels, roles and members a test gives it."""
+    return ApiGuild(guild_id, name, channels=channels, roles=roles,
+                    members=members)
 
 
 def api_client(*guilds: ApiGuild, forums: list | None = None) -> ApiClient:

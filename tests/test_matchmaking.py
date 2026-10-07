@@ -9,6 +9,7 @@ import discord
 import pytest
 
 from common import constants
+from cogs.matchmaking import utils as mm_utils
 from cogs.matchmaking.cog import Matchmaking
 from cogs.matchmaking.constants import (
     DEFAULT_GUILD_ID, DEFAULT_NB_GAMES, EMOJI_START, GAMES_COMMAND,
@@ -186,6 +187,58 @@ class TestSendHelp:
         assert interaction.response.messages[0][1] is None
         assert "# Help: /unknown" in content
         assert "No detailed help is available" in content
+
+
+class TestGameColor:
+    """The embed colour of an LFG post: what is configured, or the host's."""
+
+    def _game_option(self, color: str | None) -> GameOption:
+        return GameOption(
+            name="Game A", command="game_a", role="", icon="", color=color,
+            forum=None, channel=None, tag=None, visibility=None, message=None,
+            registration_api=None, match_api=None, match_url=None,
+            api_token=None, website_url=None, registration_url=None,
+            profile_url=None, default_max_guests=None)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("color, expected", [
+        ("16777215", discord.Colour(0xFFFFFF)),
+        ("0x00ff00", discord.Colour(0x00FF00)),
+        ("#ff0000", discord.Colour(0xFF0000)),
+    ])
+    async def test_a_configured_colour_is_applied(self, matchmaking, color,
+                                                  expected):
+        interaction = FakeInteraction(user=FakeMember(1, "host"))
+        await matchmaking.create_lfg(
+            interaction, self._game_option(color), None, "desc", None)
+        content, embed, _ = interaction.channel.sent[0]
+        assert embed.colour == expected
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("color", ["", None, "not a colour", "99999999"])
+    async def test_an_unset_or_unreadable_colour_falls_back_to_the_host(
+            self, matchmaking, color):
+        interaction = FakeInteraction(user=FakeMember(1, "host"))
+        await matchmaking.create_lfg(
+            interaction, self._game_option(color), None, "desc", None)
+        content, embed, _ = interaction.channel.sent[0]
+        assert embed.colour == interaction.user.colour
+
+    def test_the_accepted_colour_forms(self):
+        assert mm_utils.parse_color(" 16711680 ") == discord.Colour(0xFF0000)
+        assert mm_utils.parse_color("0x0000ff") == discord.Colour(0x0000FF)
+        assert mm_utils.parse_color("#00ff00") == discord.Colour(0x00FF00)
+
+    def test_a_colour_it_cannot_read_is_none(self):
+        assert mm_utils.parse_color("") is None
+        assert mm_utils.parse_color(None) is None
+        assert mm_utils.parse_color("not a colour") is None
+        assert mm_utils.parse_color("#zzz") is None
+        # A bare hex is not one of the forms Discord's own parser accepts.
+        assert mm_utils.parse_color("ff0000") is None
+        # Beyond 24 bits, Discord would refuse it: not a colour here either.
+        assert mm_utils.parse_color("99999999") is None
+        assert mm_utils.parse_color("0x99999999") is None
 
 
 class TestMinimalDynamicGame:
@@ -3463,6 +3516,26 @@ class TestGameNameValidation:
         # display name, so the sentinel is just an (invalid) name.
         fields, error = validation.updated_fields(name="-")
         assert error is not None
+
+
+class TestThreadVisibilityValidation:
+    """Thread visibility must be a value the cog can read as an integer."""
+
+    def test_unreadable_visibility_is_rejected(self):
+        from cogs.matchmaking import validation
+
+        for value in ("abc", "0.0", "private"):
+            assert validation.visibility_error(value) is not None
+            assert validation.game_fields(visibility=value)[0] is None
+            assert validation.updated_fields(visibility=value)[0] is None
+
+    def test_public_and_private_values_pass(self):
+        from cogs.matchmaking import validation
+
+        for value in ("", None, "0", "1"):
+            assert validation.visibility_error(value) is None
+        assert validation.game_fields(visibility="0")[1] is None
+        assert validation.updated_fields(visibility="1")[1] is None
 
 
 class TestConfigGameNameCaps:

@@ -11,6 +11,7 @@ import configparser
 
 from common import utils as common_utils
 
+from tortoise.exceptions import IntegrityError
 from tortoise.transactions import in_transaction
 
 from db import models
@@ -250,22 +251,29 @@ async def ensure_guild_categories(guild_id: int) -> None:
     default_categories = (await models.RollCategory
                           .filter(guild__guild_id=constants.DEFAULT_GUILD_ID)
                           .order_by("id").prefetch_related("roll_items"))
-    async with in_transaction():
-        guild, _ = await models.Guild.get_or_create(guild_id=guild_id)
-        for category in default_categories:
-            replica = await models.RollCategory.create(
-                guild=guild, name=category.name)
-            for item in await category.roll_items.all().order_by("id"):
-                item_replica = await models.RollItem.create(
-                    category=replica, name=item.name, active=item.active)
-                for description in await models.RollDescription.filter(
-                        item=item).order_by("id"):
-                    await models.RollDescription.create(
-                        item=item_replica,
-                        description=description.description,
-                        color=description.color,
-                        image_url=description.image_url,
-                        thumbnail_url=description.thumbnail_url)
+    try:
+        async with in_transaction():
+            guild, _ = await models.Guild.get_or_create(guild_id=guild_id)
+            for category in default_categories:
+                replica = await models.RollCategory.create(
+                    guild=guild, name=category.name)
+                for item in await category.roll_items.all().order_by("id"):
+                    item_replica = await models.RollItem.create(
+                        category=replica, name=item.name, active=item.active)
+                    for description in await models.RollDescription.filter(
+                            item=item).order_by("id"):
+                        await models.RollDescription.create(
+                            item=item_replica,
+                            description=description.description,
+                            color=description.color,
+                            image_url=description.image_url,
+                            thumbnail_url=description.thumbnail_url)
+    except IntegrityError:
+        # The bot and the panel are separate processes: a concurrent first
+        # write can materialize the categories between the check and the
+        # insert. Its own atomic copy stands; anything else is a failure.
+        if (not await _guild_has_own_categories(guild_id)):
+            raise
 
 
 async def _guild_has_own_categories(guild_id: int) -> bool:

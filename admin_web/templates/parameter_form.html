@@ -1,0 +1,53 @@
+{% extends 'base.html' %}
+{% block title %}{{ 'Add a parameter' if new else 'Edit ' ~ values.name }} — LFG bot panel{% endblock %}
+{% block content %}
+<h1 class="h3">{{ 'Add a parameter' if new else 'Edit ' ~ values.name }}</h1>
+<p class="text-body-secondary">Of game <code>{{ game.command }}</code>.</p>
+{% if errors %}
+<div class="alert alert-danger"><ul class="mb-0">
+  {% for error in errors %}<li>{{ error }}</li>{% endfor %}
+</ul></div>
+{% endif %}
+<form method="post" action="{{ game_base }}/games/{{ game_id }}/parameters/{{ 'new' if new else values.id }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <div class="row g-3">
+    <div class="col-md-6">
+      <label class="form-label" for="name">Parameter name</label>
+      {% if new %}
+      <input class="form-control" id="name" name="name" value="{{ values.name or '' }}">
+      {% else %}
+      <input class="form-control" id="name" name="name" value="{{ values.name }}"
+             readonly>
+      {% endif %}
+      <div class="form-text">Lowercase letters, digits or underscores; it cannot
+      start with <code>api_</code>.</div>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label" for="display_name">Display name</label>
+      <input class="form-control" id="display_name" name="display_name"
+             value="{{ values.display_name or '' }}">
+      <div class="form-text">Shown on the LFG post; blank uses the name.</div>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label" for="api_field">Match API field</label>
+      <input class="form-control" id="api_field" name="api_field"
+             value="{{ values.api_field or '' }}">
+      <div class="form-text">Where the value is submitted; blank keeps it in Discord only.</div>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label" for="values">Accepted values</label>
+      <textarea class="form-control" id="values" name="values" rows="3">{{ values.values_text or '' }}</textarea>
+      <div class="form-text">Either <code>a, b, c</code> or pairs like
+      <code>(a, Alpha), (b, Bravo)</code>; at least one is required.</div>
+    </div>
+  </div>
+  <div class="mt-3">
+    <button class="btn btn-primary" type="submit">Save</button>
+    <a class="btn btn-secondary" href="{{ game_base }}/games/{{ game_id }}">Cancel</a>
+    {% if not new %}
+    <a class="btn btn-outline-danger"
+       href="{{ game_base }}/games/{{ game_id }}/parameters/{{ values.id }}/remove">Remove</a>
+    {% endif %}
+  </div>
+</form>
+{% endblock %}

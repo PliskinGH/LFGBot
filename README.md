@@ -156,6 +156,11 @@ With `DATABASE_URL` set, server managers (`manage_guild` permission) can edit
 their server's games and roll sets at runtime (no code or restart needed). The
 commands write to the database and take effect immediately.
 
+A server starts out inheriting the `[DEFAULT]` configuration. **Its first edit —
+of any kind, whether it adds, changes or removes something — gives it a
+complete, independent copy of `[DEFAULT]`**, and that copy is what the edit
+then changes.
+
 #### Games
 
 | Command | Description |

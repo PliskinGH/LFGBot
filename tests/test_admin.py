@@ -98,20 +98,15 @@ class TestGamesAdd:
         interaction = FakeInteraction(user=_manager(), guild_id=42424)
         written = {}
 
-        async def fake_ensure(guild_id):
-            written["ensure"] = guild_id
-
         async def fake_add(guild_id, command, **fields):
             written["add"] = (guild_id, command, fields)
             return True
 
-        monkeypatch.setattr(db_config, "ensure_guild_config", fake_ensure)
         monkeypatch.setattr(db_config, "add_game", fake_add)
         await Matchmaking.games_add.callback(
             cog, interaction, command="root", name="Root",
             role="<@&954741722846490624>",
             forum="<#1068560342671700088>", max_players=4)
-        assert written["ensure"] == 42424
         guild_id, command, fields = written["add"]
         assert (guild_id, command) == (42424, "root")
         assert fields["name"] == "Root"
@@ -130,14 +125,10 @@ class TestGamesAdd:
         interaction = FakeInteraction(user=_manager(), guild_id=42424)
         written = {}
 
-        async def fake_ensure(guild_id):
-            return None
-
         async def fake_add(guild_id, command, **fields):
             written["add"] = (guild_id, command, fields)
             return True
 
-        monkeypatch.setattr(db_config, "ensure_guild_config", fake_ensure)
         monkeypatch.setattr(db_config, "add_game", fake_add)
         await Matchmaking.games_add.callback(
             cog, interaction, command="root", forum="<#123>")
@@ -150,14 +141,10 @@ class TestGamesAdd:
         interaction = FakeInteraction(user=_manager(), guild_id=42424)
         written = {}
 
-        async def fake_ensure(guild_id):
-            return None
-
         async def fake_add(guild_id, command, **fields):
             written["add"] = (guild_id, command, fields)
             return True
 
-        monkeypatch.setattr(db_config, "ensure_guild_config", fake_ensure)
         monkeypatch.setattr(db_config, "add_game", fake_add)
         await Matchmaking.games_add.callback(
             cog, interaction, command="root", channel="<#123>")
@@ -205,13 +192,9 @@ class TestGamesAdd:
         cog = _cog(monkeypatch)
         interaction = FakeInteraction(user=_manager(), guild_id=42424)
 
-        async def fake_ensure(guild_id):
-            return None
-
         async def fake_add(guild_id, command, **fields):
             return False
 
-        monkeypatch.setattr(db_config, "ensure_guild_config", fake_ensure)
         monkeypatch.setattr(db_config, "add_game", fake_add)
         await Matchmaking.games_add.callback(cog, interaction, command="root")
         assert "already configured" in interaction.followup.sent[0][0]
@@ -241,13 +224,9 @@ class TestGamesAdd:
         cog = _cog(monkeypatch)
         interaction = FakeInteraction(user=_manager(), guild_id=42424)
 
-        async def fake_ensure(guild_id):
-            return None
-
         async def fake_add(*args, **kwargs):
             return True
 
-        monkeypatch.setattr(db_config, "ensure_guild_config", fake_ensure)
         monkeypatch.setattr(db_config, "add_game", fake_add)
         await Matchmaking.games_add.callback(cog, interaction, command="root")
         # The in-memory configuration was replaced by the fake reload, and the
@@ -287,14 +266,10 @@ class TestGamesCopy:
         interaction = FakeInteraction(user=_manager(), guild_id=42424)
         written = {}
 
-        async def fake_ensure(guild_id):
-            return None
-
         async def fake_copy(guild_id, source, command, **kwargs):
             written["copy"] = (guild_id, source, command, kwargs)
             return True
 
-        monkeypatch.setattr(db_config, "ensure_guild_config", fake_ensure)
         monkeypatch.setattr(db_config, "copy_game", fake_copy)
         await Matchmaking.games_copy.callback(
             cog, interaction, game="game_a", command="game_x", name="Game X")
@@ -312,14 +287,10 @@ class TestGamesCopy:
         interaction = FakeInteraction(user=_manager(), guild_id=42424)
         written = {}
 
-        async def fake_ensure(guild_id):
-            return None
-
         async def fake_copy(guild_id, source, command, **kwargs):
             written["copy"] = kwargs
             return True
 
-        monkeypatch.setattr(db_config, "ensure_guild_config", fake_ensure)
         monkeypatch.setattr(db_config, "copy_game", fake_copy)
         await Matchmaking.games_copy.callback(
             cog, interaction, game="game_a", command="game_x", name="Game X",
@@ -392,14 +363,10 @@ class TestGamesCopy:
         interaction = FakeInteraction(user=_manager(), guild_id=42424)
         written = {}
 
-        async def fake_ensure(guild_id):
-            return None
-
         async def fake_copy(guild_id, source, command, **kwargs):
             written["copy"] = kwargs
             return True
 
-        monkeypatch.setattr(db_config, "ensure_guild_config", fake_ensure)
         monkeypatch.setattr(db_config, "copy_game", fake_copy)
         await Matchmaking.games_copy.callback(
             cog, interaction, game="game_a", command="game_x", name="Game X",
@@ -414,13 +381,9 @@ class TestGamesCopy:
         cog = _cog(monkeypatch)
         interaction = FakeInteraction(user=_manager(), guild_id=42424)
 
-        async def fake_ensure(guild_id):
-            return None
-
         async def fake_copy(*args, **kwargs):
             return False
 
-        monkeypatch.setattr(db_config, "ensure_guild_config", fake_ensure)
         monkeypatch.setattr(db_config, "copy_game", fake_copy)
         await Matchmaking.games_copy.callback(
             cog, interaction, game="game_a", command="game_x", name="Game X")
@@ -431,13 +394,9 @@ class TestGamesCopy:
         cog = _cog(monkeypatch)
         interaction = FakeInteraction(user=_manager(), guild_id=42424)
 
-        async def fake_ensure(guild_id):
-            return None
-
         async def fake_copy(*args, **kwargs):
             return True
 
-        monkeypatch.setattr(db_config, "ensure_guild_config", fake_ensure)
         monkeypatch.setattr(db_config, "copy_game", fake_copy)
         await Matchmaking.games_copy.callback(
             cog, interaction, game="game_a", command="game_x", name="Game X")
@@ -857,14 +816,10 @@ class TestGameApiToken:
         interaction = FakeInteraction(user=_manager(), guild_id=42424)
         written = {}
 
-        async def fake_ensure(guild_id):
-            return None
-
         async def fake_add(guild_id, command, **fields):
             written["add"] = fields
             return True
 
-        monkeypatch.setattr(db_config, "ensure_guild_config", fake_ensure)
         monkeypatch.setattr(db_config, "add_game", fake_add)
         await Matchmaking.games_add.callback(
             cog, interaction, command="root", api_token="secret-value")
@@ -1071,14 +1026,10 @@ class TestGameApiFields:
         interaction = FakeInteraction(user=_manager(), guild_id=42424)
         written = {}
 
-        async def fake_ensure(guild_id):
-            return None
-
         async def fake_add(guild_id, command, **fields):
             written["add"] = fields
             return True
 
-        monkeypatch.setattr(db_config, "ensure_guild_config", fake_ensure)
         monkeypatch.setattr(db_config, "add_game", fake_add)
         await Matchmaking.games_add.callback(
             cog, interaction, command="root",
@@ -1220,15 +1171,11 @@ class TestGamesParameterAdd:
         interaction = FakeInteraction(user=_manager(), guild_id=42424)
         written = {}
 
-        async def fake_ensure(guild_id):
-            written["ensure"] = guild_id
-
         async def fake_add(guild_id, game, name, values, api_field=None,
                            display_name=None):
             written["add"] = (guild_id, game, name, values, api_field, display_name)
             return True
 
-        monkeypatch.setattr(db_config, "ensure_guild_config", fake_ensure)
         monkeypatch.setattr(db_config, "add_parameter", fake_add)
         await Matchmaking.games_parameter_add.callback(
             cog, interaction, game="game_a", name="newparam",
@@ -1258,14 +1205,10 @@ class TestGamesParameterAdd:
         cog = _cog(monkeypatch)
         interaction = FakeInteraction(user=_manager(), guild_id=42424)
 
-        async def fake_ensure(guild_id):
-            pass
-
         async def fake_add(guild_id, game, name, values, api_field=None,
                            display_name=None):
             return False
 
-        monkeypatch.setattr(db_config, "ensure_guild_config", fake_ensure)
         monkeypatch.setattr(db_config, "add_parameter", fake_add)
         await Matchmaking.games_parameter_add.callback(
             cog, interaction, game="game_a", name="param1", values="x, y")
@@ -1310,14 +1253,10 @@ class TestGamesParameterUpdate:
         interaction = FakeInteraction(user=_manager(), guild_id=42424)
         written = {}
 
-        async def fake_ensure(guild_id):
-            written["ensure"] = guild_id
-
         async def fake_update(guild_id, game, name, **kwargs):
             written["update"] = (guild_id, game, name, kwargs)
             return True
 
-        monkeypatch.setattr(db_config, "ensure_guild_config", fake_ensure)
         monkeypatch.setattr(db_config, "update_parameter", fake_update)
         await Matchmaking.games_parameter_update.callback(
             cog, interaction, game="game_a", name="param1",
@@ -1336,14 +1275,10 @@ class TestGamesParameterUpdate:
         interaction = FakeInteraction(user=_manager(), guild_id=42424)
         written = {}
 
-        async def fake_ensure(guild_id):
-            written["ensure"] = guild_id
-
         async def fake_update(guild_id, game, name, **kwargs):
             written["update"] = kwargs
             return True
 
-        monkeypatch.setattr(db_config, "ensure_guild_config", fake_ensure)
         monkeypatch.setattr(db_config, "update_parameter", fake_update)
         await Matchmaking.games_parameter_update.callback(
             cog, interaction, game="game_a", name="param1", values="zed")
@@ -1356,14 +1291,10 @@ class TestGamesParameterUpdate:
         interaction = FakeInteraction(user=_manager(), guild_id=42424)
         written = {}
 
-        async def fake_ensure(guild_id):
-            written["ensure"] = guild_id
-
         async def fake_update(guild_id, game, name, **kwargs):
             written["update"] = kwargs
             return True
 
-        monkeypatch.setattr(db_config, "ensure_guild_config", fake_ensure)
         monkeypatch.setattr(db_config, "update_parameter", fake_update)
         await Matchmaking.games_parameter_update.callback(
             cog, interaction, game="game_a", name="param1", api_field="renamed")
@@ -1377,14 +1308,10 @@ class TestGamesParameterUpdate:
         interaction = FakeInteraction(user=_manager(), guild_id=42424)
         written = {}
 
-        async def fake_ensure(guild_id):
-            written["ensure"] = guild_id
-
         async def fake_update(guild_id, game, name, **kwargs):
             written["update"] = kwargs
             return True
 
-        monkeypatch.setattr(db_config, "ensure_guild_config", fake_ensure)
         monkeypatch.setattr(db_config, "update_parameter", fake_update)
         await Matchmaking.games_parameter_update.callback(
             cog, interaction, game="game_a", name="param1", api_field="")
@@ -1399,14 +1326,10 @@ class TestGamesParameterUpdate:
         interaction = FakeInteraction(user=_manager(), guild_id=42424)
         written = {}
 
-        async def fake_ensure(guild_id):
-            written["ensure"] = guild_id
-
         async def fake_update(guild_id, game, name, **kwargs):
             written["update"] = kwargs
             return True
 
-        monkeypatch.setattr(db_config, "ensure_guild_config", fake_ensure)
         monkeypatch.setattr(db_config, "update_parameter", fake_update)
         await Matchmaking.games_parameter_update.callback(
             cog, interaction, game="game_a", name="param1", api_field=common_constants.RESET_SENTINEL)
@@ -1421,14 +1344,10 @@ class TestGamesParameterUpdate:
         interaction = FakeInteraction(user=_manager(), guild_id=42424)
         written = {}
 
-        async def fake_ensure(guild_id):
-            written["ensure"] = guild_id
-
         async def fake_update(guild_id, game, name, **kwargs):
             written["update"] = kwargs
             return True
 
-        monkeypatch.setattr(db_config, "ensure_guild_config", fake_ensure)
         monkeypatch.setattr(db_config, "update_parameter", fake_update)
         await Matchmaking.games_parameter_update.callback(
             cog, interaction, game="game_a", name="param1", display_name=common_constants.RESET_SENTINEL)
@@ -1440,14 +1359,10 @@ class TestGamesParameterUpdate:
         interaction = FakeInteraction(user=_manager(), guild_id=42424)
         written = {}
 
-        async def fake_ensure(guild_id):
-            written["ensure"] = guild_id
-
         async def fake_update(guild_id, game, name, **kwargs):
             written["update"] = kwargs
             return True
 
-        monkeypatch.setattr(db_config, "ensure_guild_config", fake_ensure)
         monkeypatch.setattr(db_config, "update_parameter", fake_update)
         await Matchmaking.games_parameter_update.callback(
             cog, interaction, game="game_a", name="param1",
@@ -1493,13 +1408,9 @@ class TestGamesParameterUpdate:
         cog = _cog(monkeypatch)
         interaction = FakeInteraction(user=_manager(), guild_id=42424)
 
-        async def fake_ensure(guild_id):
-            pass
-
         async def fake_update(guild_id, game, name, **kwargs):
             return False
 
-        monkeypatch.setattr(db_config, "ensure_guild_config", fake_ensure)
         monkeypatch.setattr(db_config, "update_parameter", fake_update)
         await Matchmaking.games_parameter_update.callback(
             cog, interaction, game="game_a", name="nope", values="a")
@@ -1532,13 +1443,9 @@ class TestGamesParameterRemove:
         cog = _cog(monkeypatch)
         interaction = FakeInteraction(user=_manager(), guild_id=42424)
 
-        async def fake_ensure(guild_id):
-            pass
-
         async def fake_delete(guild_id, game, name):
             return guild_id == 42424 and game == "game_a" and name == "param1"
 
-        monkeypatch.setattr(db_config, "ensure_guild_config", fake_ensure)
         monkeypatch.setattr(db_config, "delete_parameter", fake_delete)
         await Matchmaking.games_parameter_remove.callback(
             cog, interaction, game="game_a", name="param1")
@@ -1552,13 +1459,9 @@ class TestGamesParameterRemove:
         cog = _cog(monkeypatch)
         interaction = FakeInteraction(user=_manager(), guild_id=42424)
 
-        async def fake_ensure(guild_id):
-            pass
-
         async def fake_delete(guild_id, game, name):
             return False
 
-        monkeypatch.setattr(db_config, "ensure_guild_config", fake_ensure)
         monkeypatch.setattr(db_config, "delete_parameter", fake_delete)
         await Matchmaking.games_parameter_remove.callback(
             cog, interaction, game="game_a", name="param1")

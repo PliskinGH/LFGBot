@@ -15,7 +15,11 @@ async def http_error(request, error):
     context = {"status": status, "detail": detail,
                "title": TITLES.get(status, "Something went wrong")}
     if ("session" not in request.scope):
-        # The request failed before the session middleware: nothing to read.
-        return pages.templates.TemplateResponse(request, "error.html", context,
-                                                status_code=status)
+        # The request failed before the session middleware: nothing to read, so
+        # the layout's own values are given explicitly.
+        return pages.templates.TemplateResponse(
+            request, "error.html",
+            dict(context, user=None, operator=False, flashes=[], csrf_token="",
+                 active=""),
+            status_code=status)
     return pages.render(request, "error.html", status_code=status, **context)
