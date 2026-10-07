@@ -169,6 +169,12 @@ class TestLifespan:
         # well, so the pages can show channel and role names.
         from admin_web import app as panel
 
+        # The lifespan needs a URL, not a database: Tortoise.init is stubbed
+        # below, so this one is never dialled. Pinning it here keeps the test
+        # off DATABASE_URL, which only a deployment sets.
+        monkeypatch.setattr(settings, "DATABASE_URL",
+                            "postgres://test:test@localhost/test")
+
         called = {}
 
         async def fake_init(*args, **kwargs):

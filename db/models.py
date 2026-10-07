@@ -184,7 +184,7 @@ class ConfigChange(models.Model):
     """
 
     id = fields.IntField(primary_key=True)
-    guild_id = fields.BigIntField(index=True)
+    guild_id = fields.BigIntField(db_index=True)
     actor_id = fields.BigIntField()
     actor_name = fields.TextField(default="", db_default="")
     # "discord" or "web" (see db/config_log.py).

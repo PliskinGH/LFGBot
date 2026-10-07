@@ -9,7 +9,9 @@ import os
 
 from dotenv import load_dotenv
 
-load_dotenv()
+# The file wins over the environment: a stale or empty variable left in a shell
+# would otherwise shadow what .env says.
+load_dotenv(override=True)
 
 MIGRATIONS_MODULE = "db.migrations"
 
