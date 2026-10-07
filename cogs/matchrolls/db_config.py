@@ -255,25 +255,80 @@ async def ensure_guild_categories(guild_id: int) -> None:
         async with in_transaction():
             guild, _ = await models.Guild.get_or_create(guild_id=guild_id)
             for category in default_categories:
-                replica = await models.RollCategory.create(
-                    guild=guild, name=category.name)
-                for item in await category.roll_items.all().order_by("id"):
-                    item_replica = await models.RollItem.create(
-                        category=replica, name=item.name, active=item.active)
-                    for description in await models.RollDescription.filter(
-                            item=item).order_by("id"):
-                        await models.RollDescription.create(
-                            item=item_replica,
-                            description=description.description,
-                            color=description.color,
-                            image_url=description.image_url,
-                            thumbnail_url=description.thumbnail_url)
+                await _copy_category(guild, category)
     except IntegrityError:
         # The bot and the panel are separate processes: a concurrent first
         # write can materialize the categories between the check and the
         # insert. Its own atomic copy stands; anything else is a failure.
         if (not await _guild_has_own_categories(guild_id)):
             raise
+
+
+async def _copy_category(guild: models.Guild,
+                         source: models.RollCategory) -> models.RollCategory:
+    """Copy a category with its items and their description variants."""
+    replica = await models.RollCategory.create(guild=guild, name=source.name)
+    for item in await models.RollItem.filter(
+            category=source).order_by("id"):
+        item_replica = await models.RollItem.create(
+            category=replica, name=item.name, active=item.active)
+        for description in await models.RollDescription.filter(
+                item=item).order_by("id"):
+            await models.RollDescription.create(
+                item=item_replica,
+                description=description.description,
+                color=description.color,
+                image_url=description.image_url,
+                thumbnail_url=description.thumbnail_url)
+    return replica
+
+
+async def own_categories(guild_id: int) -> list[models.RollCategory]:
+    """The categories a guild owns, in insertion order ([] before materializing).
+
+    Only the rows this guild was given: an inherited category still belongs to
+    [DEFAULT], and is copied in (``adopt_category``) before it can be edited.
+    """
+    return await models.RollCategory.filter(
+        guild__guild_id=guild_id).order_by("id")
+
+
+async def category_by_id(guild_id: int,
+                         category_id: int) -> models.RollCategory | None:
+    """One of the categories a guild owns, addressed by its row id.
+
+    None when the row is not one of them, which is how a stale, inherited or
+    another guild's id is refused.
+    """
+    return await models.RollCategory.get_or_none(
+        id=category_id, guild__guild_id=guild_id)
+
+
+async def adopt_category(guild_id: int, category_name: str) -> bool:
+    """Copy one [DEFAULT] category into a guild's own configuration.
+
+    Materializing copies every [DEFAULT] category at once, so a category
+    [DEFAULT] gained afterwards reaches a guild only through this. False when
+    the guild already has it or [DEFAULT] has no such category.
+    """
+    if (guild_id == constants.DEFAULT_GUILD_ID):
+        return False
+    if (await models.RollCategory.get_or_none(
+            guild__guild_id=guild_id, name=category_name) is not None):
+        return False
+    source = await models.RollCategory.get_or_none(
+        guild__guild_id=constants.DEFAULT_GUILD_ID, name=category_name)
+    if (source is None):
+        return False
+    await ensure_guild_categories(guild_id)
+    if (await models.RollCategory.get_or_none(
+            guild__guild_id=guild_id, name=category_name) is not None):
+        # The guild had no configuration yet: the copy above brought it in.
+        return False
+    async with in_transaction():
+        guild = await models.Guild.get(guild_id=guild_id)
+        await _copy_category(guild, source)
+    return True
 
 
 async def _guild_has_own_categories(guild_id: int) -> bool:

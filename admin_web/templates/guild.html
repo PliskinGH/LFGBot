@@ -116,15 +116,71 @@ these games are not offered here; copy one in to start using it.</p>
 {% endif %}
 
 <h2 class="h5 mt-4">Roll sets <span class="text-body-secondary">({{ rolls|length }})</span></h2>
+<p class="mb-2">
+  <a class="btn btn-outline-primary btn-sm" href="{{ game_base }}/rollsets/new">Add a category</a>
+</p>
 {% if rolls %}
-<ul class="list-group">
-  {% for roll in rolls %}
-  <li class="list-group-item"><strong>{{ roll.name }}</strong> —
-  {{ roll.names|join(', ') }}</li>
-  {% endfor %}
-</ul>
+<div class="card table-card">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead><tr><th>Category</th><th>Items</th><th>Variants</th><th></th></tr></thead>
+      <tbody>
+      {% for roll in rolls %}
+        <tr>
+          <td><code>{{ roll.name }}</code></td>
+          <td>{{ roll.item_names|join(', ') if roll.item_names else '—' }}
+            {% if roll.inactive %}<span class="text-body-secondary">({{ roll.inactive|length }} off)</span>{% endif %}</td>
+          <td>{{ roll.variants }}</td>
+          <td class="text-nowrap">
+            {% if roll.id %}
+            <div class="d-flex gap-1">
+              <a class="btn btn-sm btn-outline-secondary"
+                 href="{{ game_base }}/rollsets/{{ roll.id }}">Edit</a>
+              <a class="btn btn-sm btn-outline-danger"
+                 href="{{ game_base }}/rollsets/{{ roll.id }}/remove">Remove</a>
+            </div>
+            {% else %}
+            <span class="text-body-secondary fst-italic">inherited</span>
+            {% if not is_default %}
+            <form method="post" action="{{ game_base }}/rollsets/adopt"
+                  class="mt-1">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="name" value="{{ roll.name }}">
+              <button class="btn btn-sm btn-outline-primary" type="submit"
+                      title="Copies this category into this server's own configuration, so it can be edited here.">
+                Customise</button>
+            </form>
+            {% endif %}
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
 {% else %}
 <p class="text-body-secondary">No roll category is configured here.</p>
+{% endif %}
+
+{% if missing_rolls %}
+<h3 class="h6 mt-4">In <code>[DEFAULT]</code>, not in this server</h3>
+<p class="text-body-secondary mb-2">This server has its own configuration, so
+these roll categories are not offered here; copy one in to start using it.</p>
+<ul class="list-group">
+  {% for name in missing_rolls %}
+  <li class="list-group-item d-flex justify-content-between align-items-center">
+    <code>{{ name }}</code>
+    <form method="post" action="{{ game_base }}/rollsets/adopt">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="name" value="{{ name }}">
+      <button class="btn btn-sm btn-outline-primary" type="submit"
+              title="Copies this category into this server's own configuration, so it can be used and edited here.">
+        Customise</button>
+    </form>
+  </li>
+  {% endfor %}
+</ul>
 {% endif %}
 
 <h2 class="h5 mt-4">Recent changes</h2>

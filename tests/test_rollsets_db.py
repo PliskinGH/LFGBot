@@ -267,3 +267,68 @@ class TestTwoItemsOneName:
         assert db_config.item_label(resolved) == "map — Zeta"
         resolved = await db_config.item_for_option(42424, "landmark — Zeta")
         assert resolved.id == landmark_zeta.id
+
+
+class TestAdoptingACategory:
+    """A category [DEFAULT] gained after a guild was materialized is copied in."""
+
+    async def test_it_copies_the_category_with_its_variants(
+            self, db, rolls_config, descriptions):
+        await _seed(rolls_config, descriptions)
+        # A guild whose own copy predates one of [DEFAULT]'s categories.
+        await db_config.ensure_guild_categories(42424)
+        await db_config.delete_category(42424, "map")
+        assert await db_config.adopt_category(42424, "map") is True
+        assert (await db_config.effective_category_sets(42424))["map"] == (
+            "Alpha, Beta, Gamma")
+        # The description variants came with the item they belong to.
+        alpha = await _item(42424, "Alpha", "map")
+        assert len(await db_config.description_variants(42424, alpha.id)) == 1
+
+    async def test_it_refuses_a_category_the_guild_has(
+            self, db, rolls_config, descriptions):
+        await _seed(rolls_config, descriptions)
+        await db_config.ensure_guild_categories(42424)
+        assert await db_config.adopt_category(42424, "map") is False
+
+    async def test_it_refuses_a_category_default_does_not_have(self, db):
+        assert await db_config.adopt_category(42424, "nope") is False
+
+    async def test_the_default_guild_owns_everything(self, db, rolls_config,
+                                                     descriptions):
+        await _seed(rolls_config, descriptions)
+        assert await db_config.adopt_category(DEFAULT_GUILD_ID, "map") is False
+
+
+class TestOwnedCategories:
+    """The pages edit the rows a guild owns, addressed by their row id."""
+
+    async def test_own_categories_is_empty_before_materializing(
+            self, db, rolls_config, descriptions):
+        await _seed(rolls_config, descriptions)
+        assert await db_config.own_categories(999999) == []
+
+    async def test_own_categories_lists_the_guilds_rows(
+            self, db, rolls_config, descriptions):
+        await _seed(rolls_config, descriptions)
+        await db_config.ensure_guild_categories(42424)
+        categories = await db_config.own_categories(42424)
+        # Its own map (Zeta, Eta), plus the inherited landmark it was given.
+        assert [category.name for category in categories] == [
+            "map", "landmark"]
+        assert len({category.id for category in categories}) == 2
+
+    async def test_category_by_id_is_owned_only(self, db, rolls_config,
+                                                descriptions):
+        await _seed(rolls_config, descriptions)
+        await db_config.ensure_guild_categories(42424)
+        own = await db_config.own_categories(42424)
+        found = await db_config.category_by_id(42424, own[0].id)
+        assert found is not None and found.name == "map"
+        # [DEFAULT]'s rows, another guild's rows and unknown ids are refused.
+        default_map = await models.RollCategory.get(
+            guild__guild_id=DEFAULT_GUILD_ID, name="map")
+        assert await db_config.category_by_id(42424, default_map.id) is None
+        assert await db_config.category_by_id(999999, own[0].id) is None
+        assert await db_config.category_by_id(42424, 999999) is None
+

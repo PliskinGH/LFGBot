@@ -3,7 +3,10 @@
 from pathlib import Path
 
 from jinja2 import StrictUndefined
+from starlette.exceptions import HTTPException
 from starlette.templating import Jinja2Templates
+
+from db import config_log
 
 from . import auth, csrf
 
@@ -27,3 +30,27 @@ def render(request, template: str, status_code: int = 200, **context):
     context.setdefault("active", "")
     return templates.TemplateResponse(request, template, context,
                                       status_code=status_code)
+
+
+async def submitted(request):
+    """The submitted form, refusing one that another site sent."""
+    form = await request.form()
+    if (not csrf.is_valid(request, form.get(csrf.FORM_FIELD))):
+        raise HTTPException(403, "The form was not sent by this session: "
+                                 "try again.")
+    return form
+
+
+def submitted_values(form) -> dict:
+    """What a form posted, for showing it again after an error."""
+    return {key: value for key, value in form.items() if isinstance(value, str)}
+
+
+async def log_change(request, guild_id: int, action: str,
+                     summary: str = "") -> None:
+    """Log a panel write as the queued change the bot will pick up."""
+    user = auth.session_user(request)
+    await config_log.record_change(
+        guild_id, actor_id=(user or {}).get("id") or 0,
+        actor_name=(user or {}).get("name") or "",
+        source=config_log.SOURCE_WEB, action=action, summary=summary)

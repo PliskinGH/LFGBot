@@ -14,41 +14,16 @@ from starlette.routing import Route
 from cogs.matchmaking import constants as mm_constants
 from cogs.matchmaking import db_config as games_db_config
 from cogs.matchmaking import validation
-from db import config_log
 
-from .. import auth, csrf, discord_reads, forms, overview, pages
+from .. import auth, discord_reads, forms, overview, pages
+from . import sections
 
 DEFAULT_GUILD_ID = mm_constants.DEFAULT_GUILD_ID
 
 
 def routes() -> list[Route]:
     """The game pages of one server, and the same ones for [DEFAULT]."""
-    routes = []
-    for path, name, view, methods in PAGES:
-        routes.append(Route(f"/g/{{guild_id:int}}/{path}", _guild_view(view),
-                            methods=methods, name=name))
-        routes.append(Route(f"/ops/default/{path}", _default_view(view),
-                            methods=methods, name=f"ops_{name}"))
-    return routes
-
-
-def _guild_view(view):
-    """A game page of one server: its managers, or an operator."""
-    return auth.require_guild(_with_guild(view, from_path=True))
-
-
-def _default_view(view):
-    """A game page of the [DEFAULT] configuration: the panel's operators only."""
-    return auth.require_operator(_with_guild(view, from_path=False))
-
-
-def _with_guild(view, from_path: bool):
-    """A page function taking the guild it edits, as the gates supply it."""
-    async def page(request, **kwargs):
-        guild_id = (int(request.path_params["guild_id"]) if from_path
-                    else DEFAULT_GUILD_ID)
-        return await view(request, guild_id)
-    return page
+    return sections.routes(PAGES)
 
 
 async def new_game(request, guild_id: int):
@@ -56,7 +31,7 @@ async def new_game(request, guild_id: int):
     context = await overview.blank_game(request.app.state.discord, guild_id)
     if (request.method == "GET"):
         return _page(request, guild_id, "game_form.html", new=True, **context)
-    form = await _submitted(request)
+    form = await pages.submitted(request)
     arguments, errors = forms.game_form(form)
     if (not errors):
         overrides = {key: value
@@ -68,10 +43,10 @@ async def new_game(request, guild_id: int):
         if (not created):
             errors.append(f"`{arguments['command']}` is already configured here.")
     if (errors):
-        context["values"] = _submitted_values(form)
+        context["values"] = pages.submitted_values(form)
         context["errors"] = errors
         return _page(request, guild_id, "game_form.html", new=True, **context)
-    await _log(request, guild_id, "game.add", arguments["command"])
+    await pages.log_change(request, guild_id, "game.add", arguments["command"])
     auth.flash(request, "success", f"Game `{arguments['command']}` added.")
     return _back(request, guild_id)
 
@@ -94,12 +69,12 @@ async def reset_guild(request, guild_id: int):
                               "lost."),
                      action_url=f"{base}/reset",
                      cancel_url=base)
-    await _submitted(request)
+    await pages.submitted(request)
     if (not await games_db_config.reset_guild_config(guild_id)):
         auth.flash(request, "info", "This server has no configuration of its own.")
         return _back(request, guild_id)
-    await _log(request, guild_id, "game.reset", "[DEFAULT]")
-    await _log(request, guild_id, "rollset.reset", "[DEFAULT]")
+    await pages.log_change(request, guild_id, "game.reset", "[DEFAULT]")
+    await pages.log_change(request, guild_id, "rollset.reset", "[DEFAULT]")
     auth.flash(request, "success",
                "This server now inherits the [DEFAULT] configuration.")
     return _back(request, guild_id)
@@ -113,13 +88,13 @@ async def adopt_game(request, guild_id: int):
     """
     if (guild_id == DEFAULT_GUILD_ID):
         raise HTTPException(404, DEFAULT_OWNS_EVERYTHING)
-    form = await _submitted(request)
+    form = await pages.submitted(request)
     command = form.get("command")
     command = command.strip() if isinstance(command, str) else ""
     game_id = await games_db_config.materialize_game(guild_id, command)
     if (game_id is None):
         raise HTTPException(404, NO_SUCH_GAME)
-    await _log(request, guild_id, "game.adopt", command)
+    await pages.log_change(request, guild_id, "game.adopt", command)
     auth.flash(request, "success",
                f"`{command}` is now part of this server's own configuration.")
     return _back_to_game(request, guild_id, game_id)
@@ -132,7 +107,7 @@ async def edit_game(request, guild_id: int):
     command = detail["game"].command
     if (request.method == "GET"):
         return _page(request, guild_id, "game_form.html", new=False, **detail)
-    form = await _submitted(request)
+    form = await pages.submitted(request)
     arguments, errors = forms.game_form(form, command, detail["commands"])
     changed = _changed(detail["game"], arguments, detail["api_values"])
     if (not errors and not changed and arguments["new_command"] is None):
@@ -143,7 +118,7 @@ async def edit_game(request, guild_id: int):
             api_fields=arguments["api_fields"], **arguments["fields"])):
         errors.append(f"`{command}` is not configured for this server any more.")
     if (errors):
-        detail["values"] = _submitted_values(form)
+        detail["values"] = pages.submitted_values(form)
         detail["color_hex"] = forms.color_hex(form.get("color"))
         detail["color_set"] = bool(form.get("use_color"))
         detail["errors"] = errors
@@ -156,7 +131,7 @@ async def edit_game(request, guild_id: int):
         action = "game.update"
         summary = ", ".join(changed)
         done = f"Game `{command}` updated: {summary}."
-    await _log(request, guild_id, action, summary)
+    await pages.log_change(request, guild_id, action, summary)
     auth.flash(request, "success", done)
     return _back(request, guild_id)
 
@@ -170,7 +145,7 @@ async def copy_game(request, guild_id: int):
     if (request.method == "GET"):
         return _page(request, guild_id, "game_copy.html", source=detail["game"],
                      game_id=game_id, values=values)
-    form = await _submitted(request)
+    form = await pages.submitted(request)
     arguments, errors = forms.copy_form(
         form, command, detail["values"]["name"] or command)
     if (not errors and not await games_db_config.copy_game(
@@ -178,9 +153,9 @@ async def copy_game(request, guild_id: int):
         errors.append(f"`{arguments['command']}` is already configured here.")
     if (errors):
         return _page(request, guild_id, "game_copy.html", source=detail["game"],
-                     game_id=game_id, values=_submitted_values(form),
+                     game_id=game_id, values=pages.submitted_values(form),
                      errors=errors)
-    await _log(request, guild_id, "game.copy",
+    await pages.log_change(request, guild_id, "game.copy",
                f"{arguments['command']} from {command}")
     auth.flash(request, "success",
                f"Game `{arguments['command']}` copied from `{command}`.")
@@ -200,10 +175,10 @@ async def remove_game(request, guild_id: int):
                      action_url=(f"{_base(request, guild_id)}/games/{game_id}"
                                  "/remove"),
                      cancel_url=_base(request, guild_id))
-    await _submitted(request)
+    await pages.submitted(request)
     if (not await games_db_config.delete_game(guild_id, command)):
         raise HTTPException(404, NO_SUCH_GAME)
-    await _log(request, guild_id, "game.remove", command)
+    await pages.log_change(request, guild_id, "game.remove", command)
     auth.flash(request, "success", f"Game `{command}` removed.")
     return _back(request, guild_id)
 
@@ -217,7 +192,7 @@ async def new_parameter(request, guild_id: int):
     if (request.method == "GET"):
         return _page(request, guild_id, "parameter_form.html", new=True,
                      game=detail["game"], game_id=game_id, values=values)
-    form = await _submitted(request)
+    form = await pages.submitted(request)
     arguments, errors = forms.parameter_form(form)
     if (not errors and not await games_db_config.add_parameter(
             guild_id, command, arguments["name"], arguments["values"],
@@ -228,9 +203,9 @@ async def new_parameter(request, guild_id: int):
     if (errors):
         return _page(request, guild_id, "parameter_form.html", new=True,
                      game=detail["game"], game_id=game_id,
-                     values=_parameter_values(_submitted_values(form)),
+                     values=_parameter_values(pages.submitted_values(form)),
                      errors=errors)
-    await _log(request, guild_id, "parameter.add",
+    await pages.log_change(request, guild_id, "parameter.add",
                f"{command}/{arguments['name']}")
     auth.flash(request, "success",
                f"Parameter `{arguments['name']}` added to `{command}`.")
@@ -249,7 +224,7 @@ async def edit_parameter(request, guild_id: int):
         return _page(request, guild_id, "parameter_form.html", new=False,
                      game=detail["game"], game_id=game_id,
                      values=_parameter_values(current, parameter_id))
-    form = await _submitted(request)
+    form = await pages.submitted(request)
     arguments, errors = forms.parameter_form(form)
     if (not errors and not await games_db_config.update_parameter(
             guild_id, command, name, values=arguments["values"],
@@ -259,10 +234,10 @@ async def edit_parameter(request, guild_id: int):
     if (errors):
         return _page(request, guild_id, "parameter_form.html", new=False,
                      game=detail["game"], game_id=game_id,
-                     values=_parameter_values(_submitted_values(form),
+                     values=_parameter_values(pages.submitted_values(form),
                                               parameter_id),
                      errors=errors)
-    await _log(request, guild_id, "parameter.update", f"{command}/{name}")
+    await pages.log_change(request, guild_id, "parameter.update", f"{command}/{name}")
     auth.flash(request, "success", f"Parameter `{name}` updated.")
     return _back_to_game(request, guild_id, game_id)
 
@@ -282,10 +257,10 @@ async def remove_parameter(request, guild_id: int):
                      action_url=(f"{_base(request, guild_id)}/games/{game_id}"
                                  f"/parameters/{parameter_id}/remove"),
                      cancel_url=f"{_base(request, guild_id)}/games/{game_id}")
-    await _submitted(request)
+    await pages.submitted(request)
     if (not await games_db_config.delete_parameter(guild_id, command, name)):
         raise HTTPException(404, NO_SUCH_PARAMETER)
-    await _log(request, guild_id, "parameter.remove", f"{command}/{name}")
+    await pages.log_change(request, guild_id, "parameter.remove", f"{command}/{name}")
     auth.flash(request, "success",
                f"Parameter `{name}` removed from `{command}`.")
     return _back_to_game(request, guild_id, game_id)
@@ -298,7 +273,7 @@ async def set_ping(request, guild_id: int):
     command = detail["game"].command
     if (request.method == "GET"):
         return _ping_page(request, guild_id, detail)
-    form = await _submitted(request)
+    form = await pages.submitted(request)
     values, errors = forms.ping_form(form)
     if (not errors and values.get("name")):
         values, errors = await _named_member(request, guild_id, values["name"])
@@ -307,9 +282,9 @@ async def set_ping(request, guild_id: int):
         errors.append(f"`{command}` is not configured for this server any more.")
     if (errors):
         detail["errors"] = errors
-        detail["values"] = _submitted_values(form)
+        detail["values"] = pages.submitted_values(form)
         return _ping_page(request, guild_id, detail)
-    await _log(request, guild_id, "game.ping", command)
+    await pages.log_change(request, guild_id, "game.ping", command)
     auth.flash(request, "success", f"Ping updated for `{command}`.")
     return _back(request, guild_id)
 
@@ -319,10 +294,10 @@ async def clear_ping(request, guild_id: int):
     game_id = int(request.path_params["game_id"])
     detail = await _ping_detail(request, guild_id, game_id)
     command = detail["game"].command
-    await _submitted(request)
+    await pages.submitted(request)
     if (not await games_db_config.update_game(guild_id, command, role="")):
         raise HTTPException(404, NO_SUCH_GAME)
-    await _log(request, guild_id, "game.ping.clear", command)
+    await pages.log_change(request, guild_id, "game.ping.clear", command)
     auth.flash(request, "success", f"Ping cleared for `{command}`.")
     return _back(request, guild_id)
 
@@ -368,14 +343,14 @@ async def set_token(request, guild_id: int):
     if (request.method == "GET"):
         return _page(request, guild_id, "token_form.html", game=detail["game"],
                      game_id=game_id)
-    token, errors = forms.token_form(await _submitted(request))
+    token, errors = forms.token_form(await pages.submitted(request))
     if (not errors and not await games_db_config.update_game(
             guild_id, command, api_token=token)):
         errors.append(f"`{command}` is not configured for this server any more.")
     if (errors):
         return _page(request, guild_id, "token_form.html", game=detail["game"],
                      game_id=game_id, errors=errors)
-    await _log(request, guild_id, "game.token", command)
+    await pages.log_change(request, guild_id, "game.token", command)
     auth.flash(request, "success", f"API token set for `{command}`.")
     return _back(request, guild_id)
 
@@ -385,10 +360,10 @@ async def clear_token(request, guild_id: int):
     game_id = int(request.path_params["game_id"])
     detail = await _detail(request, guild_id, game_id)
     command = detail["game"].command
-    await _submitted(request)
+    await pages.submitted(request)
     if (not await games_db_config.update_game(guild_id, command, api_token="")):
         raise HTTPException(404, NO_SUCH_GAME)
-    await _log(request, guild_id, "game.token.clear", command)
+    await pages.log_change(request, guild_id, "game.token.clear", command)
     auth.flash(request, "success", f"API token cleared for `{command}`.")
     return _back(request, guild_id)
 
@@ -418,20 +393,6 @@ def _parameter(detail: dict, parameter_id: int) -> dict:
     raise HTTPException(404, NO_SUCH_PARAMETER)
 
 
-async def _submitted(request):
-    """The submitted form, refusing one that another site sent."""
-    form = await request.form()
-    if (not csrf.is_valid(request, form.get(csrf.FORM_FIELD))):
-        raise HTTPException(403, "The form was not sent by this session: "
-                                 "try again.")
-    return form
-
-
-def _submitted_values(form) -> dict:
-    """What a form posted, for showing it again after an error."""
-    return {key: value for key, value in form.items() if isinstance(value, str)}
-
-
 def _parameter_values(source: dict, parameter_id: int | None = None) -> dict:
     """The values a parameter form reads, from a row or from a submitted form.
 
@@ -446,14 +407,6 @@ def _parameter_values(source: dict, parameter_id: int | None = None) -> dict:
         "values_text": source.get("values_text", source.get("values", "")),
         "api_field": source.get("api_field", ""),
     }
-
-
-async def _log(request, guild_id: int, action: str, summary: str = "") -> None:
-    """Log a panel write as the queued change the bot will pick up."""
-    user = auth.session_user(request)
-    await config_log.record_change(
-        guild_id, actor_id=user["id"], actor_name=user.get("name") or "",
-        source=config_log.SOURCE_WEB, action=action, summary=summary)
 
 
 def _changed(game, arguments: dict, stored_api: dict[str, str]) -> list[str]:

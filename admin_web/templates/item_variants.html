@@ -1,0 +1,49 @@
+{% extends 'base.html' %}
+{% block title %}{{ item.name }} — LFG bot panel{% endblock %}
+{% block content %}
+<h1 class="h3">{{ item.name }}</h1>
+<p class="text-body-secondary">Of category
+<a href="{{ rollset_base }}/rollsets/{{ category.id }}">{{ category.name }}</a>.
+{% if not item.active %}Not rolled: the name is not part of the category's set.{% endif %}</p>
+<p>
+  <a class="btn btn-outline-primary btn-sm"
+     href="{{ rollset_base }}/rollsets/{{ category.id }}/items/{{ item.id }}/variants/new">Add a variant</a>
+</p>
+{% if variants %}
+<div class="card table-card">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead><tr><th>#</th><th>Text</th><th>Colour</th><th>Image</th><th></th></tr></thead>
+      <tbody>
+      {% for variant in variants %}
+        <tr>
+          <td>{{ variant.index }}</td>
+          <td>{{ variant.description or '—' }}</td>
+          <td class="text-nowrap">
+          {%- if variant.color_set -%}
+            <span class="badge" style="background-color: {{ variant.color_hex }}">&nbsp;&nbsp;&nbsp;</span>
+            <code>{{ variant.color }}</code>
+          {%- else -%}
+            random
+          {%- endif -%}
+          </td>
+          <td>{{ variant.image_url or '—' }}</td>
+          <td class="text-nowrap">
+            <div class="d-flex gap-1">
+              <a class="btn btn-sm btn-outline-secondary"
+                 href="{{ rollset_base }}/rollsets/{{ category.id }}/items/{{ item.id }}/variants/{{ variant.id }}">Edit</a>
+              <a class="btn btn-sm btn-outline-danger"
+                 href="{{ rollset_base }}/rollsets/{{ category.id }}/items/{{ item.id }}/variants/{{ variant.id }}/remove">Remove</a>
+            </div>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<p class="text-body-secondary">This item has no description variants: rolling it
+shows a plain <em>Random</em> embed with a random colour.</p>
+{% endif %}
+{% endblock %}

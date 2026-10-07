@@ -33,14 +33,51 @@ async def guild_config(reads: discord_reads.DiscordReads, guild_id: int) -> dict
                  guild_games.games.items(),
                  key=lambda item: (item[1].name or item[0]).lower())]
     categories = await rolls_db_config.effective_category_sets(guild_id)
-    rolls = [{"name": name,
-              "names": [item.strip() for item in (roll_set or "").split(",")
-                        if item.strip()]}
+    default_rolls = await rolls_db_config.effective_category_sets(
+        mm_constants.DEFAULT_GUILD_ID)
+    owned = {category.name: category
+             for category in await rolls_db_config.own_categories(guild_id)}
+    rolls = [await _roll_row(guild_id, name, roll_set, owned.get(name))
              for name, roll_set in categories.items()]
     return {"games": games, "rolls": rolls,
             "missing": _missing_games(loaded, guild_id, guild_games),
+            "missing_rolls": _missing_rolls(loaded, guild_id, categories,
+                                            default_rolls),
             "inherited": guild_id not in loaded.guilds,
             "changes": await config_log.changes_for_guild(guild_id)}
+
+
+async def _roll_row(guild_id: int, name: str, roll_set: str,
+                    category) -> dict:
+    """One roll category as a server's page shows it.
+
+    ``category`` is the row the server owns, or None when it inherits this one:
+    the page only offers the actions it can carry out.
+    """
+    items = [item.strip() for item in (roll_set or "").split(",")
+             if item.strip()]
+    counts = await rolls_db_config.item_variant_counts(guild_id, name)
+    return {
+        "id": None if (category is None) else category.id,
+        "name": name,
+        "item_names": items,
+        "variants": sum(count for _, _, count, _ in counts),
+        "inactive": [item_name for _, item_name, _, active in counts
+                     if not active],
+    }
+
+
+def _missing_rolls(loaded, guild_id: int, categories: dict,
+                   default_rolls: dict) -> list[str]:
+    """The [DEFAULT] roll categories a server with its own configuration lacks.
+
+    A server that owns rows inherits nothing, so a category [DEFAULT] gained
+    after its copy was made is offered as one to bring in. Empty for a server
+    that inherits everything: it already shows them.
+    """
+    if (guild_id not in loaded.guilds):
+        return []
+    return [name for name in default_rolls if name not in categories]
 
 
 def _missing_games(loaded, guild_id: int, guild_games) -> list[str]:
@@ -117,6 +154,53 @@ async def game_detail(reads: discord_reads.DiscordReads, guild_id: int,
         return None
     return await _game_context(reads, guild_id, loaded, guild_games, option,
                                row, game_id)
+
+
+async def rollset_detail(guild_id: int, category_id: int) -> dict | None:
+    """One of a server's own roll categories, its items, and its form values.
+
+    None when the server has no category row with that id, which the view
+    answers as not found.
+    """
+    category = await rolls_db_config.category_by_id(guild_id, category_id)
+    if (category is None):
+        return None
+    counts = await rolls_db_config.item_variant_counts(guild_id, category.name)
+    items = [{"id": item_id, "name": name, "variants": count, "active": active}
+             for item_id, name, count, active in counts]
+    items_text = ", ".join(item["name"] for item in items if item["active"])
+    return {"category": category, "items": items, "items_text": items_text,
+            "values": {"name": category.name, "items_text": items_text}}
+
+
+async def rollset_item_detail(guild_id: int, category_id: int,
+                              item_id: int) -> dict | None:
+    """One of a server's items, its description variants, and its category.
+
+    None when the item is not one of that category's, which the view answers as
+    not found.
+    """
+    category = await rolls_db_config.category_by_id(guild_id, category_id)
+    item = await rolls_db_config.item_by_id(guild_id, item_id)
+    if (category is None or item is None or item.category.id != category.id):
+        return None
+    return {"category": category, "item": item,
+            "variants": await _variant_rows(guild_id, item_id)}
+
+
+async def _variant_rows(guild_id: int, item_id: int) -> list[dict]:
+    """An item's variants, numbered the way the commands number them."""
+    variants = await rolls_db_config.description_variants(guild_id, item_id)
+    return [{"id": variant.id,
+             "index": index,
+             "description": variant.description,
+             "color": variant.color,
+             "color_hex": (forms.color_hex(str(variant.color))
+                           if (variant.color is not None) else forms.NO_COLOR),
+             "color_set": variant.color is not None,
+             "image_url": variant.image_url or "",
+             "thumbnail_url": variant.thumbnail_url or ""}
+            for index, variant in enumerate(variants, start=1)]
 
 
 async def blank_game(reads: discord_reads.DiscordReads, guild_id: int) -> dict:

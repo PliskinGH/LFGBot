@@ -1,0 +1,66 @@
+{% extends 'base.html' %}
+{% block title %}{{ 'Add a roll category' if new else 'Edit ' ~ values.name }} — LFG bot panel{% endblock %}
+{% block content %}
+<h1 class="h3">{{ 'Add a roll category' if new else 'Edit ' ~ values.name }}</h1>
+{% if errors %}
+<div class="alert alert-danger"><ul class="mb-0">
+  {% for error in errors %}<li>{{ error }}</li>{% endfor %}
+</ul></div>
+{% endif %}
+<form method="post" action="{{ rollset_base }}/rollsets/{{ 'new' if new else category.id }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <div class="row g-3">
+    <div class="col-md-6">
+      <label class="form-label" for="name">Category name</label>
+      <input class="form-control" id="name" name="name" value="{{ values.name or '' }}">
+      <div class="form-text">1-50 characters; it cannot be <code>id</code>.</div>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label" for="items">Items</label>
+      <textarea class="form-control" id="items" name="items" rows="2">{{ values.items_text or '' }}</textarea>
+      <div class="form-text">Comma-separated, like the <code>rolls.ini</code>
+      values: each name is rolled as its own item.</div>
+    </div>
+  </div>
+  <div class="mt-3">
+    <button class="btn btn-primary" type="submit">Save</button>
+    <a class="btn btn-secondary" href="{{ rollset_base }}">Cancel</a>
+    {% if not new %}
+    <a class="btn btn-outline-danger"
+       href="{{ rollset_base }}/rollsets/{{ category.id }}/remove">Remove</a>
+    {% endif %}
+  </div>
+</form>
+{% if not new %}
+<h2 class="h5 mt-4">Items <span class="text-body-secondary">({{ items|length }})</span></h2>
+{% if items %}
+<div class="card table-card">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead><tr><th>Item</th><th>Variants</th><th>Rolled</th></tr></thead>
+      <tbody>
+      {% for item in items %}
+        <tr class="position-relative">
+          <td><a class="stretched-link"
+                 href="{{ rollset_base }}/rollsets/{{ category.id }}/items/{{ item.id }}">{{ item.name }}</a></td>
+          <td>{{ item.variants }}</td>
+          <td>
+          {%- if item.active -%}
+            <span class="badge text-bg-success">yes</span>
+          {%- else -%}
+            <span class="badge text-bg-secondary">no</span>
+          {%- endif -%}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<p class="text-body-secondary">This category has no items yet.</p>
+{% endif %}
+<p class="text-body-secondary mt-2">Dropping a name keeps the item, switched
+off: its description variants stay, and adding the name back restores it.</p>
+{% endif %}
+{% endblock %}

@@ -9,6 +9,7 @@ never rendered.
 from cogs.matchmaking import utils as mm_utils
 from cogs.matchmaking import validation
 from cogs.matchmaking.config import LFGConfigMixin
+from cogs.matchrolls import validation as rolls_validation
 
 # The colour picker posts #rrggbb and needs a value; no colour is stored empty.
 NO_COLOR = "#ffffff"
@@ -166,6 +167,83 @@ def token_form(form) -> tuple[str, list[str]]:
     if (not token):
         return "", ["Give a token, or use the Clear button to remove it."]
     return token, []
+
+
+def category_form(form) -> tuple[dict, list[str]]:
+    """The values a roll category form posts, as the cog's writer takes them.
+
+    Returns ``(arguments, errors)``. The item set is the comma-separated form
+    the commands take; both rules are the shared validators' own words.
+    """
+    errors: list[str] = []
+    name = _text(form, "name")
+    error = rolls_validation.category_name_error(name, "name")
+    if (error):
+        errors.append(error)
+    items, error = rolls_validation.item_names_error(_text(form, "items"))
+    if (error):
+        errors.append(error)
+    if (errors):
+        return {}, errors
+    return {"name": name, "item_names": items}, []
+
+
+def variant_form(form) -> tuple[dict, list[str]]:
+    """The fields a description-variant form posts, as the writer takes them.
+
+    Every field is set from the form, so a blank one clears the value (the
+    commands' ``-`` sentinel is Discord's way of posting that blank; the panel
+    posts the blank). Only the text's length and the URLs are checked by the
+    cog's rules.
+    """
+    errors: list[str] = []
+    text = _variant_text(form, errors)
+    color = _variant_color(form, errors)
+    image = _variant_url(form, errors, "image_url", "image")
+    thumbnail = _variant_url(form, errors, "thumbnail_url", "thumbnail")
+    if (not errors and not (text or color is not None or image or thumbnail)):
+        errors.append("Give the variant a text, a colour or an image.")
+    return {"description": text, "color": color, "image_url": image,
+            "thumbnail_url": thumbnail}, errors
+
+
+def _variant_text(form, errors: list[str]) -> str:
+    """The text a variant form posts, empty when it has none."""
+    text = _text(form, "description")
+    if (not text):
+        return ""
+    parsed, error = rolls_validation.parse_text(text)
+    if (error):
+        errors.append(error)
+        return ""
+    return parsed
+
+
+def _variant_color(form, errors: list[str]) -> int | None:
+    """The colour a variant form posts, None unless its box is ticked.
+
+    A colour input always posts a value, so ticking the box is what says the
+    value is meant: unticked, the bot rolls a random colour for the variant.
+    """
+    if (not form.get("use_color")):
+        return None
+    stored = color_stored(_text(form, "color"))
+    if (stored is None):
+        errors.append("`color` must be a colour like #1a2b3c.")
+        return None
+    return int(stored)
+
+
+def _variant_url(form, errors: list[str], field: str, label: str) -> str | None:
+    """The URL a variant form posts for one of its images; blank clears it."""
+    posted = _text(form, field)
+    if (not posted):
+        return None
+    parsed, error = rolls_validation.parse_url(posted, label)
+    if (error):
+        errors.append(error)
+        return None
+    return parsed
 
 
 def _color(form, errors: list[str]) -> str:
