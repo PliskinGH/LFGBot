@@ -11,7 +11,7 @@ from starlette.responses import RedirectResponse
 
 from . import settings
 
-# The panel's own Discord application, which the login authorizes.
+# The bot's own Discord application, which the login authorizes.
 AUTHORIZE_URL = "https://discord.com/oauth2/authorize"
 API_BASE_URL = "https://discord.com/api/v10"
 SCOPES = ("identify", "guilds")

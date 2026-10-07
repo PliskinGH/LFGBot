@@ -7,7 +7,9 @@ from common import utils
 from db import Database
 from db.config_queue import apply_pending
 
-load_dotenv()
+# The file wins over the environment: a stale or empty variable left in a shell
+# would otherwise shadow what .env says.
+load_dotenv(override=True)
 
 TOKEN = os.getenv('DISCORD_TOKEN')
 PREFIX = os.getenv('COMMAND_PREFIX')

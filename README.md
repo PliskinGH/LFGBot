@@ -5,7 +5,8 @@ A **Looking-for-Group (LFG) bot** for Discord, built with
 
 Servers, games, roles, forum channels, and league-website integration are defined in `config/` or
 dynamically by Discord server admins, so supporting new games or servers requires no
-code changes.
+code changes. A [web admin panel](#web-admin-panel) edits the same configuration
+from a browser.
 
 ## Commands
 
@@ -16,8 +17,8 @@ code changes.
 | `/rename [title]` | Rename a bot-created game thread (host only). |
 | `/random category:<category> [subset:<subset>] [display:<true\|false>]` | Random item from a configured set; subsets accept indices/ranges (e.g. `2,5-9`). |
 | `/help [topic]` | Help for a command. |
-| `/games add \| update \| copy \| remove \| list \| show` | Server managers: edit the server's games dynamically (database mode only). |
-| `/rollsets add \| update \| remove \| show \| list \| description` | Server managers: edit the server's roll sets dynamically (database mode only). |
+| `/games add \| update \| copy \| remove \| list \| show \| parameter` | Server managers: edit the server's games dynamically (database mode only). |
+| `/rollsets add \| update \| remove \| show \| list \| item \| description` | Server managers: edit the server's roll sets dynamically (database mode only). |
 
 ### LFG posts
 
@@ -61,8 +62,16 @@ mention roles.
 | Variable | Required | Description |
 | --- | --- | --- |
 | `DISCORD_TOKEN` | Yes | The bot token. |
-| `DATABASE_URL` | No | Bot database connection URL; see below. |
+| `DATABASE_URL` | Database mode only | Bot database connection URL; see below. |
 | `TEST_DATABASE_URL` | No | Test suite only. |
+| `DISCORD_CLIENT_ID` | Web admin only | The Discord bot's own application. |
+| `DISCORD_CLIENT_SECRET` | Web admin only | Its client secret. |
+| `DISCORD_REDIRECT_URI` | No | Its login callback; defaults to `<WEB_BASE_URL>/discord/callback`. |
+| `WEB_BASE_URL` | Web admin only | Its public URL; an `https://` one enables the HTTPS redirect and the secure session cookie. |
+| `SESSION_SECRET` | Web admin only | Signs the session cookie. |
+| `OPERATOR_DISCORD_IDS` | No | Discord IDs allowed to edit every server and the `[DEFAULT]` configuration. |
+| `TRUSTED_HOSTS` | No | Hostnames the web admin answers for; empty accepts every one. |
+| `SESSION_MAX_AGE` | No | Login lifetime in seconds (default 8 hours). |
 | *(per-game API tokens)* | Config-file mode only | Named by `GamesAPITokenEnvVars` in `config/games.ini`. |
 
 
@@ -85,6 +94,8 @@ If it is empty at startup (first run of the bot), its tables are seeded from the
 ```bash
 python bot.py
 ```
+
+The [web admin panel](#web-admin-panel) runs as a separate process.
 
 ### Using a preconfigured bot
 
@@ -155,6 +166,7 @@ picks at random when the item is rolled.
 With `DATABASE_URL` set, server managers (`manage_guild` permission) can edit
 their server's games and roll sets at runtime (no code or restart needed). The
 commands write to the database and take effect immediately.
+The same configuration can be edited from the [web admin panel](#web-admin-panel).
 
 A server starts out inheriting the `[DEFAULT]` configuration. **Its first edit —
 of any kind, whether it adds, changes or removes something — gives it a
@@ -244,6 +256,40 @@ provide instead. An item with no variant at all still rolls, showing a plain
 `Random <category>: <item>` embed with a random colour.
 Deleting a whole category is permanent instead: after the confirmation, the
 category, its items and all their variants are removed from the database for the corresponding Discord server.
+
+## Web admin panel
+
+A web app (`admin_web/`) edits the same configuration as the Discord commands
+above, plus the `[DEFAULT]` configuration. It
+reads the same database and requires `DATABASE_URL`.
+
+```bash
+uvicorn admin_web.app:app --reload
+```
+
+### Who may edit what
+
+The login goes through Discord, so the web admin only ever offers what the
+account is allowed to change:
+
+- a server manager (the `manage_guild` permission, or administrator) may edit
+  that server;
+- an id listed in `OPERATOR_DISCORD_IDS` may edit every server, and the
+  `[DEFAULT]` configuration the others inherit.
+
+### Login setup
+
+The login uses the bot's own Discord application: add
+`https://<host>/discord/callback` to its OAuth2 redirect URIs (the bot's own
+scopes stay as they are), then set `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`
+and `WEB_BASE_URL`. The web admin asks for the `identify` and `guilds` scopes
+only.
+
+### How a write reaches the bot
+
+Every page write is one row in the change log, which the bot picks up and applies
+within 30 seconds, with no restart. `https://<host>/ops` shows what is still waiting and warns
+when the bot looks down; `https://<host>//ops/changes` is the log itself.
 
 ## League website integration
 
