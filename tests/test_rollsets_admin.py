@@ -9,6 +9,7 @@ from cogs.matchrolls import MatchRolls, db_config
 from cogs.matchrolls.db_config import LoadedRollsConfig
 from common import constants as common_constants
 from common.views import ConfirmView
+from db import config_log
 
 from tests.conftest import FakeBot, FakeInteraction, FakeMember
 
@@ -566,3 +567,171 @@ class TestDeferredResponses:
         assert interaction.response.deferred is True
         _, _, _, view = interaction.followup.sent[0]
         assert isinstance(view, ConfirmView)
+
+
+def _spy_log(monkeypatch) -> dict:
+    """Capture what a command logs, without a database."""
+    logged: dict = {}
+
+    async def record(interaction, action, summary=""):
+        logged["change"] = (action, summary)
+
+    monkeypatch.setattr(config_log, "record_command_change", record)
+    return logged
+
+
+class TestItemCommands:
+    """/rollsets item: add (with its first description), rename, remove."""
+
+    @pytest.mark.asyncio
+    async def test_add_passes_the_parsed_fields_and_logs(
+            self, rollset_cog, monkeypatch):
+        calls = {}
+
+        async def add_item(guild_id, category, name, fields):
+            calls["args"] = (guild_id, category, name, fields)
+            return True
+
+        monkeypatch.setattr(db_config, "add_item", add_item)
+        monkeypatch.setattr(db_config, "list_category_items",
+                            _noop_return((["Zeta"], [])))
+        logged = _spy_log(monkeypatch)
+        interaction = _interaction()
+        await MatchRolls.item_add.callback(
+            rollset_cog, interaction, "map", "Theta", "Flavor.", "111",
+            "https://a/b.png")
+        assert calls["args"] == (42424, "map", "Theta",
+                                 {"description": "Flavor.", "color": 111,
+                                  "image_url": "https://a/b.png"})
+        assert logged["change"] == ("rollset.item.add", "map — Theta")
+        assert "Item `Theta` added to `map`" in interaction.response.messages[0][0]
+
+    @pytest.mark.asyncio
+    async def test_add_dash_gives_the_blank_first_variant(
+            self, rollset_cog, monkeypatch):
+        calls = {}
+
+        async def add_item(guild_id, category, name, fields):
+            calls["args"] = (guild_id, category, name, fields)
+            return True
+
+        monkeypatch.setattr(db_config, "add_item", add_item)
+        monkeypatch.setattr(db_config, "list_category_items",
+                            _noop_return((["Zeta"], [])))
+        interaction = _interaction()
+        await MatchRolls.item_add.callback(
+            rollset_cog, interaction, "map", "Theta",
+            common_constants.RESET_SENTINEL)
+        # "-" clears the text: the item rolls with a plain embed.
+        assert calls["args"] == (42424, "map", "Theta", {"description": ""})
+
+    @pytest.mark.asyncio
+    async def test_add_validates_its_names_colour_and_category(
+            self, rollset_cog, monkeypatch):
+        monkeypatch.setattr(db_config, "list_category_items",
+                            _noop_return((["Zeta"], [])))
+        interaction = _interaction()
+        await MatchRolls.item_add.callback(
+            rollset_cog, interaction, "map", "", "Flavor.")
+        assert "`item` must be 1-50 characters" in (
+            interaction.response.messages[0][0])
+
+        interaction = _interaction()
+        await MatchRolls.item_add.callback(
+            rollset_cog, interaction, "nope", "Theta", "Flavor.")
+        assert "There is no roll category `nope`" in (
+            interaction.response.messages[0][0])
+
+        interaction = _interaction()
+        await MatchRolls.item_add.callback(
+            rollset_cog, interaction, "map", "Theta", "Flavor.", "not-a-colour")
+        assert "`color` must be an integer" in (
+            interaction.response.messages[0][0])
+
+        interaction = _interaction()
+        await MatchRolls.item_add.callback(
+            rollset_cog, interaction, "map", "Zeta", "Flavor.")
+        assert "`Zeta` is already an item of `map`" in (
+            interaction.response.messages[0][0])
+
+    @pytest.mark.asyncio
+    async def test_rename_passes_the_new_name_and_logs(
+            self, rollset_cog, monkeypatch):
+        calls = {}
+
+        async def rename(guild_id, item_id, new_name):
+            calls["args"] = (guild_id, item_id, new_name)
+            return True
+
+        monkeypatch.setattr(db_config, "rename_item", rename)
+        logged = _spy_log(monkeypatch)
+        interaction = _interaction()
+        await MatchRolls.item_rename.callback(
+            rollset_cog, interaction, "Zeta", "Omega")
+        assert calls["args"] == (42424, 7, "Omega")
+        assert logged["change"] == ("rollset.item.rename",
+                                    "map — Zeta -> Omega")
+        assert "renamed to `Omega`" in interaction.response.messages[0][0]
+
+    @pytest.mark.asyncio
+    async def test_rename_reports_unknown_and_taken_names(
+            self, rollset_cog, monkeypatch):
+        async def rename(guild_id, item_id, new_name):
+            return False
+
+        monkeypatch.setattr(db_config, "rename_item", rename)
+        interaction = _interaction()
+        await MatchRolls.item_rename.callback(
+            rollset_cog, interaction, "Zeta", "Eta")
+        assert "`Eta` is already an item of `map`" in (
+            interaction.response.messages[0][0])
+
+        interaction = _interaction()
+        await MatchRolls.item_rename.callback(
+            rollset_cog, interaction, "Nope", "Omega")
+        assert "There is no item `Nope`" in (
+            interaction.response.messages[0][0])
+
+        interaction = _interaction()
+        await MatchRolls.item_rename.callback(rollset_cog, interaction,
+                                              "Zeta", " ")
+        assert "`new_name` must be 1-50 characters" in (
+            interaction.response.messages[0][0])
+
+    @pytest.mark.asyncio
+    async def test_remove_takes_the_item_out_of_the_set(
+            self, rollset_cog, monkeypatch):
+        calls = []
+
+        async def remove(guild_id, item_id):
+            calls.append((guild_id, item_id))
+            return True
+
+        monkeypatch.setattr(db_config, "remove_item", remove)
+        logged = _spy_log(monkeypatch)
+
+        interaction = _interaction()
+        await MatchRolls.item_remove.callback(rollset_cog, interaction, "Zeta")
+        assert calls == [(42424, 7)]
+        assert logged["change"] == ("rollset.item.remove", "map — Zeta")
+        content = interaction.response.messages[0][0]
+        assert "Removed `map — Zeta` from the set" in content
+        assert "descriptions are kept" in content
+
+    @pytest.mark.asyncio
+    async def test_remove_reports_an_unknown_item(
+            self, rollset_cog, monkeypatch):
+        interaction = _interaction()
+        await MatchRolls.item_remove.callback(rollset_cog, interaction, "Nope")
+        assert "There is no item `Nope`" in (
+            interaction.response.messages[0][0])
+
+    @pytest.mark.asyncio
+    async def test_the_help_lists_the_item_commands(self, rollset_cog):
+        interaction = _interaction()
+        await rollset_cog.send_help(interaction, "rollsets")
+        content = interaction.response.messages[0][0]
+        assert "## Items" in content
+        assert "/rollsets item add" in content
+        assert "/rollsets item rename" in content
+        assert "/rollsets item remove" in content

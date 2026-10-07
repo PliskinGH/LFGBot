@@ -33,16 +33,19 @@
 </form>
 {% if not new %}
 <h2 class="h5 mt-4">Items <span class="text-body-secondary">({{ items|length }})</span></h2>
+<p class="mb-2">
+  <a class="btn btn-outline-primary btn-sm"
+     href="{{ rollset_base }}/rollsets/{{ category.id }}/items/new">Add an item</a>
+</p>
 {% if items %}
 <div class="card table-card">
   <div class="table-responsive">
     <table class="table table-hover align-middle mb-0">
-      <thead><tr><th>Item</th><th>Variants</th><th>Rolled</th></tr></thead>
+      <thead><tr><th>Item</th><th>Variants</th><th>Rolled</th><th></th></tr></thead>
       <tbody>
       {% for item in items %}
-        <tr class="position-relative">
-          <td><a class="stretched-link"
-                 href="{{ rollset_base }}/rollsets/{{ category.id }}/items/{{ item.id }}">{{ item.name }}</a></td>
+        <tr>
+          <td>{{ item.name }}</td>
           <td>{{ item.variants }}</td>
           <td>
           {%- if item.active -%}
@@ -50,6 +53,33 @@
           {%- else -%}
             <span class="badge text-bg-secondary">no</span>
           {%- endif -%}
+          </td>
+          <td class="text-nowrap">
+            <div class="d-flex gap-1 flex-wrap">
+              <a class="btn btn-sm btn-outline-secondary"
+                 href="{{ rollset_base }}/rollsets/{{ category.id }}/items/{{ item.id }}/rename">Rename</a>
+              <a class="btn btn-sm btn-outline-secondary"
+                 href="{{ rollset_base }}/rollsets/{{ category.id }}/items/{{ item.id }}">Edit variants</a>
+              {% if item.active %}
+              <form method="post"
+                    action="{{ rollset_base }}/rollsets/{{ category.id }}/items/{{ item.id }}/remove">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button class="btn btn-sm btn-outline-danger" type="submit"
+                        title="The name leaves the set; the item keeps its variants and can be added back.">
+                  Remove from the set</button>
+              </form>
+              {% else %}
+              <form method="post"
+                    action="{{ rollset_base }}/rollsets/{{ category.id }}/items/{{ item.id }}/restore">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button class="btn btn-sm btn-outline-success" type="submit"
+                        title="The item is rolled again, with the variants it kept.">
+                  Add back</button>
+              </form>
+              <a class="btn btn-sm btn-outline-danger"
+                 href="{{ rollset_base }}/rollsets/{{ category.id }}/items/{{ item.id }}/delete">Delete permanently</a>
+              {% endif %}
+            </div>
           </td>
         </tr>
       {% endfor %}

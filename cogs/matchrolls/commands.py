@@ -62,6 +62,11 @@ class RollsCommandsMixin:
         if (nb_descriptions >= 1):
             description = dicts[random.randrange(0, nb_descriptions)]
 
+        if (len(choice) and not description):
+            # An item with no variants at all still rolls: a plain embed, whose
+            # random colour comes from the branch below.
+            description = {"title": choice, "category": category.capitalize()}
+
         if (len(description)):
             embed = discord.Embed.from_dict(description)
 

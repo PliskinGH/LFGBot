@@ -14,13 +14,21 @@ def category_name_error(value: str, fallback: str) -> str | None:
     return None
 
 
+def item_name_error(name: str, fallback: str) -> str | None:
+    """An error message when a single item name is invalid, else None."""
+    name = name.strip()
+    if (not name or len(name) > 50 or "\n" in name or "\r" in name):
+        return f"`{fallback}` must be 1-50 characters without newlines."
+    return None
+
+
 def item_names_error(value: str) -> tuple[list[str] | None, str | None]:
     """(names, error): the parsed item names, or an error message."""
     names = [item.strip() for item in value.split(",")]
     if (not names or not names[0]):
         return None, "`items` requires at least one item."
     for name in names:
-        if (not name or len(name) > 50 or "\n" in name or "\r" in name):
+        if (item_name_error(name, "items")):
             return None, ("`items` must be a comma-separated list of "
                           "1-50 character names.")
     if (len(set(names)) != len(names)):
@@ -62,3 +70,36 @@ def parse_text(value: str | None) -> tuple[str | None, str | None]:
         return None, (f"`text` must be 1-{common_constants.EMBED_DESCRIPTION_LIMIT} "
                       "characters, or `-` to clear it.")
     return value, None
+
+
+def variant_fields(text: str | None, color: str | None = None,
+                   image: str | None = None, thumbnail: str | None = None,
+                   ) -> tuple[dict, str | None]:
+    """(fields, error): a variant's model fields, from the four options.
+
+    An option given as None is left out, so the writer only sets what was
+    given; ``-`` in any of them clears it. The parse rules are the /rollsets
+    ones, shared by the description commands and the item commands.
+    """
+    fields: dict = {}
+    if (text is not None):
+        text_value, error = parse_text(text)
+        if (error):
+            return {}, error
+        fields["description"] = text_value
+    if (color is not None):
+        color_value, error = parse_color(color)
+        if (error):
+            return {}, error
+        fields["color"] = color_value
+    if (image is not None):
+        image_url, error = parse_url(image, "image")
+        if (error):
+            return {}, error
+        fields["image_url"] = image_url
+    if (thumbnail is not None):
+        thumbnail_url, error = parse_url(thumbnail, "thumbnail")
+        if (error):
+            return {}, error
+        fields["thumbnail_url"] = thumbnail_url
+    return fields, None

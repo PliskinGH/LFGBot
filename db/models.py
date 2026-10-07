@@ -138,9 +138,10 @@ class RollCategory(models.Model):
 class RollItem(models.Model):
     """One rollable item of a category: a row per name ever configured.
 
-    ``active`` is set (or reactivated) when the name is part of the
-    category's set; inactive rows keep their name and description variants,
-    so re-adding the name restores its flavors.
+    A new item is created with its first description variant, so it can be
+    rolled straight away. ``active`` is set (or reactivated) when the name is
+    part of the category's set; inactive rows keep their name and description
+    variants, so re-adding the name restores its flavors.
     """
 
     id = fields.IntField(primary_key=True)

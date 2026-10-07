@@ -1,0 +1,28 @@
+{% extends 'base.html' %}
+{% block title %}Rename {{ item.name }} — LFG bot panel{% endblock %}
+{% block content %}
+<h1 class="h3">Rename {{ item.name }}</h1>
+<p class="text-body-secondary">Of category
+<a href="{{ rollset_base }}/rollsets/{{ category.id }}">{{ category.name }}</a>.
+Its description variants are kept.</p>
+{% if errors %}
+<div class="alert alert-danger"><ul class="mb-0">
+  {% for error in errors %}<li>{{ error }}</li>{% endfor %}
+</ul></div>
+{% endif %}
+<form method="post"
+      action="{{ rollset_base }}/rollsets/{{ category.id }}/items/{{ item.id }}/rename">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <div class="col-md-6">
+    <label class="form-label" for="name">Item name</label>
+    <input class="form-control" id="name" name="name" value="{{ values.name or '' }}">
+    <div class="form-text">1-50 characters; it cannot be the name of another
+    item of this category.</div>
+  </div>
+  <div class="mt-3">
+    <button class="btn btn-primary" type="submit">Save</button>
+    <a class="btn btn-secondary"
+       href="{{ rollset_base }}/rollsets/{{ category.id }}/items/{{ item.id }}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

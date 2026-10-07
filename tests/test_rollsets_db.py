@@ -16,6 +16,12 @@ async def _item(guild_id: int, name: str, category: str):
                                      category__name=category, name=name)
 
 
+async def _item_or_none(guild_id: int, name: str, category: str):
+    """The guild's item row when it exists, None otherwise."""
+    return await models.RollItem.get_or_none(
+        category__guild__guild_id=guild_id, category__name=category, name=name)
+
+
 class TestEnsureGuildCategories:
     async def test_materializes_defaults_for_unknown_guild(
             self, db, rolls_config, descriptions):
@@ -257,16 +263,161 @@ class TestTwoItemsOneName:
         assert map_zeta.id != landmark_zeta.id
         assert await db_config.add_description(
             42424, map_zeta.id, {"description": "Map only."}) is True
+        # Zeta is new to landmark, so it arrives with its blank first variant
+        # (a new item must be rollable); the map row's own variant is untouched.
         assert [variant.description for variant in
                 await db_config.description_variants(42424, map_zeta.id)] == [
             "Map only."]
-        assert await db_config.description_variants(
-            42424, landmark_zeta.id) == []
+        landmark_variants = await db_config.description_variants(
+            42424, landmark_zeta.id)
+        assert [variant.description for variant in landmark_variants] == [""]
+        assert landmark_variants[0].color is None
         # The label tells them apart, and each id resolves to its own row.
         resolved = await db_config.item_for_option(42424, str(map_zeta.id))
         assert db_config.item_label(resolved) == "map — Zeta"
         resolved = await db_config.item_for_option(42424, "landmark — Zeta")
         assert resolved.id == landmark_zeta.id
+
+
+class TestItemWriters:
+    """Adding, renaming and removing a single item.
+
+    Creating an item gives it a first description variant: an item with no
+    variants is drawn from the set but has no flavour to show.
+    """
+
+    async def test_add_item_creates_it_with_its_first_variant(
+            self, db, rolls_config, descriptions):
+        await _seed(rolls_config, descriptions)
+        await db_config.ensure_guild_categories(42424)
+        assert await db_config.add_item(
+            42424, "map", "Theta", {"description": "A flavour."}) is True
+        item = await _item(42424, "Theta", "map")
+        variants = await db_config.description_variants(42424, item.id)
+        assert [(v.description, v.color) for v in variants] == [
+            ("A flavour.", None)]
+        # The set follows the rows: the new item is rolled.
+        assert (await db_config.effective_category_sets(42424))["map"] == (
+            "Zeta, Eta, Theta")
+
+    async def test_add_item_without_fields_stores_the_blank_variant(
+            self, db, rolls_config, descriptions):
+        await _seed(rolls_config, descriptions)
+        await db_config.ensure_guild_categories(42424)
+        assert await db_config.add_item(42424, "map", "Theta") is True
+        item = await _item(42424, "Theta", "map")
+        assert [(v.description, v.color, v.image_url) for v in
+                await db_config.description_variants(42424, item.id)] == [
+            ("", None, None)]
+
+    async def test_add_item_refuses_an_active_name_or_unknown_category(
+            self, db, rolls_config, descriptions):
+        await _seed(rolls_config, descriptions)
+        await db_config.ensure_guild_categories(42424)
+        assert await db_config.add_item(42424, "map", "Zeta") is False
+        assert await db_config.add_item(42424, "nope", "Theta") is False
+        assert await _item_or_none(42424, "Theta", "map") is None
+
+    async def test_add_item_reactivates_a_dropped_name_keeping_variants(
+            self, db, rolls_config, descriptions):
+        await _seed(rolls_config, descriptions)
+        await db_config.ensure_guild_categories(42424)
+        eta = await _item(42424, "Eta", "map")
+        await db_config.add_description(42424, eta.id, {"description": "Kept."})
+        await db_config.update_category(42424, "map", ["Zeta"])
+        assert (await _item(42424, "Eta", "map")).active is False
+        assert await db_config.add_item(42424, "map", "Eta") is True
+        assert (await _item(42424, "Eta", "map")).active is True
+        assert [v.description for v in
+                await db_config.description_variants(42424, eta.id)] == [
+            "Kept."]
+
+    async def test_add_item_gives_a_variant_to_a_row_that_has_none(
+            self, db, rolls_config, descriptions):
+        # A row from before items came with a variant (or seeded without a
+        # /rollsets description entry) gets one when the name is added back.
+        await _seed(rolls_config, descriptions)
+        await db_config.ensure_guild_categories(42424)
+        await db_config.update_category(42424, "map", ["Zeta"])
+        eta = await _item(42424, "Eta", "map")
+        await models.RollDescription.filter(item_id=eta.id).delete()
+        assert await db_config.add_item(42424, "map", "Eta",
+                                        {"color": 255}) is True
+        variants = await db_config.description_variants(42424, eta.id)
+        assert [(v.description, v.color) for v in variants] == [("", 255)]
+
+    async def test_rename_item(self, db, rolls_config, descriptions):
+        await _seed(rolls_config, descriptions)
+        await db_config.ensure_guild_categories(42424)
+        zeta = await _item(42424, "Zeta", "map")
+        assert await db_config.rename_item(42424, zeta.id, "Omega") is True
+        assert await _item(42424, "Omega", "map") is not None
+        assert (await db_config.effective_category_sets(42424))["map"] == (
+            "Omega, Eta")
+        # A name another item of the category already has is refused, and so
+        # is an id that is not one of this guild's.
+        assert await db_config.rename_item(42424, zeta.id, "Eta") is False
+        assert await db_config.rename_item(999999, zeta.id, "Nu") is False
+
+    async def test_remove_item_disables_it_and_keeps_its_variants(
+            self, db, rolls_config, descriptions):
+        await _seed(rolls_config, descriptions)
+        await db_config.ensure_guild_categories(42424)
+        zeta = await _item(42424, "Zeta", "map")
+        await db_config.add_description(42424, zeta.id, {"description": "Kept."})
+        assert await db_config.remove_item(42424, zeta.id) is True
+        # The row stays, switched off with its variant, and leaves the set.
+        kept = await _item_or_none(42424, "Zeta", "map")
+        assert kept is not None and kept.active is False
+        assert [v.description for v in
+                await db_config.description_variants(42424, zeta.id)] == [
+            "Kept."]
+        assert (await db_config.effective_category_sets(42424))["map"] == "Eta"
+        # Adding the name back restores the item, with the variant it kept.
+        assert await db_config.add_item(42424, "map", "Zeta") is True
+        assert (await _item(42424, "Zeta", "map")).active is True
+        assert [v.description for v in
+                await db_config.description_variants(42424, zeta.id)] == [
+            "Kept."]
+        # A row that is not this guild's is refused.
+        assert await db_config.remove_item(999999, zeta.id) is False
+
+    async def test_delete_item_removes_it_with_its_variants(
+            self, db, rolls_config, descriptions):
+        await _seed(rolls_config, descriptions)
+        await db_config.ensure_guild_categories(42424)
+        zeta = await _item(42424, "Zeta", "map")
+        await db_config.add_description(42424, zeta.id, {"description": "Gone."})
+        assert await db_config.delete_item(42424, zeta.id) is True
+        # The row and the variants that made it rollable are both gone.
+        assert await _item_or_none(42424, "Zeta", "map") is None
+        assert await models.RollDescription.filter(item_id=zeta.id).count() == 0
+        assert (await db_config.effective_category_sets(42424))["map"] == "Eta"
+        # A stale id, and another guild's row, are refused.
+        assert await db_config.delete_item(42424, zeta.id) is False
+        eta = await _item(42424, "Eta", "map")
+        assert await db_config.delete_item(999999, eta.id) is False
+        assert await _item_or_none(42424, "Eta", "map") is not None
+
+    async def test_a_new_name_in_the_set_is_given_a_variant(
+            self, db, rolls_config, descriptions):
+        await _seed(rolls_config, descriptions)
+        await db_config.ensure_guild_categories(42424)
+        await db_config.update_category(42424, "map", ["Zeta", "Theta"])
+        theta = await _item(42424, "Theta", "map")
+        assert [v.description for v in
+                await db_config.description_variants(42424, theta.id)] == [""]
+
+    async def test_a_new_category_is_given_its_items_a_variant(
+            self, db, rolls_config, descriptions):
+        await _seed(rolls_config, descriptions)
+        assert await db_config.add_category(42424, "deck",
+                                            ["One", "Two"]) is True
+        one = await _item(42424, "One", "deck")
+        two = await _item(42424, "Two", "deck")
+        for item in (one, two):
+            assert len(await db_config.description_variants(
+                42424, item.id)) == 1
 
 
 class TestAdoptingACategory:

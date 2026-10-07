@@ -5,7 +5,7 @@
 <p>{{ message }}</p>
 <form method="post" action="{{ action_url }}">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-  <button class="btn btn-danger" type="submit">Remove</button>
+  <button class="btn btn-danger" type="submit">{{ confirm_label|default('Remove') }}</button>
   <a class="btn btn-secondary" href="{{ cancel_url }}">Cancel</a>
 </form>
 {% endblock %}

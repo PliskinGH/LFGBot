@@ -432,7 +432,102 @@ async def add_category(guild_id: int, category_name: str,
         category = await models.RollCategory.create(
             guild_id=guild_id, name=category_name)
         for item_name in item_names:
-            await models.RollItem.create(category=category, name=item_name)
+            await _create_item(category, item_name)
+    return True
+
+
+async def _create_item(category: models.RollCategory, name: str,
+                       fields: dict | None = None) -> models.RollItem:
+    """Create an active item row and its first description variant.
+
+    A new item must be rollable straight away: an item with no variants at all
+    is drawn from the set but has no flavour to show. ``fields`` maps variant
+    model attributes to values (see ``add_description``); an empty dict is the
+    blank variant, which rolls with a random colour.
+    """
+    item = await models.RollItem.create(category=category, name=name)
+    await models.RollDescription.create(item=item, **(fields or {}))
+    return item
+
+
+async def add_item(guild_id: int, category_name: str, name: str,
+                   fields: dict | None = None) -> bool:
+    """Add an item to one of the guild's categories, with a first variant.
+
+    False when the category is not the guild's or the name is already an
+    active item there. Reactivating a name that was dropped from the set keeps
+    the variants it already had; a row that has none gets this first variant.
+    """
+    await ensure_guild_categories(guild_id)
+    category = await models.RollCategory.get_or_none(
+        guild__guild_id=guild_id, name=category_name)
+    if (category is None):
+        return False
+    item = await models.RollItem.get_or_none(category=category, name=name)
+    if (item is not None and item.active):
+        return False
+    if (item is None):
+        await _create_item(category, name, fields)
+        return True
+    item.active = True
+    await item.save(update_fields=["active"])
+    if (await models.RollDescription.filter(item=item).count() == 0):
+        await models.RollDescription.create(item=item, **(fields or {}))
+    return True
+
+
+async def remove_item(guild_id: int, item_id: int) -> bool:
+    """Take one of the guild's items out of its category's set; whether the row
+    is the guild's.
+
+    The item keeps its row and its description variants, so adding the name
+    back (``add_item``) restores it. The category's set is read from its active
+    items, so the name leaves the set with the flag.
+    """
+    await ensure_guild_categories(guild_id)
+    item = await models.RollItem.get_or_none(
+        id=item_id, category__guild__guild_id=await _read_source(guild_id))
+    if (item is None):
+        return False
+    if (item.active):
+        item.active = False
+        await item.save(update_fields=["active"])
+    return True
+
+
+async def delete_item(guild_id: int, item_id: int) -> bool:
+    """Delete one of the guild's items with its description variants.
+
+    Permanent, unlike ``remove_item``: the row goes, and with it the variants
+    that made the item rollable, so there is nothing left to add back.
+    """
+    await ensure_guild_categories(guild_id)
+    item = await models.RollItem.get_or_none(
+        id=item_id, category__guild__guild_id=await _read_source(guild_id))
+    if (item is None):
+        return False
+    await item.delete()
+    return True
+
+
+async def rename_item(guild_id: int, item_id: int, new_name: str) -> bool:
+    """Rename one of the guild's items; whether it was renamed.
+
+    False when the row is not one of the guild's, or the category already has
+    an item under that name.
+    """
+    await ensure_guild_categories(guild_id)
+    item = await models.RollItem.get_or_none(
+        id=item_id, category__guild__guild_id=await _read_source(guild_id))
+    if (item is None):
+        return False
+    clash = await models.RollItem.get_or_none(
+        category_id=item.category_id, name=new_name)
+    if (clash is not None and clash.id != item.id):
+        return False
+    if (item.name != new_name):
+        item.name = new_name
+        await item.save(update_fields=["name"])
     return True
 
 
@@ -463,13 +558,18 @@ async def update_category(guild_id: int, category_name: str,
 
 async def _reconcile_items(category: models.RollCategory,
                            item_names: list[str]) -> None:
-    """Make ``item_names`` the category's active items, preserving rows."""
+    """Make ``item_names`` the category's active items, preserving rows.
+
+    A name the category has never had becomes an item with a blank first
+    variant, so it rolls straight away; names dropped from the set become
+    inactive with their variants kept.
+    """
     registry = {item.name: item
                 for item in await models.RollItem.filter(category=category)}
     for name in item_names:
         item = registry.get(name)
         if (item is None):
-            await models.RollItem.create(category=category, name=name)
+            await _create_item(category, name)
         elif (not item.active):
             item.active = True
             await item.save(update_fields=["active"])

@@ -221,6 +221,9 @@ texts), one of which `/random` picks at random when the item is rolled.
 | `/rollsets add <category> <items>` | Add a category (`items` is comma-separated). |
 | `/rollsets update <category> [items] [new_name]` | Replace a category's items and/or rename it. |
 | `/rollsets remove <category>` | Delete a category (permanently). |
+| `/rollsets item add <category> <item> <text> [color] [image] [thumbnail]` | Add an item with its first description variant (`-` in `text` adds it with a blank one). |
+| `/rollsets item rename <item> <new_name>` | Rename an item. |
+| `/rollsets item remove <item>` | Take an item out of its category's set. |
 | `/rollsets description list [category]` | Show each item its variant count. |
 | `/rollsets description show <item> [variant]` | Show an item's variants, or a single one. |
 | `/rollsets description add <item> <text> [color] [image] [thumbnail]` | Add a description variant to an item. |
@@ -232,9 +235,13 @@ texts), one of which `/random` picks at random when the item is rolled.
 `description show`. `color` is a Discord colour integer (0–16777215);
 `image` and `thumbnail` must be URLs.
 
-Dropping an item from a category's set keeps
-its description variants: the item stops being listed and rolled, and adding
-the name back restores it (with its variants).
+Dropping an item from a category's set (or `/rollsets item remove`) keeps its
+description variants: the item stops being listed and rolled, and adding the
+name back (`/rollsets item add`) restores it (with its variants).
+A name the category has never had is added with a blank first variant, so the
+item rolls straight away; `/rollsets item add` gives it the description you
+provide instead. An item with no variant at all still rolls, showing a plain
+`Random <category>: <item>` embed with a random colour.
 Deleting a whole category is permanent instead: after the confirmation, the
 category, its items and all their variants are removed from the database for the corresponding Discord server.
 

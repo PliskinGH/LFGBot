@@ -5,10 +5,31 @@
 <p class="text-body-secondary">Of category
 <a href="{{ rollset_base }}/rollsets/{{ category.id }}">{{ category.name }}</a>.
 {% if not item.active %}Not rolled: the name is not part of the category's set.{% endif %}</p>
-<p>
+<div class="d-flex align-items-center gap-2 flex-wrap">
+  <a class="btn btn-outline-secondary btn-sm"
+     href="{{ rollset_base }}/rollsets/{{ category.id }}/items/{{ item.id }}/rename">Rename</a>
   <a class="btn btn-outline-primary btn-sm"
      href="{{ rollset_base }}/rollsets/{{ category.id }}/items/{{ item.id }}/variants/new">Add a variant</a>
-</p>
+  {% if item.active %}
+  <form method="post"
+        action="{{ rollset_base }}/rollsets/{{ category.id }}/items/{{ item.id }}/remove">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button class="btn btn-outline-danger btn-sm" type="submit"
+            title="The name leaves the set; the item keeps its variants and can be added back.">
+      Remove from the set</button>
+  </form>
+  {% else %}
+  <form method="post"
+        action="{{ rollset_base }}/rollsets/{{ category.id }}/items/{{ item.id }}/restore">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button class="btn btn-outline-success btn-sm" type="submit"
+            title="The item is rolled again, with the variants it kept.">
+      Add back</button>
+  </form>
+  <a class="btn btn-outline-danger btn-sm"
+     href="{{ rollset_base }}/rollsets/{{ category.id }}/items/{{ item.id }}/delete?from=item">Delete permanently</a>
+  {% endif %}
+</div>
 {% if variants %}
 <div class="card table-card">
   <div class="table-responsive">

@@ -218,6 +218,116 @@ async def remove_variant(request, guild_id: int):
     return _back_to_item(request, guild_id, detail)
 
 
+async def new_item(request, guild_id: int):
+    """Add an item to one of the server's categories, with its first variant."""
+    detail = await _detail(request, guild_id)
+    category = detail["category"]
+    if (request.method == "GET"):
+        return _page(request, guild_id, "item_form.html", category=category,
+                     values=_blank_variant() | {"name": ""})
+    form = await pages.submitted(request)
+    arguments, errors = forms.item_form(form)
+    if (not errors and not await rolls_db_config.add_item(
+            guild_id, category.name, arguments["name"], arguments["fields"])):
+        errors.append(f"`{arguments['name']}` is already an item of "
+                      f"`{category.name}`.")
+    if (errors):
+        return _page(request, guild_id, "item_form.html", category=category,
+                     values=_item_input(form), errors=errors)
+    await _log(request, guild_id, "rollset.item.add",
+               f"{category.name} — {arguments['name']}")
+    auth.flash(request, "success",
+               f"Item `{arguments['name']}` added to `{category.name}`.")
+    return _back_to_category(request, guild_id, detail)
+
+
+async def rename_item(request, guild_id: int):
+    """Rename one of the server's items."""
+    detail = await _item_detail(request, guild_id)
+    item = detail["item"]
+    label = rolls_db_config.item_label(item)
+    if (request.method == "GET"):
+        return _page(request, guild_id, "item_rename.html", **detail,
+                     values={"name": item.name})
+    form = await pages.submitted(request)
+    name, errors = forms.item_name_form(form)
+    if (not errors and not await rolls_db_config.rename_item(
+            guild_id, item.id, name)):
+        errors.append(f"`{name}` is already an item of `{item.category.name}`.")
+    if (errors):
+        return _page(request, guild_id, "item_rename.html", **detail,
+                     values={"name": _posted(form, "name")}, errors=errors)
+    await _log(request, guild_id, "rollset.item.rename", f"{label} -> {name}")
+    auth.flash(request, "success", f"Item `{label}` renamed to `{name}`.")
+    return _back_to_item(request, guild_id, detail)
+
+
+async def remove_item(request, guild_id: int):
+    """Take one of the server's items out of its category's set."""
+    detail = await _item_detail(request, guild_id)
+    item = detail["item"]
+    label = rolls_db_config.item_label(item)
+    await pages.submitted(request)
+    if (not await rolls_db_config.remove_item(guild_id, item.id)):
+        raise HTTPException(404, NO_SUCH_ITEM)
+    await _log(request, guild_id, "rollset.item.remove", label)
+    auth.flash(request, "success",
+               f"Item `{label}` removed from the set; its descriptions are "
+               "kept, and adding the name back restores it.")
+    return _back_to_category(request, guild_id, detail)
+
+
+async def restore_item(request, guild_id: int):
+    """Put one of the server's removed items back in its category's set."""
+    detail = await _item_detail(request, guild_id)
+    item = detail["item"]
+    label = rolls_db_config.item_label(item)
+    await pages.submitted(request)
+    if (not await rolls_db_config.add_item(guild_id, item.category.name,
+                                           item.name)):
+        raise HTTPException(404, NO_SUCH_ITEM)
+    await _log(request, guild_id, "rollset.item.add", label)
+    auth.flash(request, "success",
+               f"Item `{label}` is rolled again; it kept its descriptions.")
+    return _back_to_category(request, guild_id, detail)
+
+
+async def delete_item(request, guild_id: int):
+    """Delete one of the server's items for good: a confirmation in, a deletion out."""
+    detail = await _item_detail(request, guild_id)
+    item = detail["item"]
+    label = rolls_db_config.item_label(item)
+    if (request.method == "GET"):
+        return _page(request, guild_id, "confirm.html",
+                     title=f"Delete {item.name}",
+                     message=(f"Item `{label}` and its "
+                              f"{len(detail['variants'])} description "
+                              "variant(s) are permanently removed from this "
+                              "configuration. This cannot be undone."),
+                     confirm_label="Delete",
+                     action_url=(f"{_item_base(request, guild_id, detail)}"
+                                 f"/delete"),
+                     cancel_url=_cancel_url(request, guild_id, detail))
+    await pages.submitted(request)
+    if (not await rolls_db_config.delete_item(guild_id, item.id)):
+        raise HTTPException(404, NO_SUCH_ITEM)
+    await _log(request, guild_id, "rollset.item.delete", label)
+    auth.flash(request, "success", f"Item `{label}` deleted permanently.")
+    return _back_to_category(request, guild_id, detail)
+
+
+def _cancel_url(request, guild_id: int, detail: dict) -> str:
+    """Where a confirmation page cancels to: the page whose button opened it."""
+    if (request.query_params.get("from") == "item"):
+        return _item_base(request, guild_id, detail)
+    return f"{_base(request, guild_id)}/rollsets/{detail['category'].id}"
+
+
+def _item_input(form) -> dict:
+    """What an item form posted, keyed the way its template reads it."""
+    return _variant_input(form) | {"name": _posted(form, "name")}
+
+
 def _category_values(form) -> dict:
     """What a category form posted, keyed the way its template reads it."""
     return {"name": _posted(form, "name"), "items_text": _posted(form, "items")}
@@ -326,6 +436,14 @@ def _back_to_item(request, guild_id: int, detail: dict) -> RedirectResponse:
                             status_code=303)
 
 
+def _back_to_category(request, guild_id: int,
+                      detail: dict) -> RedirectResponse:
+    """Send the manager back to the category's page, where its items are."""
+    return RedirectResponse(
+        f"{_base(request, guild_id)}/rollsets/{detail['category'].id}",
+        status_code=303)
+
+
 async def _log(request, guild_id: int, action: str, summary: str = "") -> None:
     """Log a panel write as the queued change the bot will pick up."""
     await pages.log_change(request, guild_id, action, summary)
@@ -342,8 +460,18 @@ PAGES = (
      ["GET", "POST"]),
     ("rollsets/{category_id:int}/remove", "rollset_remove", remove_category,
      ["GET", "POST"]),
+    ("rollsets/{category_id:int}/items/new", "item_new", new_item,
+     ["GET", "POST"]),
     ("rollsets/{category_id:int}/items/{item_id:int}", "rollset_item",
      item_variants, ["GET"]),
+    ("rollsets/{category_id:int}/items/{item_id:int}/rename", "item_rename",
+     rename_item, ["GET", "POST"]),
+    ("rollsets/{category_id:int}/items/{item_id:int}/remove", "item_remove",
+     remove_item, ["POST"]),
+    ("rollsets/{category_id:int}/items/{item_id:int}/restore", "item_restore",
+     restore_item, ["POST"]),
+    ("rollsets/{category_id:int}/items/{item_id:int}/delete", "item_delete",
+     delete_item, ["GET", "POST"]),
     ("rollsets/{category_id:int}/items/{item_id:int}/variants/new",
      "variant_new", new_variant, ["GET", "POST"]),
     ("rollsets/{category_id:int}/items/{item_id:int}/variants/"

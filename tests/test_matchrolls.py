@@ -163,6 +163,27 @@ class TestRandomCommand:
         content, embeds, ephemeral, _ = interaction.response.messages[0]
         assert content == "No item found in the set or subset for `map`."
 
+    @pytest.mark.asyncio
+    async def test_an_item_with_no_variants_still_rolls_a_plain_embed(
+            self, matchrolls, monkeypatch):
+        # An item drawn from the set that has no variants at all rolls a plain
+        # embed with a random colour, rather than reporting no item.
+        matchrolls.default_descriptions = [
+            {"title": "Beta", "category": "Map", "description": "Beta only."}]
+        interaction = self._interaction()
+        self._patch_random(monkeypatch)
+
+        await self._call_random(matchrolls, interaction, "map")
+
+        content, embeds, ephemeral, _ = interaction.response.messages[0]
+        assert content is None
+        assert ephemeral is False
+        embed = embeds[0]
+        assert embed.title == "Random Map: Alpha"
+        assert embed.description is None
+        assert embed.colour is not None
+        assert "Randomly chosen among: Alpha, Beta, Gamma." in embed.footer.text
+
 
 def await_test(coro):
     import asyncio

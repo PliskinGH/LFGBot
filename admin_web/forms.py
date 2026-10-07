@@ -188,6 +188,36 @@ def category_form(form) -> tuple[dict, list[str]]:
     return {"name": name, "item_names": items}, []
 
 
+def item_form(form) -> tuple[dict, list[str]]:
+    """The values an item form posts: its name and its first variant's fields.
+
+    Returns ``(arguments, errors)``. Unlike a variant form, every field may be
+    blank: a new item rolls with the blank first variant the writer gives it.
+    """
+    errors: list[str] = []
+    name = _text(form, "name")
+    error = rolls_validation.item_name_error(name, "name")
+    if (error):
+        errors.append(error)
+    fields = {"description": _variant_text(form, errors),
+              "color": _variant_color(form, errors),
+              "image_url": _variant_url(form, errors, "image_url", "image"),
+              "thumbnail_url": _variant_url(form, errors, "thumbnail_url",
+                                            "thumbnail")}
+    if (errors):
+        return {}, errors
+    return {"name": name.strip(), "fields": fields}, []
+
+
+def item_name_form(form) -> tuple[str, list[str]]:
+    """The name a rename form posts, checked by the shared item-name rule."""
+    name = _text(form, "name")
+    error = rolls_validation.item_name_error(name, "name")
+    if (error):
+        return "", [error]
+    return name.strip(), []
+
+
 def variant_form(form) -> tuple[dict, list[str]]:
     """The fields a description-variant form posts, as the writer takes them.
 

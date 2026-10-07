@@ -35,6 +35,10 @@ class RollsAdminMixin:
     rollsets_description = app_commands.Group(
         name="description", description="Manage an item's description variants.")
 
+    # Nested subgroup (/rollsets item ...), attached the same way.
+    rollsets_item = app_commands.Group(
+        name="item", description="Manage one item of a category.")
+
     async def _category_autocomplete(
         self, interaction: discord.Interaction, current: str
     ) -> list[app_commands.Choice[str]]:
@@ -344,29 +348,10 @@ class RollsAdminMixin:
         guild_id = await self._expect_guild(interaction)
         if (guild_id is None):
             return
-        text_value, error = validation.parse_text(text)
+        fields, error = validation.variant_fields(text, color, image, thumbnail)
         if (error):
             await interaction.response.send_message(error, ephemeral=True)
             return
-        color_value, error = validation.parse_color(color)
-        if (error):
-            await interaction.response.send_message(error, ephemeral=True)
-            return
-        image_url, error = validation.parse_url(image, "image")
-        if (error):
-            await interaction.response.send_message(error, ephemeral=True)
-            return
-        thumbnail_url, error = validation.parse_url(thumbnail, "thumbnail")
-        if (error):
-            await interaction.response.send_message(error, ephemeral=True)
-            return
-        fields = {"description": text_value}
-        if (color_value is not None):
-            fields["color"] = color_value
-        if (image_url is not None):
-            fields["image_url"] = image_url
-        if (thumbnail_url is not None):
-            fields["thumbnail_url"] = thumbnail_url
         await interaction.response.defer(ephemeral=True)
         resolved = await self._item_of(guild_id, item)
         if (resolved is None):
@@ -410,31 +395,10 @@ class RollsAdminMixin:
             await interaction.response.send_message(
                 "`variant` must be a positive index.", ephemeral=True)
             return
-        fields: dict = {}
-        if (text is not None):
-            text_value, error = validation.parse_text(text)
-            if (error):
-                await interaction.response.send_message(error, ephemeral=True)
-                return
-            fields["description"] = text_value
-        if (color is not None):
-            color_value, error = validation.parse_color(color)
-            if (error):
-                await interaction.response.send_message(error, ephemeral=True)
-                return
-            fields["color"] = color_value
-        if (image is not None):
-            image_url, error = validation.parse_url(image, "image")
-            if (error):
-                await interaction.response.send_message(error, ephemeral=True)
-                return
-            fields["image_url"] = image_url
-        if (thumbnail is not None):
-            thumbnail_url, error = validation.parse_url(thumbnail, "thumbnail")
-            if (error):
-                await interaction.response.send_message(error, ephemeral=True)
-                return
-            fields["thumbnail_url"] = thumbnail_url
+        fields, error = validation.variant_fields(text, color, image, thumbnail)
+        if (error):
+            await interaction.response.send_message(error, ephemeral=True)
+            return
         await interaction.response.defer(ephemeral=True)
         resolved = await self._item_of(guild_id, item)
         if (resolved is None):
@@ -488,9 +452,125 @@ class RollsAdminMixin:
         await interaction.followup.send(
             f"Removed variant #{variant} from `{label}`.", ephemeral=True)
 
-    # Attach the description subgroup to the rollsets group now that its
-    # subcommands exist; CogMeta skips it as a top-level command (parent set).
+    # ------------------------------------------------------------------ #
+    # Items
+    # ------------------------------------------------------------------ #
+
+    @rollsets_item.command(
+        name="add", description="Add an item to a category, with its first description.")
+    @app_commands.describe(category="The category to add the item to.",
+                           item="The item's name.",
+                           text="Its first variant's text, or `-` for none.",
+                           color="Its colour as an integer (optional).",
+                           image="The image URL (optional).",
+                           thumbnail="The thumbnail URL (optional).")
+    @app_commands.autocomplete(category=_category_autocomplete)
+    async def item_add(self, interaction: discord.Interaction, category: str,
+                       item: str, text: str, color: str | None = None,
+                       image: str | None = None, thumbnail: str | None = None):
+        if (not await self._guard_admin(interaction)):
+            return
+        if (not await self._guard_database(interaction)):
+            return
+        guild_id = await self._expect_guild(interaction)
+        if (guild_id is None):
+            return
+        if (error := validation.category_name_error(category, "category")):
+            await interaction.response.send_message(error, ephemeral=True)
+            return
+        if (error := validation.item_name_error(item, "item")):
+            await interaction.response.send_message(error, ephemeral=True)
+            return
+        fields, error = validation.variant_fields(text, color, image, thumbnail)
+        if (error):
+            await interaction.response.send_message(error, ephemeral=True)
+            return
+        category = category.strip()
+        item = item.strip()
+        await interaction.response.defer(ephemeral=True)
+        if (category not in await db_config.effective_category_sets(guild_id)):
+            await interaction.followup.send(
+                f"There is no roll category `{category}` in this server.",
+                ephemeral=True)
+            return
+        active, _ = await db_config.list_category_items(guild_id, category)
+        if (item in active):
+            await interaction.followup.send(
+                f"`{item}` is already an item of `{category}`.",
+                ephemeral=True)
+            return
+        await db_config.add_item(guild_id, category, item, fields)
+        await config_log.record_command_change(
+            interaction, "rollset.item.add", f"{category} — {item}")
+        await self.reload_config()
+        await interaction.followup.send(
+            f"Item `{item}` added to `{category}`.", ephemeral=True)
+
+    @rollsets_item.command(name="rename", description="Rename an item.")
+    @app_commands.describe(item="The item.", new_name="Its new name.")
+    @app_commands.autocomplete(item=_item_autocomplete)
+    async def item_rename(self, interaction: discord.Interaction, item: str,
+                          new_name: str):
+        if (not await self._guard_admin(interaction)):
+            return
+        if (not await self._guard_database(interaction)):
+            return
+        guild_id = await self._expect_guild(interaction)
+        if (guild_id is None):
+            return
+        if (error := validation.item_name_error(new_name, "new_name")):
+            await interaction.response.send_message(error, ephemeral=True)
+            return
+        new_name = new_name.strip()
+        await interaction.response.defer(ephemeral=True)
+        resolved = await self._item_of(guild_id, item)
+        if (resolved is None):
+            await interaction.followup.send(
+                f"There is no item `{item}` in this server.", ephemeral=True)
+            return
+        label = db_config.item_label(resolved)
+        if (not await db_config.rename_item(guild_id, resolved.id, new_name)):
+            await interaction.followup.send(
+                f"`{new_name}` is already an item of "
+                f"`{resolved.category.name}`.", ephemeral=True)
+            return
+        await config_log.record_command_change(
+            interaction, "rollset.item.rename", f"{label} -> {new_name}")
+        await self.reload_config()
+        await interaction.followup.send(
+            f"Item `{label}` renamed to `{new_name}`.", ephemeral=True)
+
+    @rollsets_item.command(
+        name="remove", description="Take an item out of its category's set (its descriptions are kept).")
+    @app_commands.describe(item="The item.")
+    @app_commands.autocomplete(item=_item_autocomplete)
+    async def item_remove(self, interaction: discord.Interaction, item: str):
+        if (not await self._guard_admin(interaction)):
+            return
+        if (not await self._guard_database(interaction)):
+            return
+        guild_id = await self._expect_guild(interaction)
+        if (guild_id is None):
+            return
+        await interaction.response.defer(ephemeral=True)
+        resolved = await self._item_of(guild_id, item)
+        if (resolved is None):
+            await interaction.followup.send(
+                f"There is no item `{item}` in this server.", ephemeral=True)
+            return
+        label = db_config.item_label(resolved)
+        await db_config.remove_item(guild_id, resolved.id)
+        await config_log.record_command_change(
+            interaction, "rollset.item.remove", label)
+        await self.reload_config()
+        await interaction.followup.send(
+            f"Removed `{label}` from the set; its descriptions are kept, and "
+            "adding the name back restores it.", ephemeral=True)
+
+    # Attach the subgroups to the rollsets group now that their subcommands
+    # exist; CogMeta skips them as top-level commands (parent set).
     rollsets.add_command(rollsets_description)
+    rollsets.add_command(rollsets_item)
 
     async def _guard_admin(self, interaction: discord.Interaction) -> bool:
         """Reject non-managers with an ephemeral message."""

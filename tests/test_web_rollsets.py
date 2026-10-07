@@ -27,9 +27,9 @@ async def _category(guild_id: int, name: str):
 
 
 async def _item(guild_id: int, category: str, name: str):
-    """An item row, found through its category since names repeat across them."""
-    return await models.RollItem.get(category__guild__guild_id=guild_id,
-                                     category__name=category, name=name)
+    """The item row when it exists, found through its category."""
+    return await models.RollItem.get_or_none(
+        category__guild__guild_id=guild_id, category__name=category, name=name)
 
 
 async def _changes() -> list[models.ConfigChange]:
@@ -368,3 +368,279 @@ class TestTheDefaultConfiguration:
         response = _post(client, "/ops/default/rollsets/adopt",
                          {"name": "map"})
         assert response.status_code == 404
+
+
+class TestItemPages:
+    """Adding, renaming and removing one item, from the category and item pages."""
+
+    async def test_the_category_page_offers_adding_an_item(
+            self, db, client, login, rolls_config, descriptions):
+        await _seed(rolls_config, descriptions)
+        login(client, guilds={ROLLS_GUILD_ID: "Server B"})
+        category = await _category(ROLLS_GUILD_ID, "map")
+        page = client.get(f"/g/{ROLLS_GUILD_ID}/rollsets/{category.id}").text
+        assert f"/rollsets/{category.id}/items/new" in page
+        assert "built-in method" not in page
+
+    async def test_it_adds_an_item_with_its_first_variant(
+            self, db, client, login, rolls_config, descriptions):
+        await _seed(rolls_config, descriptions)
+        login(client, guilds={ROLLS_GUILD_ID: "Server B"})
+        category = await _category(ROLLS_GUILD_ID, "map")
+        response = _post(client, f"/g/{ROLLS_GUILD_ID}/rollsets/{category.id}"
+                                "/items/new",
+                         {"name": "Theta", "description": "A flavour.",
+                          "use_color": "1", "color": "#ff0000"})
+        assert response.status_code == 303, response.text
+        # It lands on the category's page, where the new item is listed.
+        assert response.headers["location"].endswith(
+            f"/rollsets/{category.id}")
+        item = await _item(ROLLS_GUILD_ID, "map", "Theta")
+        variants = await rolls_db_config.description_variants(
+            ROLLS_GUILD_ID, item.id)
+        assert [(v.description, v.color) for v in variants] == [
+            ("A flavour.", 16711680)]
+        # The set follows the rows: the new item is rolled straight away.
+        assert (await rolls_db_config.effective_category_sets(
+            ROLLS_GUILD_ID))["map"] == "Zeta, Eta, Theta"
+        change, = await _changes()
+        assert (change.action, change.summary) == (
+            "rollset.item.add", "map — Theta")
+
+    async def test_a_blank_flavour_is_allowed_and_stays_a_blank_variant(
+            self, db, client, login, rolls_config, descriptions):
+        # A variant form requires something; an item may be added without a
+        # flavour at all, and rolls a plain embed.
+        await _seed(rolls_config, descriptions)
+        login(client, guilds={ROLLS_GUILD_ID: "Server B"})
+        category = await _category(ROLLS_GUILD_ID, "map")
+        response = _post(client, f"/g/{ROLLS_GUILD_ID}/rollsets/{category.id}"
+                                "/items/new",
+                         {"name": "Theta", "description": ""})
+        assert response.status_code == 303, response.text
+        item = await _item(ROLLS_GUILD_ID, "map", "Theta")
+        assert [(v.description, v.color, v.image_url) for v in
+                await rolls_db_config.description_variants(
+                    ROLLS_GUILD_ID, item.id)] == [("", None, None)]
+
+    async def test_a_bad_name_is_refused_and_a_taken_one_reported(
+            self, db, client, login, rolls_config, descriptions):
+        await _seed(rolls_config, descriptions)
+        login(client, guilds={ROLLS_GUILD_ID: "Server B"})
+        category = await _category(ROLLS_GUILD_ID, "map")
+        page = f"/g/{ROLLS_GUILD_ID}/rollsets/{category.id}/items/new"
+        assert "`name` must be 1-50 characters" in _post(
+            client, page, {"name": "", "description": ""}).text
+        assert "is already an item of `map`" in _post(
+            client, page, {"name": "Zeta", "description": ""}).text
+        assert await _changes() == []
+
+    async def test_a_new_name_in_the_set_is_given_a_variant(
+            self, db, client, login, rolls_config, descriptions):
+        # The category form's item set is the other way in: a name the category
+        # has never had must arrive rollable too.
+        await _seed(rolls_config, descriptions)
+        login(client, guilds={ROLLS_GUILD_ID: "Server B"})
+        category = await _category(ROLLS_GUILD_ID, "map")
+        _post(client, f"/g/{ROLLS_GUILD_ID}/rollsets/{category.id}",
+              {"name": "map", "items": "Zeta, Eta, Theta"})
+        item = await _item(ROLLS_GUILD_ID, "map", "Theta")
+        assert [v.description for v in
+                await rolls_db_config.description_variants(
+                    ROLLS_GUILD_ID, item.id)] == [""]
+
+    async def test_it_renames_an_item(
+            self, db, client, login, rolls_config, descriptions):
+        await _seed(rolls_config, descriptions)
+        login(client, guilds={ROLLS_GUILD_ID: "Server B"})
+        category = await _category(ROLLS_GUILD_ID, "map")
+        item = await _item(ROLLS_GUILD_ID, "map", "Zeta")
+        base = f"/g/{ROLLS_GUILD_ID}/rollsets/{category.id}/items/{item.id}"
+        assert 'value="Zeta"' in client.get(f"{base}/rename").text
+        response = _post(client, f"{base}/rename", {"name": "Omega"})
+        assert response.status_code == 303, response.text
+        assert await _item(ROLLS_GUILD_ID, "map", "Omega") is not None
+        # The row keeps its id, so the item's page follows the new name.
+        assert "Omega" in client.get(base).text
+        change, = await _changes()
+        assert (change.action, change.summary) == (
+            "rollset.item.rename", "map — Zeta -> Omega")
+
+    async def test_a_rename_onto_another_item_is_refused(
+            self, db, client, login, rolls_config, descriptions):
+        await _seed(rolls_config, descriptions)
+        login(client, guilds={ROLLS_GUILD_ID: "Server B"})
+        category = await _category(ROLLS_GUILD_ID, "map")
+        item = await _item(ROLLS_GUILD_ID, "map", "Zeta")
+        response = _post(client,
+                         f"/g/{ROLLS_GUILD_ID}/rollsets/{category.id}"
+                         f"/items/{item.id}/rename", {"name": "Eta"})
+        assert "`Eta` is already an item of `map`" in response.text
+        assert await _item(ROLLS_GUILD_ID, "map", "Zeta") is not None
+        assert await _changes() == []
+
+    async def test_it_takes_an_item_out_of_the_set(
+            self, db, client, login, rolls_config, descriptions):
+        await _seed(rolls_config, descriptions)
+        login(client, guilds={ROLLS_GUILD_ID: "Server B"})
+        category = await _category(ROLLS_GUILD_ID, "map")
+        item = await _item(ROLLS_GUILD_ID, "map", "Zeta")
+        await rolls_db_config.add_description(ROLLS_GUILD_ID, item.id,
+                                              {"description": "Kept."})
+        base = f"/g/{ROLLS_GUILD_ID}/rollsets/{category.id}/items/{item.id}"
+        response = _post(client, f"{base}/remove", {})
+        assert response.status_code == 303, response.text
+        # It lands on the category's page, where the item stays listed as off.
+        assert response.headers["location"].endswith(
+            f"/rollsets/{category.id}")
+        # The row stays, switched off with its variant, and leaves the set.
+        assert (await _item(ROLLS_GUILD_ID, "map", "Zeta")).active is False
+        assert [v.description for v in
+                await rolls_db_config.description_variants(
+                    ROLLS_GUILD_ID, item.id)] == ["Kept."]
+        assert (await rolls_db_config.effective_category_sets(
+            ROLLS_GUILD_ID))["map"] == "Eta"
+        change, = await _changes()
+        assert (change.action, change.summary) == (
+            "rollset.item.remove", "map — Zeta")
+        # Its page says so, and no longer offers the button.
+        page = client.get(base).text
+        assert "Not rolled" in page
+        assert f"/items/{item.id}/remove" not in page
+        # Adding the name back through the set restores the item.
+        _post(client, f"/g/{ROLLS_GUILD_ID}/rollsets/{category.id}",
+              {"name": "map", "items": "Zeta, Eta"})
+        assert (await _item(ROLLS_GUILD_ID, "map", "Zeta")).active is True
+        assert [v.description for v in
+                await rolls_db_config.description_variants(
+                    ROLLS_GUILD_ID, item.id)] == ["Kept."]
+
+    async def test_the_item_pages_refuse_stale_ids_and_missing_tokens(
+            self, db, client, login, rolls_config, descriptions):
+        await _seed(rolls_config, descriptions)
+        login(client, guilds={ROLLS_GUILD_ID: "Server B"})
+        category = await _category(ROLLS_GUILD_ID, "map")
+        assert client.get(f"/g/{ROLLS_GUILD_ID}/rollsets/{category.id}"
+                          "/items/999999/rename").status_code == 404
+        assert client.get(f"/g/{ROLLS_GUILD_ID}/rollsets/999999"
+                          "/items/new").status_code == 404
+        response = client.post(
+            f"/g/{ROLLS_GUILD_ID}/rollsets/{category.id}/items/new",
+            data={"name": "Theta", "description": ""})
+        assert response.status_code == 403
+        assert await _item(ROLLS_GUILD_ID, "map", "Theta") is None
+
+    async def test_the_buttons_follow_the_items_state(
+            self, db, client, login, rolls_config, descriptions):
+        await _seed(rolls_config, descriptions)
+        login(client, guilds={ROLLS_GUILD_ID: "Server B"})
+        category = await _category(ROLLS_GUILD_ID, "map")
+        item = await _item(ROLLS_GUILD_ID, "map", "Zeta")
+        base = f"/g/{ROLLS_GUILD_ID}/rollsets/{category.id}/items/{item.id}"
+        active = client.get(base).text
+        assert "Rename" in active and "Add a variant" in active
+        assert "Remove from the set" in active
+        assert "Add back" not in active and "Delete permanently" not in active
+        # Removed: the ways back in and the permanent way out replace it.
+        await rolls_db_config.remove_item(ROLLS_GUILD_ID, item.id)
+        removed = client.get(base).text
+        assert "Add back" in removed and "Delete permanently" in removed
+        assert "Remove from the set" not in removed
+        assert "built-in method" not in removed
+
+    async def test_the_category_table_offers_the_item_actions(
+            self, db, client, login, rolls_config, descriptions):
+        await _seed(rolls_config, descriptions)
+        login(client, guilds={ROLLS_GUILD_ID: "Server B"})
+        category = await _category(ROLLS_GUILD_ID, "map")
+        active = await _item(ROLLS_GUILD_ID, "map", "Zeta")
+        removed = await _item(ROLLS_GUILD_ID, "map", "Eta")
+        await rolls_db_config.remove_item(ROLLS_GUILD_ID, removed.id)
+        page = client.get(f"/g/{ROLLS_GUILD_ID}/rollsets/{category.id}").text
+        # The name is plain text: the way in is a button of its own.
+        assert f"<td>{active.name}</td>" in page
+        assert "Edit variants" in page
+        assert f"/items/{active.id}/rename" in page
+        assert f"/items/{active.id}/remove" in page
+        assert f"/items/{active.id}/restore" not in page
+        # A removed item comes back, or goes for good.
+        assert f"/items/{removed.id}/restore" in page
+        assert f"/items/{removed.id}/delete" in page
+        assert f"/items/{removed.id}/remove" not in page
+        assert "built-in method" not in page
+
+    async def test_add_back_puts_the_item_in_the_set_again(
+            self, db, client, login, rolls_config, descriptions):
+        await _seed(rolls_config, descriptions)
+        login(client, guilds={ROLLS_GUILD_ID: "Server B"})
+        category = await _category(ROLLS_GUILD_ID, "map")
+        item = await _item(ROLLS_GUILD_ID, "map", "Zeta")
+        await rolls_db_config.add_description(ROLLS_GUILD_ID, item.id,
+                                              {"description": "Kept."})
+        await rolls_db_config.remove_item(ROLLS_GUILD_ID, item.id)
+        response = _post(client, f"/g/{ROLLS_GUILD_ID}/rollsets/{category.id}"
+                                f"/items/{item.id}/restore", {})
+        assert response.status_code == 303, response.text
+        assert response.headers["location"].endswith(
+            f"/rollsets/{category.id}")
+        assert (await _item(ROLLS_GUILD_ID, "map", "Zeta")).active is True
+        assert [v.description for v in
+                await rolls_db_config.description_variants(
+                    ROLLS_GUILD_ID, item.id)] == ["Kept."]
+        assert (await rolls_db_config.effective_category_sets(
+            ROLLS_GUILD_ID))["map"] == "Zeta, Eta"
+        change, = await _changes()
+        assert (change.action, change.summary) == (
+            "rollset.item.add", "map — Zeta")
+
+    async def test_delete_permanently_asks_then_removes_it(
+            self, db, client, login, rolls_config, descriptions):
+        await _seed(rolls_config, descriptions)
+        login(client, guilds={ROLLS_GUILD_ID: "Server B"})
+        category = await _category(ROLLS_GUILD_ID, "map")
+        item = await _item(ROLLS_GUILD_ID, "map", "Zeta")
+        await rolls_db_config.add_description(ROLLS_GUILD_ID, item.id,
+                                              {"description": "Gone."})
+        await rolls_db_config.remove_item(ROLLS_GUILD_ID, item.id)
+        url = (f"/g/{ROLLS_GUILD_ID}/rollsets/{category.id}"
+               f"/items/{item.id}/delete")
+        confirm = client.get(url).text
+        assert "cannot be undone" in confirm
+        assert "1 description variant(s)" in confirm
+        assert ">Delete</button>" in confirm
+        # The warning is about this deletion only: the set-removal story does
+        # not apply to it.
+        assert "removed from this configuration" in confirm
+        assert "keeps them" not in confirm
+        # Cancel goes back to the page whose button opened the confirmation.
+        assert f'/rollsets/{category.id}"' in confirm
+        assert f'items/{item.id}"' in client.get(f"{url}?from=item").text
+        response = _post(client, url, {})
+        assert response.status_code == 303, response.text
+        assert response.headers["location"].endswith(
+            f"/rollsets/{category.id}")
+        assert await _item(ROLLS_GUILD_ID, "map", "Zeta") is None
+        assert await models.RollDescription.filter(item_id=item.id).count() == 0
+        assert (await rolls_db_config.effective_category_sets(
+            ROLLS_GUILD_ID))["map"] == "Eta"
+        change, = await _changes()
+        assert (change.action, change.summary) == (
+            "rollset.item.delete", "map — Zeta")
+
+    async def test_the_item_writes_need_the_token_and_the_servers_item(
+            self, db, client, login, rolls_config, descriptions):
+        await _seed(rolls_config, descriptions)
+        login(client, guilds={ROLLS_GUILD_ID: "Server B"})
+        category = await _category(ROLLS_GUILD_ID, "map")
+        item = await _item(ROLLS_GUILD_ID, "map", "Zeta")
+        base = f"/g/{ROLLS_GUILD_ID}/rollsets/{category.id}/items/{item.id}"
+        await rolls_db_config.remove_item(ROLLS_GUILD_ID, item.id)
+        for path in (f"{base}/restore", f"{base}/delete"):
+            response = client.post(path, data={"no": "token"})
+            assert response.status_code == 403, path
+        assert (await _item(ROLLS_GUILD_ID, "map", "Zeta")) is not None
+        # An id that is not the category's is not found.
+        assert client.get(f"/g/{ROLLS_GUILD_ID}/rollsets/{category.id}"
+                          "/items/999999/delete").status_code == 404
+        assert _post(client, f"/g/{ROLLS_GUILD_ID}/rollsets/{category.id}"
+                             "/items/999999/restore", {}).status_code == 404
